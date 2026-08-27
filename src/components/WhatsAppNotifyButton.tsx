@@ -15,6 +15,7 @@ import type { TicketEstado } from "@/lib/tipos";
 
 export function WhatsAppNotifyButton({
   ticketId,
+  nroRevisionGlobal,
   patenteCamion,
   patenteRampla,
   transporte,
@@ -27,6 +28,7 @@ export function WhatsAppNotifyButton({
   size = "sm",
 }: {
   ticketId: string;
+  nroRevisionGlobal: number | null;
   patenteCamion: string;
   patenteRampla: string;
   transporte?: string | null;
@@ -49,7 +51,7 @@ export function WhatsAppNotifyButton({
     if (!supervisorTelefono) return;
     setEnviando(true);
     const mensaje = construirMensajeVencimiento({
-      ticketId,
+      nroRevisionGlobal,
       patenteCamion,
       patenteRampla,
       transporte,

@@ -7,7 +7,7 @@ export type FallaResumen = {
 };
 
 type DatosVencimiento = {
-  ticketId: string;
+  nroRevisionGlobal: number | null;
   patenteCamion: string;
   patenteRampla: string;
   transporte?: string | null;
@@ -26,8 +26,9 @@ const fmtFecha = (v: string | Date | null | undefined) =>
     : "—";
 
 /**
- * Plantilla de texto automatizada para el deep link de WhatsApp — §3.
- * Detalla ID de ticket, patentes, fallas detectadas y tiempo restante.
+ * Plantilla de texto automatizada para el deep link de WhatsApp — §3 / §4.
+ * Identifica la revisión por el correlativo `nro_revision_global` (legible para
+ * una persona), nunca por el UUID interno del ticket.
  */
 export function construirMensajeVencimiento(d: DatosVencimiento): string {
   const horas = horasRestantes(d.fechaVencimiento);
@@ -46,7 +47,7 @@ export function construirMensajeVencimiento(d: DatosVencimiento): string {
   return [
     "*Cordillera M&P — Alerta de vencimiento de corrección*",
     "",
-    `Ticket: ${d.ticketId}`,
+    `N° de Revisión: ${d.nroRevisionGlobal ?? "—"}`,
     d.transporte ? `Transporte: ${d.transporte}` : null,
     `Patente camión: ${d.patenteCamion}`,
     `Patente rampla: ${d.patenteRampla}`,
@@ -75,45 +76,57 @@ export function enlaceWhatsApp(telefono: string, mensaje: string): string {
   )}`;
 }
 
-type DatosInforme = {
-  ticketId: string;
+export type DatosInforme = {
+  nroRevisionGlobal: number | null;
   revision: number;
   patenteCamion: string;
   patenteRampla: string;
   transporte: string;
   conductor: string;
   estado: string;
-  urlInforme: string;
+  observaciones: { nombre: string; observacion: string | null }[];
+  /** Link real al informe online; se omite del cuerpo si no se pasa. */
+  urlInforme?: string | null;
 };
 
 export function construirAsuntoInforme(d: DatosInforme): string {
-  return `Informe de Inspección de Flota — ${d.patenteCamion} / ${d.patenteRampla} (ticket ${d.ticketId})`;
+  return `Informe de Inspección de Flota — ${d.patenteCamion} / ${d.patenteRampla} (N° Revisión ${
+    d.nroRevisionGlobal ?? "s/n"
+  })`;
 }
 
+/**
+ * Cuerpo del correo (§4.1): datos de cabecera + resumen de observaciones EN TEXTO.
+ * Sin fotos (van solo en el PDF adjunto). Sin líneas de link vacías.
+ */
 export function construirCuerpoInforme(d: DatosInforme): string {
+  const resumenObs =
+    d.observaciones.length > 0
+      ? [
+          "",
+          "Observaciones:",
+          ...d.observaciones.map(
+            (o) =>
+              `  - ${o.nombre}${o.observacion ? `: ${o.observacion}` : ""}`,
+          ),
+        ]
+      : ["", "Sin observaciones: todos los elementos conformes."];
+
+  const linkLinea =
+    d.urlInforme && /^https?:\/\//.test(d.urlInforme)
+      ? ["", `Informe online: ${d.urlInforme}`]
+      : [];
+
   return [
-    "Adjunto el Informe de Inspección de Flota de Cordillera M&P.",
+    "Adjunto (PDF) el Informe de Inspección de Flota de Cordillera M&P.",
     "",
-    `Ticket: ${d.ticketId}`,
-    `Revisión: #${d.revision}`,
+    `N° de Revisión: ${d.nroRevisionGlobal ?? "—"}`,
     `Estado: ${d.estado}`,
     `Transporte: ${d.transporte}`,
     `Conductor: ${d.conductor}`,
     `Patente camión: ${d.patenteCamion}`,
     `Patente rampla: ${d.patenteRampla}`,
-    "",
-    `Ver informe: ${d.urlInforme}`,
+    ...resumenObs,
+    ...linkLinea,
   ].join("\n");
-}
-
-/** Enlace mailto con múltiples destinatarios (envío desde el cliente de correo). */
-export function enlaceMailto(
-  destinatarios: string[],
-  asunto: string,
-  cuerpo: string,
-): string {
-  const to = destinatarios.map((e) => e.trim()).filter(Boolean).join(",");
-  return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(
-    asunto,
-  )}&body=${encodeURIComponent(cuerpo)}`;
 }

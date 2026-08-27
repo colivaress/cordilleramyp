@@ -8,27 +8,20 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
-import { enlaceMailto } from "@/lib/mensajes";
 import type { DestinatarioCorreo } from "@/lib/tipos";
 
 /**
- * Selector MULTI-destinatario (checkboxes, no <select> único) poblado desde
- * destinatarios_correo — §4. "Enviar por correo" abre el cliente de correo del
- * usuario (mailto:) con todos los seleccionados y el cuerpo prellenado.
+ * Selector MULTI-destinatario (checkboxes) poblado desde destinatarios_correo — §4.1.
+ * "Enviar por correo" hace POST al endpoint que genera el PDF del informe en el
+ * servidor y lo manda adjunto en un solo envío.
  */
-export function EmailRecipientsSelect({
-  ticketId,
-  asunto,
-  cuerpo,
-}: {
-  ticketId: string;
-  asunto: string;
-  cuerpo: string;
-}) {
+export function EmailRecipientsSelect({ ticketId }: { ticketId: string }) {
   const [lista, setLista] = useState<DestinatarioCorreo[]>([]);
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
   const [extra, setExtra] = useState("");
   const [cargando, setCargando] = useState(true);
+  const [enviando, setEnviando] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -53,31 +46,46 @@ export function EmailRecipientsSelect({
   }
 
   async function enviar() {
-    const correos = [
+    const destinatarios = [
       ...seleccion,
       ...extra
         .split(/[;,\s]+/)
         .map((s) => s.trim())
         .filter(Boolean),
     ];
-    if (correos.length === 0) {
+    if (destinatarios.length === 0) {
       toast.error("Seleccioná al menos un destinatario.");
       return;
     }
-    window.location.href = enlaceMailto(correos, asunto, cuerpo);
-
-    const supabase = createClient();
-    await supabase.from("notificaciones").insert(
-      correos.map((email) => ({
-        ticket_id: ticketId,
-        tipo: "email" as const,
-        destinatario: email,
-        contenido: asunto,
-      })),
-    );
-    toast.success(
-      `Se abrió el cliente de correo para ${correos.length} destinatario(s). Adjuntá el PDF del informe antes de enviar.`,
-    );
+    setEnviando(true);
+    setPreview(null);
+    try {
+      const res = await fetch(`/api/informe/${ticketId}/enviar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ destinatarios }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        toast.error(data.error ?? "No se pudo enviar el informe.");
+        return;
+      }
+      const kb = Math.round((data.pdfBytes ?? 0) / 1024);
+      if (data.modo === "ethereal") {
+        setPreview(data.previewUrl ?? null);
+        toast.success(
+          `Informe enviado a ${data.enviados} destinatario(s) — PDF adjunto (${kb} KB). Modo prueba: ver abajo.`,
+        );
+      } else {
+        toast.success(
+          `Informe enviado a ${data.enviados} destinatario(s) con el PDF adjunto (${kb} KB).`,
+        );
+      }
+    } catch {
+      toast.error("Error de red al enviar el informe.");
+    } finally {
+      setEnviando(false);
+    }
   }
 
   return (
@@ -121,10 +129,28 @@ export function EmailRecipientsSelect({
           placeholder="jefe.flota@empresa.cl, taller@empresa.cl"
         />
       </div>
-      <Button type="button" onClick={enviar} className="w-fit">
+      <Button
+        type="button"
+        onClick={enviar}
+        disabled={enviando}
+        className="w-fit"
+      >
         <MailIcon />
-        Enviar por correo
+        {enviando ? "Enviando…" : "Enviar por correo"}
       </Button>
+      {preview && (
+        <p className="text-xs text-muted-foreground">
+          Vista previa del correo enviado (modo prueba):{" "}
+          <a
+            href={preview}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline"
+          >
+            abrir
+          </a>
+        </p>
+      )}
     </div>
   );
 }

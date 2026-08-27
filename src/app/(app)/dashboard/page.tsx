@@ -194,6 +194,7 @@ export default async function DashboardPage() {
                           <WhatsAppNotifyButton
                             size="xs"
                             ticketId={t.id}
+                            nroRevisionGlobal={nroRevisionGlobal.get(t.id) ?? null}
                             patenteCamion={t.patente_camion}
                             patenteRampla={t.patente_rampla}
                             transporte={t.transporte}

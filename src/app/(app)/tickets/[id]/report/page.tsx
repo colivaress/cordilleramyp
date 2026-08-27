@@ -6,10 +6,6 @@ import { firmarRutas } from "@/lib/storage";
 import { PrintButton } from "@/components/PrintButton";
 import { EmailRecipientsSelect } from "@/components/EmailRecipientsSelect";
 import { ETIQUETA_ESTADO, ETIQUETA_ITEM } from "@/lib/tipos";
-import {
-  construirAsuntoInforme,
-  construirCuerpoInforme,
-} from "@/lib/mensajes";
 
 export const dynamic = "force-dynamic";
 
@@ -50,10 +46,11 @@ export default async function InformePage({
   );
 
   const urlFotos = await firmarRutas(
+    supabase,
     "fallas",
     items.map((r) => r.foto_url),
   );
-  const urlFirmas = await firmarRutas("firmas", [
+  const urlFirmas = await firmarRutas(supabase, "firmas", [
     revision?.firma_conductor_url,
     revision?.firma_fiscalizador_url,
   ]);
@@ -62,17 +59,6 @@ export default async function InformePage({
   // ticket, no el administrador.
   const puedeEnviarCorreo =
     perfil.rol === "supervisor" && ticket.supervisor_id === perfil.id;
-
-  const datosInforme = {
-    ticketId: ticket.id,
-    revision: ticket.revision_actual,
-    patenteCamion: ticket.patente_camion,
-    patenteRampla: ticket.patente_rampla,
-    transporte: ticket.transporte,
-    conductor: ticket.conductor,
-    estado: ETIQUETA_ESTADO[ticket.estado],
-    urlInforme: "",
-  };
 
   return (
     <div className="grid gap-6">
@@ -87,11 +73,12 @@ export default async function InformePage({
             Cordillera M&amp;P — Informe de Inspección de Flota
           </p>
           <p className="text-muted-foreground">
-            Revisión N° {ticket.revision_actual} · {ETIQUETA_ESTADO[ticket.estado]}
-          </p>
-          <p className="font-mono text-xs text-muted-foreground">
-            Ticket {ticket.id}
-            {revision ? ` · Nro de Revisión ${revision.nro_revision_global}` : ""}
+            N° de Revisión{" "}
+            <span className="font-mono font-medium text-foreground">
+              {revision?.nro_revision_global ?? "s/n"}
+            </span>{" "}
+            · Revisión #{ticket.revision_actual} ·{" "}
+            {ETIQUETA_ESTADO[ticket.estado]}
           </p>
         </header>
 
@@ -178,15 +165,22 @@ export default async function InformePage({
 
       {puedeEnviarCorreo && (
         <div className="no-print mx-auto w-full max-w-3xl rounded-xl border p-4">
-          <EmailRecipientsSelect
-            ticketId={ticket.id}
-            asunto={construirAsuntoInforme(datosInforme)}
-            cuerpo={construirCuerpoInforme(datosInforme)}
-          />
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-sm font-medium">Informe en PDF</p>
+            <a
+              href={`/api/informe/${ticket.id}/enviar`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-primary underline"
+            >
+              Ver / descargar PDF
+            </a>
+          </div>
+          <EmailRecipientsSelect ticketId={ticket.id} />
           <p className="mt-2 text-xs text-muted-foreground">
-            El correo se abre en tu cliente con los destinatarios y el cuerpo
-            prellenados. Adjuntá el PDF (botón &ldquo;Imprimir / Guardar
-            PDF&rdquo;) antes de enviar.
+            El informe se genera como PDF en el servidor y se envía adjunto a
+            todos los destinatarios en un solo correo. El cuerpo lleva el resumen
+            de observaciones en texto; las fotos van solo en el PDF.
           </p>
         </div>
       )}

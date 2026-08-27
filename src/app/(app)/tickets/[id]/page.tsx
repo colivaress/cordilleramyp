@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { TicketStatusBadge } from "@/components/TicketStatusBadge";
 import { ItemEstadoBadge } from "@/components/ItemEstadoBadge";
+import { FotoFalla } from "@/components/FotoFalla";
 import { CountdownBadge } from "@/components/CountdownBadge";
 import { WhatsAppNotifyButton } from "@/components/WhatsAppNotifyButton";
 import { BotonIniciarReparacion } from "@/components/BotonIniciarReparacion";
@@ -61,12 +62,16 @@ export default async function TicketDetallePage({
 
   const revs = revisiones ?? [];
   const resp = respuestas ?? [];
+  const nroRevisionGlobalActual =
+    revs.find((r) => r.numero_revision === ticket.revision_actual)
+      ?.nro_revision_global ?? null;
 
   const urlFotos = await firmarRutas(
+    supabase,
     "fallas",
     resp.map((r) => r.foto_url),
   );
-  const urlFirmas = await firmarRutas("firmas", [
+  const urlFirmas = await firmarRutas(supabase, "firmas", [
     ...revs.map((r) => r.firma_conductor_url),
     ...revs.map((r) => r.firma_fiscalizador_url),
   ]);
@@ -91,7 +96,12 @@ export default async function TicketDetallePage({
             {ticket.patente_camion}{" "}
             <span className="text-muted-foreground">/ {ticket.patente_rampla}</span>
           </h1>
-          <p className="font-mono text-xs text-muted-foreground">{ticket.id}</p>
+          <p className="text-sm text-muted-foreground">
+            N° de Revisión{" "}
+            <span className="font-mono font-medium text-foreground">
+              {nroRevisionGlobalActual ?? "s/n"}
+            </span>
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <TicketStatusBadge
@@ -125,6 +135,7 @@ export default async function TicketDetallePage({
         )}
         <WhatsAppNotifyButton
           ticketId={ticket.id}
+          nroRevisionGlobal={nroRevisionGlobalActual}
           patenteCamion={ticket.patente_camion}
           patenteRampla={ticket.patente_rampla}
           transporte={ticket.transporte}
@@ -189,13 +200,9 @@ export default async function TicketDetallePage({
                           </p>
                         </div>
                         {r.foto_url && urlFotos[r.foto_url] && (
-                          <Image
+                          <FotoFalla
                             src={urlFotos[r.foto_url]}
                             alt={`Falla: ${r.item?.nombre}`}
-                            width={160}
-                            height={120}
-                            unoptimized
-                            className="h-24 w-40 rounded-md border object-cover"
                           />
                         )}
                       </div>
