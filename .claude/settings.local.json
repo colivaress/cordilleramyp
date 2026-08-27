@@ -8,5 +8,9 @@
       "PowerShell(npm *)",
       "PowerShell(Get-ChildItem *)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "supabase",
+    "memory"
+  ]
 }

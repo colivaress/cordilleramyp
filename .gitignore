@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+*.key
 
 # debug
 npm-debug.log*
@@ -32,9 +33,16 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
+
+# mcp memory server local store
+/.mcp-memory.json
+
+# mcp config (contains secrets / access tokens)
+/.mcp.json
 
 # typescript
 *.tsbuildinfo

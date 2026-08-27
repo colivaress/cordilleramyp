@@ -1,0 +1,96 @@
+"use client";
+
+import { useState } from "react";
+import { toast } from "sonner";
+import { MessageCircleIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { createClient } from "@/lib/supabase/client";
+import {
+  construirMensajeVencimiento,
+  enlaceWhatsApp,
+  type FallaResumen,
+} from "@/lib/mensajes";
+import { puedeNotificarVencimiento } from "@/lib/vencimiento";
+import type { TicketEstado } from "@/lib/tipos";
+
+export function WhatsAppNotifyButton({
+  ticketId,
+  patenteCamion,
+  patenteRampla,
+  transporte,
+  conductor,
+  supervisorTelefono,
+  supervisorNombre,
+  fallas,
+  fechaVencimiento,
+  estadoTicket,
+  size = "sm",
+}: {
+  ticketId: string;
+  patenteCamion: string;
+  patenteRampla: string;
+  transporte?: string | null;
+  conductor?: string | null;
+  supervisorTelefono?: string | null;
+  supervisorNombre?: string | null;
+  fallas: FallaResumen[];
+  fechaVencimiento: string | null;
+  estadoTicket: TicketEstado;
+  size?: "xs" | "sm" | "default";
+}) {
+  const [enviando, setEnviando] = useState(false);
+
+  // §3: el botón solo aplica en estado "por vencer" o "vencido".
+  if (!puedeNotificarVencimiento(fechaVencimiento, estadoTicket)) return null;
+
+  const deshabilitado = !supervisorTelefono;
+
+  async function notificar() {
+    if (!supervisorTelefono) return;
+    setEnviando(true);
+    const mensaje = construirMensajeVencimiento({
+      ticketId,
+      patenteCamion,
+      patenteRampla,
+      transporte,
+      conductor,
+      fallas,
+      fechaVencimiento,
+      supervisorNombre,
+    });
+    window.open(enlaceWhatsApp(supervisorTelefono, mensaje), "_blank", "noopener,noreferrer");
+
+    const supabase = createClient();
+    const { error } = await supabase.from("notificaciones").insert({
+      ticket_id: ticketId,
+      tipo: "whatsapp",
+      destinatario: supervisorTelefono,
+      contenido: mensaje,
+    });
+    setEnviando(false);
+    if (error) {
+      toast.error("Se abrió WhatsApp pero no se pudo registrar la notificación.");
+      return;
+    }
+    toast.success("Notificación de vencimiento registrada.");
+  }
+
+  return (
+    <Button
+      type="button"
+      size={size}
+      variant="outline"
+      disabled={deshabilitado || enviando}
+      onClick={notificar}
+      title={
+        deshabilitado
+          ? "El supervisor a cargo no tiene teléfono cargado"
+          : undefined
+      }
+      className="border-alert-300 text-alert-700 hover:bg-alert-50"
+    >
+      <MessageCircleIcon />
+      Notificar Vencimiento por WhatsApp
+    </Button>
+  );
+}
