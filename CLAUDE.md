@@ -37,8 +37,8 @@ Todo ticket se crea con estos campos obligatorios, validados en el formulario an
 
 ### 2.1 Roles
 
-- **Supervisor**: crea tickets, ejecuta inspecciones, completa el checklist, captura las dos firmas digitales (conductor y fiscalizador), sube fotos de fallas.
-- **Administrador**: ve el dashboard con todos los tickets, recibe alertas de vencimiento, gestiona el envío de informes por correo.
+- **Supervisor**: crea tickets, ejecuta inspecciones, completa el checklist, captura las dos firmas digitales (conductor y fiscalizador), sube fotos de fallas, y envía el informe por correo (§4) de sus propios tickets. Solo ve sus propios tickets, nunca el dashboard general (detalle de acceso en §2.6).
+- **Administrador**: ve el dashboard con las tarjetas de resumen y todos los tickets de todos los supervisores, recibe alertas de vencimiento.
 - **Conductor**: solo firma en pantalla al momento de la inspección; no tiene login propio en el MVP (su firma se captura desde el dispositivo del supervisor).
 
 ### 2.2 Identidad del ticket
@@ -101,6 +101,8 @@ Cada respuesta `no_conforme` obliga en el formulario (validación de cliente + c
 - `foto_url` (subida obligatoria a Supabase Storage, bucket `fallas`, ruta `ticket_id/item_key/timestamp.ext`)
 - `fecha_vencimiento` a nivel de ítem (ver §3)
 
+En la vista de detalle del ticket (`/tickets/[id]`), cada foto de un ítem `no_conforme` se muestra como miniatura dentro de su fila del checklist; al hacer clic se abre en grande (lightbox/modal con la imagen a tamaño completo), no debe abrir la imagen en una pestaña nueva del navegador ni quedar solo como miniatura pequeña sin forma de verla ampliada.
+
 ### 2.5 Firmas digitales
 
 En la pantalla de cierre de cada revisión (cada vez que el ticket pasa por `EN_REVISION`) se muestran **dos áreas de firma independientes**, una etiquetada "Firma Conductor" y otra "Firma Fiscalizador/Supervisor". Implementación:
@@ -109,6 +111,27 @@ En la pantalla de cierre de cada revisión (cada vez que el ticket pasa por `EN_
 - Al guardar la revisión, cada firma se exporta a PNG (`toDataURL`), se sube a Supabase Storage (bucket `firmas`, ruta `ticket_id/revision_numero/conductor.png` y `.../fiscalizador.png`) y se guarda la URL pública/firmada en `ticket_revisiones.firma_conductor_url` y `firma_fiscalizador_url`.
 - Ambas firmas son obligatorias para poder cerrar la revisión (deshabilita el botón "Finalizar revisión" hasta que las dos tengan trazo).
 - El informe (§4) debe renderizar ambas imágenes de firma junto al nombre de cada firmante y la fecha/hora de la revisión correspondiente.
+
+### 2.6 Acceso y visibilidad por rol
+
+**Esto es un ajuste sobre lo ya construido** (la primera versión mostraba el Dashboard completo a todos los roles) — corrige el acceso así:
+
+- **Administrador:** ve el nav "Dashboard" con las tarjetas de resumen (Tickets, Por vencer, Vencidos, En reparación) y la tabla completa con **todos** los tickets de todos los supervisores. Sin cambios respecto a lo ya construido.
+- **Supervisor:** **no debe ver el link "Dashboard" en el nav ni las tarjetas de resumen.** Su vista de inicio (puede ser la misma ruta `/dashboard` renderizada distinto según rol, o una ruta propia — a criterio de la implementación, pero la URL del dashboard de administrador no debe quedar accesible para un supervisor ni escribiéndola directo) muestra **solo la tabla de tickets**, con las mismas columnas que ya existen, **filtrada a únicamente los tickets donde ese supervisor es el `supervisor_id`** — nunca los de otros supervisores. Agrega la columna `nro_revision_global` (ver más abajo) a esa tabla.
+- Esto es control de acceso real, no solo ocultar el link en el nav: la política RLS de `tickets`, `ticket_revisiones` y `ticket_checklist_respuestas` debe restringir el `select` para el rol supervisor a `supervisor_id = (select id from personal where user_id = auth.uid())`, y permitir `select` sin restricción cuando `personal.rol = 'administrador'`. Revisa y ajusta las políticas RLS que ya se crearon durante la primera construcción para que cumplan esto — probablemente hoy permiten leer todo a cualquier `authenticated`.
+
+**Número de revisión correlativo (`nro_revision_global`):** además del campo `numero_revision` que ya existe en `ticket_revisiones` (el contador que reinicia en 1 por cada ticket nuevo, "Revisión #1", "Revisión #2" — ver §2.3, ese no cambia), agrega un campo **nuevo y distinto**: un correlativo único y secuencial a nivel de **todo el sistema**, sin reiniciarse nunca, sin importar cuántos supervisores estén creando revisiones al mismo tiempo — dos revisiones nunca pueden compartir el mismo número, así se creen simultáneamente por supervisores distintos.
+
+```sql
+alter table ticket_revisiones
+  add column nro_revision_global bigint generated always as identity unique not null;
+```
+
+Usar `generated always as identity` (no calcular el siguiente número a mano en la aplicación) es importante: Postgres garantiza que el número es único y secuencial incluso con inserciones simultáneas de distintos supervisores — calcularlo como `max(nro_revision_global) + 1` en el código tendría una condición de carrera y podría repetir un número.
+
+Muestra este campo en la tabla de tickets (tanto en la vista de administrador como en la de supervisor) bajo la etiqueta **"Nro de Revisión"**. No lo confundas con `numero_revision` (el "Revisión #N" que ya se muestra en el badge de estado) — son dos campos distintos con propósitos distintos, ambos coexisten.
+
+**Envío del informe por correo:** el botón "Enviar por correo" del informe (§4) lo acciona el **supervisor**, no el administrador — corrige esto si hoy está implementado como una acción exclusiva de administrador. Un supervisor solo puede enviar el informe de los tickets donde él es el `supervisor_id` (misma restricción de acceso que el punto anterior).
 
 ---
 
@@ -144,7 +167,7 @@ En la pantalla de cierre de cada revisión (cada vez que el ticket pasa por `EN_
   const href = `https://wa.me/${supervisor.telefono}?text=${encodeURIComponent(mensaje)}`;
   ```
 
-  `supervisor.telefono` sale de la tabla `personal`, en formato internacional solo con dígitos (sin `+` ni espacios). La plantilla de `construirMensajeVencimiento` debe detallar como mínimo: ID del ticket, Patente Camión, Patente Rampla, fallas detectadas y tiempo restante.
+  `supervisor.telefono` sale de la tabla `personal`, en formato internacional solo con dígitos (sin `+` ni espacios). La plantilla de `construirMensajeVencimiento` debe detallar como mínimo: **N° de Revisión** (el correlativo `nro_revision_global` de §2.6 — nunca el UUID interno del ticket, que no es legible para una persona), Patente Camión, Patente Rampla, fallas detectadas y tiempo restante.
 - **Botón de alerta por correo:** dispara el envío de un correo (mismo contenido que el mensaje de WhatsApp, en formato HTML) a los destinatarios configurados para alertas (puede ser el mismo selector multi-destinatario de §4, o una lista fija de "responsables de flota" — decisión de negocio: usa el mismo selector para no duplicar UI).
 - Registra cada envío (WhatsApp abierto / correo enviado) en la tabla `notificaciones` para trazabilidad, aunque el envío de WhatsApp en sí ocurra en el cliente del usuario (no hay API de WhatsApp Business en el MVP).
 
@@ -154,11 +177,19 @@ En la pantalla de cierre de cada revisión (cada vez que el ticket pasa por `EN_
 
 Genera una vista imprimible/exportable "Informe de Inspección de Flota - Cordillera M&P" en `/tickets/[id]/report`, con:
 
-- Cabecera completa (§1) + ID del ticket + número de revisión actual + estado.
+- Cabecera completa (§1) + **N° de Revisión** (el correlativo `nro_revision_global` de §2.6 — nunca el UUID interno del ticket) + estado.
 - Los 18 elementos del checklist con su resultado (Conforme/No conforme/No aplica), observación y foto cuando aplique.
 - Las dos firmas digitales (imagen + nombre + timestamp) de la revisión correspondiente.
 - Sin códigos documentales ni números de versión (ver restricción global al inicio del documento).
-- Botón "Enviar por correo" que abre un selector **multi-destinatario** poblado desde la tabla `destinatarios_correo` (checkboxes, no un solo `<select>`), permite tildar varios antes de confirmar el envío, y adjunta el informe (PDF o HTML) a todos los seleccionados en un solo envío.
+
+### 4.1 Envío por correo (corrige lo ya construido: hoy el correo sale sin adjunto)
+
+Lo acciona el **supervisor** dueño de ese ticket (ver §2.6), no el administrador. Abre un selector **multi-destinatario** poblado desde la tabla `destinatarios_correo` (checkboxes, no un solo `<select>`), permite tildar varios antes de confirmar el envío. Al enviar:
+
+- **Genera un PDF real del informe y adjúntalo al correo** — hoy el correo se envía sin nada adjunto, eso es un bug a corregir, no una opción. Usa una librería de generación de PDF en el servidor (por ejemplo renderizar el HTML del informe con Puppeteer/Playwright, o `@react-pdf/renderer`) — el resultado tiene que ser un PDF real adjunto (`.pdf`), no un link.
+- **El PDF debe tener formato formal y profesional**: encabezado claro con el nombre de la empresa y "Informe de Inspección de Flota", tipografía y espaciado cuidados, tabla del checklist ordenada y legible, sección de firmas con las imágenes a un tamaño que se vea bien impreso, y **las fotos de los ítems no conformes en tamaño legible** (no miniaturas diminutas — deben poder distinguirse los detalles de la falla). Sigue la paleta y tipografía de §6 en la medida en que tenga sentido en un documento imprimible (fondo blanco, no los fondos de color del dashboard).
+- **Cuerpo del correo:** mantén los datos de cabecera que ya se muestran (N° de Revisión con el correlativo, no el UUID; estado; transporte; conductor; patente camión; patente rampla), y **agrega un resumen de las observaciones en texto** (ítem no conforme + su observación, uno por línea) — **sin fotos en el cuerpo del correo**, las fotos van únicamente en el PDF adjunto, legibles ahí. Elimina cualquier línea tipo "Ver informe:" que quede vacía o rota — si se quiere un link al informe online además del PDF, que apunte de verdad a `/tickets/[id]/report` y solo se agrega si funciona, no como placeholder.
+- Adjunta ese mismo PDF a todos los destinatarios seleccionados en un solo envío.
 
 ---
 
@@ -429,7 +460,15 @@ Buckets de Storage a crear: `firmas` (privado, firmas digitales) y `fallas` (pri
 
 - Proveedor de envío de correo (Resend, SendGrid, SMTP propio, etc.) y sus credenciales.
 - Si el envío de WhatsApp queda solo como enlace `wa.me` (manual, como pide el prompt original) o si en el futuro se integra WhatsApp Business API.
-- Autenticación de usuarios (Supabase Auth con roles, o login simple por PIN) — no estaba especificado en el requerimiento original.
+- ~~Autenticación de usuarios~~ — **resuelto:** ya se implementó Supabase Auth (correo + contraseña) con selector de rol y trigger `handle_new_user` que crea la fila en `personal` al registrarse. Ver el siguiente punto para el paso pendiente sobre esto.
+- **Login con Google (siguiente iteración, no bloquea lo ya construido):** agregar un botón "Iniciar sesión con Google" además del login por correo/contraseña que ya existe, usando Supabase Auth con el proveedor `google` (OAuth). Pasos:
+  1. En Google Cloud Console → [Clients](https://console.cloud.google.com/auth/clients), crear un OAuth Client ID de tipo "Web application".
+  2. En "Authorized JavaScript origins" agregar la URL de producción y `http://localhost:3000` para desarrollo local.
+  3. En "Authorized redirect URIs" agregar la callback URL que muestra el panel de Supabase en Authentication → Providers → Google (formato `https://<project-ref>.supabase.co/auth/v1/callback`).
+  4. Copiar el Client ID y Client Secret generados por Google y pegarlos en Supabase → Authentication → Providers → Google (habilitar el proveedor ahí). **Estas credenciales de Google también son secretos** — nunca las pegues en código ni en archivos versionados; solo van en el panel de Supabase (Supabase las guarda de su lado, la app no necesita tenerlas en `.env`).
+  5. En el frontend, agregar el botón que dispara `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: '<url>/auth/callback' } })`, junto al formulario de login por correo existente (no reemplazarlo, ambos métodos conviven).
+  6. Manejar la ruta `/auth/callback` (Route Handler) que intercambia el código de autorización por la sesión (`exchangeCodeForSession`), si no existe ya como parte del flujo de Supabase Auth SSR ya implementado.
+  7. El trigger `handle_new_user` (ya existente) debe funcionar igual para usuarios que entran por Google — verifica que cree la fila en `personal` también en ese flujo, no solo en el registro por correo.
 - **Logo de Cordillera M&P:** se generará más adelante con el MCP de Replicate (ya conectado en este entorno) y se integrará en el header de la app y en el informe (§4). No es parte de esta primera construcción — no bloquear el desarrollo por esto ni generar un logo placeholder improvisado; usa por ahora solo el nombre de la empresa en texto donde corresponda un logo.
 
 ## 9. Seguridad y manejo de credenciales

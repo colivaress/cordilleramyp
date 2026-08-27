@@ -161,7 +161,12 @@ export default async function TicketDetallePage({
         return (
           <Card key={rev.id}>
             <CardHeader>
-              <CardTitle>Revisión #{rev.numero_revision}</CardTitle>
+              <CardTitle>
+                Revisión #{rev.numero_revision}
+                <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">
+                  Nro de Revisión {rev.nro_revision_global}
+                </span>
+              </CardTitle>
               <CardDescription>
                 {fmt(rev.created_at)} · {" "}
                 <TicketStatusBadge estado={rev.estado_resultante} />

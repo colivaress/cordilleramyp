@@ -22,7 +22,7 @@ export default async function InformePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await getSesion();
+  const { perfil } = await getSesion();
   const supabase = await createClient();
 
   const { data: ticket } = await supabase
@@ -58,6 +58,11 @@ export default async function InformePage({
     revision?.firma_fiscalizador_url,
   ]);
 
+  // §2.6: el envío del informe por correo lo acciona el supervisor dueño del
+  // ticket, no el administrador.
+  const puedeEnviarCorreo =
+    perfil.rol === "supervisor" && ticket.supervisor_id === perfil.id;
+
   const datosInforme = {
     ticketId: ticket.id,
     revision: ticket.revision_actual,
@@ -86,6 +91,7 @@ export default async function InformePage({
           </p>
           <p className="font-mono text-xs text-muted-foreground">
             Ticket {ticket.id}
+            {revision ? ` · Nro de Revisión ${revision.nro_revision_global}` : ""}
           </p>
         </header>
 
@@ -170,18 +176,20 @@ export default async function InformePage({
         </section>
       </article>
 
-      <div className="no-print mx-auto w-full max-w-3xl rounded-xl border p-4">
-        <EmailRecipientsSelect
-          ticketId={ticket.id}
-          asunto={construirAsuntoInforme(datosInforme)}
-          cuerpo={construirCuerpoInforme(datosInforme)}
-        />
-        <p className="mt-2 text-xs text-muted-foreground">
-          El correo se abre en tu cliente con los destinatarios y el cuerpo
-          prellenados. Adjuntá el PDF (botón &ldquo;Imprimir / Guardar PDF&rdquo;)
-          antes de enviar.
-        </p>
-      </div>
+      {puedeEnviarCorreo && (
+        <div className="no-print mx-auto w-full max-w-3xl rounded-xl border p-4">
+          <EmailRecipientsSelect
+            ticketId={ticket.id}
+            asunto={construirAsuntoInforme(datosInforme)}
+            cuerpo={construirCuerpoInforme(datosInforme)}
+          />
+          <p className="mt-2 text-xs text-muted-foreground">
+            El correo se abre en tu cliente con los destinatarios y el cuerpo
+            prellenados. Adjuntá el PDF (botón &ldquo;Imprimir / Guardar
+            PDF&rdquo;) antes de enviar.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

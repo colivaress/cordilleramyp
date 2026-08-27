@@ -31,22 +31,43 @@ import type { FallaResumen } from "@/lib/mensajes";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  await getSesion();
+  // §2.6: el administrador ve todo; el supervisor ve solo sus tickets, sin
+  // tarjetas de resumen. La RLS ya filtra a nivel de BD; acá además se refleja
+  // en la UI y en el query.
+  const { perfil } = await getSesion();
+  const esAdmin = perfil.rol === "administrador";
   const supabase = await createClient();
 
-  const { data: tickets } = await supabase
+  let ticketsQuery = supabase
     .from("tickets")
     .select(
       "*, supervisor:personal!tickets_supervisor_id_fkey(id, nombre, telefono)",
     )
     .order("created_at", { ascending: false });
+  if (!esAdmin) ticketsQuery = ticketsQuery.eq("supervisor_id", perfil.id);
 
+  const { data: tickets } = await ticketsQuery;
   const lista = tickets ?? [];
+
+  // Nro de Revisión (correlativo global) de la revisión vigente de cada ticket — §2.6.
+  const { data: revisiones } = await supabase
+    .from("ticket_revisiones")
+    .select("ticket_id, numero_revision, nro_revision_global");
+
+  const nroRevisionGlobal = new Map<string, number>();
+  for (const t of lista) {
+    const rev = (revisiones ?? []).find(
+      (r) => r.ticket_id === t.id && r.numero_revision === t.revision_actual,
+    );
+    if (rev) nroRevisionGlobal.set(t.id, rev.nro_revision_global);
+  }
 
   // Fallas abiertas (no conformes de la última revisión) por ticket, para el mensaje de WhatsApp.
   const { data: respuestas } = await supabase
     .from("ticket_checklist_respuestas")
-    .select("ticket_id, revision_numero, estado, observacion, item:checklist_items(nombre)")
+    .select(
+      "ticket_id, revision_numero, estado, observacion, item:checklist_items(nombre)",
+    )
     .eq("estado", "no_conforme");
 
   const fallasPorTicket = new Map<string, FallaResumen[]>();
@@ -79,9 +100,13 @@ export default async function DashboardPage() {
     <div className="grid gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {esAdmin ? "Dashboard" : "Mis inspecciones"}
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Tickets de inspección y alertas de vencimiento.
+            {esAdmin
+              ? "Todos los tickets de inspección y alertas de vencimiento."
+              : "Tus tickets de inspección y alertas de vencimiento."}
           </p>
         </div>
         <Link href="/tickets/new" className={buttonVariants({})}>
@@ -89,20 +114,22 @@ export default async function DashboardPage() {
         </Link>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <ResumenCard titulo="Tickets" valor={resumen.total} />
-        <ResumenCard
-          titulo="Por vencer (≤48h)"
-          valor={resumen.porVencer}
-          tono="amarillo"
-        />
-        <ResumenCard titulo="Vencidos" valor={resumen.vencidos} tono="rojo" />
-        <ResumenCard
-          titulo="En reparación"
-          valor={resumen.enReparacion}
-          tono="naranja"
-        />
-      </div>
+      {esAdmin && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <ResumenCard titulo="Tickets" valor={resumen.total} />
+          <ResumenCard
+            titulo="Por vencer (≤48h)"
+            valor={resumen.porVencer}
+            tono="amarillo"
+          />
+          <ResumenCard titulo="Vencidos" valor={resumen.vencidos} tono="rojo" />
+          <ResumenCard
+            titulo="En reparación"
+            valor={resumen.enReparacion}
+            tono="naranja"
+          />
+        </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -117,6 +144,7 @@ export default async function DashboardPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Nro de Revisión</TableHead>
                   <TableHead>Camión / Rampla</TableHead>
                   <TableHead>Transporte</TableHead>
                   <TableHead>Estado</TableHead>
@@ -128,7 +156,7 @@ export default async function DashboardPage() {
               <TableBody>
                 {lista.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-muted-foreground">
+                    <TableCell colSpan={7} className="text-muted-foreground">
                       No hay tickets todavía.
                     </TableCell>
                   </TableRow>
@@ -137,6 +165,9 @@ export default async function DashboardPage() {
                   const nivel = nivelAlerta(t.fecha_vencimiento, t.estado);
                   return (
                     <TableRow key={t.id} className={cn(clasesFilaAlerta(nivel))}>
+                      <TableCell className="font-mono tabular-nums">
+                        {nroRevisionGlobal.get(t.id) ?? "—"}
+                      </TableCell>
                       <TableCell className="font-medium">
                         {t.patente_camion}
                         <span className="text-muted-foreground">

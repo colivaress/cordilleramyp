@@ -19,12 +19,15 @@ export default async function AppLayout({
             Cordillera <span className="text-primary">M&amp;P</span>
           </Link>
           <nav className="flex items-center gap-1 text-sm">
-            <Link
-              href="/dashboard"
-              className={buttonVariants({ variant: "ghost", size: "sm" })}
-            >
-              Dashboard
-            </Link>
+            {/* §2.6: el supervisor no ve el link "Dashboard" en el nav. */}
+            {esAdmin && (
+              <Link
+                href="/dashboard"
+                className={buttonVariants({ variant: "ghost", size: "sm" })}
+              >
+                Dashboard
+              </Link>
+            )}
             <Link
               href="/tickets/new"
               className={buttonVariants({ variant: "ghost", size: "sm" })}

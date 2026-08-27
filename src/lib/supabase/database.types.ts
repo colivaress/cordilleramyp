@@ -192,6 +192,7 @@ export type Database = {
           firma_conductor_url: string | null
           firma_fiscalizador_url: string | null
           id: string
+          nro_revision_global: number
           numero_revision: number
           supervisor_id: string | null
           ticket_id: string
@@ -202,6 +203,7 @@ export type Database = {
           firma_conductor_url?: string | null
           firma_fiscalizador_url?: string | null
           id?: string
+          nro_revision_global?: never
           numero_revision: number
           supervisor_id?: string | null
           ticket_id: string
@@ -212,6 +214,7 @@ export type Database = {
           firma_conductor_url?: string | null
           firma_fiscalizador_url?: string | null
           id?: string
+          nro_revision_global?: never
           numero_revision?: number
           supervisor_id?: string | null
           ticket_id?: string
