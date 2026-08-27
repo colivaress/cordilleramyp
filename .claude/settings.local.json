@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Test-Path \"C:\\\\Users\\\\Carlos Olivares\\\\sitios\\\\cordilleraMyP\"; \\(Get-Item \"C:\\\\Users\\\\Carlos Olivares\\\\sitios\\\\cordilleraMyP\"\\).GetType\\(\\).Name; Get-ChildItem \"C:\\\\Users\\\\Carlos Olivares\\\\sitios\" | Select-Object Name)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "PowerShell(claude *)",
+      "PowerShell(npm *)",
+      "PowerShell(Get-ChildItem *)"
+    ]
+  }
+}
