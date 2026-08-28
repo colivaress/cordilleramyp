@@ -40,7 +40,8 @@ function obtenerTransporte() {
 export async function enviarInformePorCorreo(opts: {
   destinatarios: string[];
   asunto: string;
-  cuerpo: string;
+  /** Cuerpo en HTML (§4.1) — se envía como `html:`, no como texto plano. */
+  cuerpoHtml: string;
   pdf: Buffer;
   nombreArchivo: string;
 }): Promise<ResultadoEnvio> {
@@ -50,7 +51,7 @@ export async function enviarInformePorCorreo(opts: {
     from,
     to: opts.destinatarios,
     subject: opts.asunto,
-    text: opts.cuerpo,
+    html: opts.cuerpoHtml,
     attachments: [
       {
         filename: opts.nombreArchivo,

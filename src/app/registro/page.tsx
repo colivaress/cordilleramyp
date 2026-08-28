@@ -19,6 +19,7 @@ import type { RolUsuario } from "@/lib/tipos";
 export default function RegistroPage() {
   const router = useRouter();
   const [nombre, setNombre] = useState("");
+  const [apellido, setApellido] = useState("");
   const [email, setEmail] = useState("");
   const [telefono, setTelefono] = useState("");
   const [rol, setRol] = useState<RolUsuario>("supervisor");
@@ -37,7 +38,7 @@ export default function RegistroPage() {
       email,
       password,
       options: {
-        data: { nombre, rol, telefono },
+        data: { nombre, apellido, rol, telefono },
         emailRedirectTo:
           typeof window !== "undefined"
             ? `${window.location.origin}/auth/callback`
@@ -71,12 +72,21 @@ export default function RegistroPage() {
         <CardContent>
           <form onSubmit={onSubmit} className="grid gap-4">
             <div className="grid gap-2">
-              <Label htmlFor="nombre">Nombre completo</Label>
+              <Label htmlFor="nombre">Nombre</Label>
               <Input
                 id="nombre"
                 required
                 value={nombre}
                 onChange={(e) => setNombre(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="apellido">Apellido</Label>
+              <Input
+                id="apellido"
+                required
+                value={apellido}
+                onChange={(e) => setApellido(e.target.value)}
               />
             </div>
             <div className="grid gap-2">

@@ -5,6 +5,7 @@ import { enviarInformePorCorreo } from "@/lib/email";
 import {
   construirAsuntoInforme,
   construirCuerpoInforme,
+  nombreCompleto,
 } from "@/lib/mensajes";
 
 export const runtime = "nodejs";
@@ -24,7 +25,7 @@ async function preparar(id: string) {
 
   const { data: perfil } = await supabase
     .from("personal")
-    .select("id, rol")
+    .select("id, rol, nombre, apellido")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -68,7 +69,7 @@ async function preparar(id: string) {
     };
   }
 
-  return { supabase, informe };
+  return { supabase, informe, perfil };
 }
 
 // Descarga / vista previa del PDF del informe (el supervisor dueño).
@@ -123,7 +124,7 @@ export async function POST(
 
   const prep = await preparar(id);
   if (prep.error) return prep.error;
-  const { supabase, informe } = prep;
+  const { supabase, informe, perfil } = prep;
 
   const datosCorreo = {
     numeroInspeccion: informe.meta.numeroInspeccion,
@@ -132,7 +133,9 @@ export async function POST(
     patenteCamion: informe.meta.patenteCamion,
     patenteRampla: informe.meta.patenteRampla,
     conductor: informe.meta.conductor,
-    supervisorNombre: informe.meta.supervisorNombre,
+    // §4.1: firma = quien envía el correo ahora (usuario autenticado), no el
+    // dueño original del ticket.
+    firmanteNombre: nombreCompleto(perfil.nombre, perfil.apellido),
     observaciones: informe.meta.observaciones,
   };
 
@@ -140,7 +143,7 @@ export async function POST(
     await enviarInformePorCorreo({
       destinatarios,
       asunto: construirAsuntoInforme(datosCorreo),
-      cuerpo: construirCuerpoInforme(datosCorreo),
+      cuerpoHtml: construirCuerpoInforme(datosCorreo),
       pdf: informe.pdf,
       nombreArchivo: `informe-inspeccion-${informe.meta.numeroInspeccion}-rev-${informe.meta.numeroRevision}.pdf`,
     });

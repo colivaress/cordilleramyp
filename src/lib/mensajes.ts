@@ -87,8 +87,12 @@ export type DatosInforme = {
   patenteRampla: string;
   /** Conductor de la revisión informada (§2.6). */
   conductor: string;
-  /** Nombre del supervisor que envía (personal.nombre). */
-  supervisorNombre: string;
+  /**
+   * Nombre + apellido del supervisor que ENVÍA el correo en este momento (el
+   * usuario autenticado), no necesariamente el dueño original del ticket — §4.1.
+   * Si el usuario legado no tiene apellido cargado, es solo el nombre.
+   */
+  firmanteNombre: string;
   /** Ítems no_conforme de la revisión, en orden de checklist. */
   observaciones: { observacion: string | null }[];
 };
@@ -96,42 +100,80 @@ export type DatosInforme = {
 /** Cargo fijo para todos los supervisores (§4.1), no se guarda en BD. */
 const CARGO_SUPERVISOR = "Supervisor de Encarpe";
 
+/**
+ * "Nombre Apellido" — y solo "Nombre" si el apellido no está cargado (usuario
+ * legado), nunca un "undefined" ni un espacio colgando (§4.1 / §2.10).
+ */
+export function nombreCompleto(
+  nombre: string | null | undefined,
+  apellido: string | null | undefined,
+): string {
+  const n = (nombre ?? "").trim();
+  const a = (apellido ?? "").trim();
+  return a ? `${n} ${a}`.trim() : n;
+}
+
+/** Escapa texto para interpolarlo con seguridad dentro del HTML del correo. */
+function esc(v: string): string {
+  return v
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export function construirAsuntoInforme(d: DatosInforme): string {
-  return `Informe de Inspección de Flota — ${d.patenteCamion} / ${d.patenteRampla} (N° Inspección ${d.numeroInspeccion} · Rev. ${d.numeroRevision})`;
+  // §4.1: misma redacción que el cuerpo ("Check List camión de transportes …"),
+  // con el par (N° Inspección, N° Revisión) para diferenciar el correo en la
+  // bandeja del destinatario.
+  return `Check List camión de transportes ${d.transporte} — ${d.patenteCamion.toUpperCase()} / ${d.patenteRampla.toUpperCase()} (N° Inspección ${d.numeroInspeccion} · Rev. ${d.numeroRevision})`;
 }
 
 /**
- * Cuerpo del correo — plantilla exacta de §4.1. No repite datos que ya van en el
- * PDF adjunto (N° de Revisión, estado, etc.). Sin fotos (van solo en el PDF).
+ * Cuerpo del correo en HTML (formato formal, con tabla) — plantilla de §4.1.
+ * No repite datos que ya van en el PDF adjunto (N° de Inspección/Revisión,
+ * estado, etc.). Sin fotos (van solo en el PDF). Las patentes se muestran en
+ * MAYÚSCULA (no cambia cómo se guardan en la base).
  */
 export function construirCuerpoInforme(d: DatosInforme): string {
   const obs = d.observaciones
     .map((o) => (o.observacion ?? "").trim())
     .filter(Boolean);
 
+  const celdaEtiqueta =
+    "background:#eef1f6; font-weight:bold; padding:8px 12px; border:1px solid #dde3ee; width:140px;";
+  const celdaValor = "padding:8px 12px; border:1px solid #dde3ee;";
+  const fila = (etiqueta: string, valor: string) =>
+    `<tr><td style="${celdaEtiqueta}">${etiqueta}</td><td style="${celdaValor}">${esc(
+      valor,
+    )}</td></tr>`;
+
   const seccionObservaciones =
     obs.length > 0
-      ? [
-          "Dentro de las observaciones se detecta lo siguiente",
-          "",
-          ...obs.map((texto, i) => `${i + 1}. ${texto}`),
-        ]
-      : [
-          "No se detectan observaciones. El camión cumple con todas las exigencias del Check List.",
-        ];
+      ? `<p style="margin: 0 0 8px;">Dentro de las observaciones se detecta lo siguiente:</p>
+    <ol style="margin: 0 0 20px; padding-left: 20px;">
+      ${obs.map((t) => `<li>${esc(t)}</li>`).join("\n      ")}
+    </ol>`
+      : `<p style="margin: 0 0 20px;">No se detectan observaciones. El camión cumple con todas las exigencias del Check List.</p>`;
 
-  return [
-    "Estimados,",
-    "",
-    `Se realiza Check List a camión de transportes ${d.transporte}.`,
-    `Matrícula ${d.patenteCamion}`,
-    `Rampla ${d.patenteRampla}`,
-    `Conductor ${d.conductor}.`,
-    "",
-    ...seccionObservaciones,
-    "",
-    "Se adjunta Check List y fotografías para ilustrar la condición",
-    "",
-    `${d.supervisorNombre} ( ${CARGO_SUPERVISOR} )`,
-  ].join("\n");
+  return `<div style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
+    <p style="margin: 0 0 16px;">Estimados,</p>
+
+    <p style="margin: 0 0 16px;">Se realiza Check List a camión de transportes <strong>${esc(
+      d.transporte,
+    )}</strong>.</p>
+
+    <table style="border-collapse: collapse; width: 100%; margin: 0 0 20px;">
+      ${fila("Empresa", d.transporte)}
+      ${fila("Matrícula", d.patenteCamion.toUpperCase())}
+      ${fila("Rampla", d.patenteRampla.toUpperCase())}
+      ${fila("Conductor", d.conductor)}
+    </table>
+
+    ${seccionObservaciones}
+
+    <p style="margin: 0 0 20px;">Se adjunta Check List y fotografías para ilustrar la condición.</p>
+
+    <p style="margin: 0;">${esc(d.firmanteNombre)}<br>${CARGO_SUPERVISOR}</p>
+  </div>`;
 }

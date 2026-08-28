@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { firmarRutas } from "@/lib/storage";
 import { ETIQUETA_ESTADO, ETIQUETA_ITEM } from "@/lib/tipos";
+import { nombreCompleto } from "@/lib/mensajes";
 import { InformePDF, type InformePDFDatos } from "@/lib/pdf/InformePDF";
 
 type SB = SupabaseClient<Database>;
@@ -52,10 +53,15 @@ export async function generarInformePdf(
 ): Promise<InformeGenerado | null> {
   const { data: ticket } = await supabase
     .from("tickets")
-    .select("*, supervisor:personal!tickets_supervisor_id_fkey(nombre)")
+    .select("*, supervisor:personal!tickets_supervisor_id_fkey(nombre, apellido)")
     .eq("id", ticketId)
     .maybeSingle();
   if (!ticket) return null;
+
+  // §4.1: nombre + apellido; solo el nombre si el apellido no está cargado.
+  const supervisorNombre = ticket.supervisor
+    ? nombreCompleto(ticket.supervisor.nombre, ticket.supervisor.apellido)
+    : "—";
 
   const { data: revision } = await supabase
     .from("ticket_revisiones")
@@ -137,7 +143,7 @@ export async function generarInformePdf(
       tipoCamion: ticket.tipo_camion,
       patenteCamion: ticket.patente_camion,
       patenteRampla: ticket.patente_rampla,
-      supervisor: ticket.supervisor?.nombre ?? "—",
+      supervisor: supervisorNombre,
       vencimiento: fmt(vencimientoRevision),
     },
     items,
@@ -148,7 +154,7 @@ export async function generarInformePdf(
         dataUri: firmaConductorUri,
       },
       fiscalizador: {
-        nombre: ticket.supervisor?.nombre ?? "—",
+        nombre: supervisorNombre,
         fecha: fmt(revision?.created_at ?? null),
         dataUri: firmaFiscalizadorUri,
       },
@@ -163,7 +169,7 @@ export async function generarInformePdf(
     meta: {
       ticketId: ticket.id,
       supervisorId: ticket.supervisor_id,
-      supervisorNombre: ticket.supervisor?.nombre ?? "—",
+      supervisorNombre: supervisorNombre,
       numeroInspeccion: ticket.numero_inspeccion,
       numeroRevision: ticket.revision_actual,
       patenteCamion: ticket.patente_camion,

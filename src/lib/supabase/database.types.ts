@@ -97,6 +97,7 @@ export type Database = {
       personal: {
         Row: {
           activo: boolean
+          apellido: string | null
           created_at: string
           email: string | null
           id: string
@@ -107,6 +108,7 @@ export type Database = {
         }
         Insert: {
           activo?: boolean
+          apellido?: string | null
           created_at?: string
           email?: string | null
           id?: string
@@ -117,6 +119,7 @@ export type Database = {
         }
         Update: {
           activo?: boolean
+          apellido?: string | null
           created_at?: string
           email?: string | null
           id?: string

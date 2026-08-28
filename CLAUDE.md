@@ -311,35 +311,63 @@ Lo acciona el **supervisor** dueño de ese ticket (ver §2.6), no el administrad
 
 - **Genera un PDF real del informe y adjúntalo al correo** — hoy el correo se envía sin nada adjunto, eso es un bug a corregir, no una opción. Usa una librería de generación de PDF en el servidor (por ejemplo renderizar el HTML del informe con Puppeteer/Playwright, o `@react-pdf/renderer`) — el resultado tiene que ser un PDF real adjunto (`.pdf`), no un link.
 - **El PDF debe tener formato formal y profesional**: encabezado claro con el nombre de la empresa y "Informe de Inspección de Flota", tipografía y espaciado cuidados, tabla del checklist ordenada y legible, sección de firmas con las imágenes a un tamaño que se vea bien impreso, y **las fotos de los ítems no conformes en tamaño legible** (no miniaturas diminutas — deben poder distinguirse los detalles de la falla). Sigue la paleta y tipografía de §6 en la medida en que tenga sentido en un documento imprimible (fondo blanco, no los fondos de color del dashboard).
-- **Cuerpo del correo (corrige lo ya construido: reemplaza el formato actual por esta plantilla exacta, con los datos reales de la revisión):**
+- **Cuerpo del correo — corrección: pásalo a HTML con una tabla, formato formal y profesional** (reemplaza tanto el texto plano anterior como cualquier otro texto genérico que haya quedado, por ejemplo si el asunto del correo todavía dice algo como "Se realizó la inspección técnica del camión. Se adjunta checklist" — unifica todo a esta redacción). Envía el correo como HTML (`html:` en `nodemailer`, no `text:` plano) con esta estructura:
 
-  ```
-  Estimados,
+  ```html
+  <div style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
+    <p style="margin: 0 0 16px;">Estimados,</p>
 
-  Se realiza Check List a camión de transportes {transporte}.
-  Matrícula {patente_camion}
-  Rampla {patente_rampla}
-  Conductor {conductor de la revisión, §2.6}.
+    <p style="margin: 0 0 16px;">Se realiza Check List a camión de transportes <strong>{transporte}</strong>.</p>
 
-  Dentro de las observaciones se detecta lo siguiente
+    <table style="border-collapse: collapse; width: 100%; margin: 0 0 20px;">
+      <tr>
+        <td style="background:#eef1f6; font-weight:bold; padding:8px 12px; border:1px solid #dde3ee; width:140px;">Empresa</td>
+        <td style="padding:8px 12px; border:1px solid #dde3ee;">{transporte}</td>
+      </tr>
+      <tr>
+        <td style="background:#eef1f6; font-weight:bold; padding:8px 12px; border:1px solid #dde3ee;">Matrícula</td>
+        <td style="padding:8px 12px; border:1px solid #dde3ee;">{PATENTE_CAMION EN MAYÚSCULA}</td>
+      </tr>
+      <tr>
+        <td style="background:#eef1f6; font-weight:bold; padding:8px 12px; border:1px solid #dde3ee;">Rampla</td>
+        <td style="padding:8px 12px; border:1px solid #dde3ee;">{PATENTE_RAMPLA EN MAYÚSCULA}</td>
+      </tr>
+      <tr>
+        <td style="background:#eef1f6; font-weight:bold; padding:8px 12px; border:1px solid #dde3ee;">Conductor</td>
+        <td style="padding:8px 12px; border:1px solid #dde3ee;">{conductor}</td>
+      </tr>
+    </table>
 
-  1. {observación del primer ítem no_conforme}
-  2. {observación del segundo ítem no_conforme}
-  ...
+    <p style="margin: 0 0 8px;">Dentro de las observaciones se detecta lo siguiente:</p>
+    <ol style="margin: 0 0 20px; padding-left: 20px;">
+      <li>{observación del primer ítem no_conforme}</li>
+      <li>{observación del segundo ítem no_conforme}</li>
+    </ol>
 
-  Se adjunta Check List y fotografías para ilustrar la condición
+    <p style="margin: 0 0 20px;">Se adjunta Check List y fotografías para ilustrar la condición.</p>
 
-  {nombre del supervisor} ( {cargo del supervisor} )
+    <p style="margin: 0;">{nombre} {apellido}<br>Supervisor de Encarpe</p>
+  </div>
   ```
 
   Detalle de cada parte de la plantilla:
 
-  - Los datos de camión (`{transporte}`, `{patente_camion}`, `{patente_rampla}`, `{conductor}`) son los de la revisión que se está informando — el mismo conductor por revisión de §2.6, no necesariamente el de la cabecera original del ticket.
-  - La lista numerada son **las observaciones de los ítems `no_conforme` de esa revisión, una por línea, en el mismo orden del checklist** — solo el texto de la observación (como en el ejemplo), sin repetir el nombre del ítem ni la foto; las fotos van únicamente en el PDF adjunto.
-  - Si la revisión no tiene ítems `no_conforme` (ticket `FINALIZADA_SIN_OBSERVACIONES`), reemplaza la sección de observaciones por una línea equivalente, por ejemplo: "No se detectan observaciones. El camión cumple con todas las exigencias del Check List." — no dejes la plantilla con un listado vacío.
-  - `{nombre del supervisor}` es el nombre (`personal.nombre`) del supervisor que envía el correo (el mismo que es dueño del ticket, §2.6). `{cargo del supervisor}` es un texto **fijo para todos los supervisores**, no varía por persona: **"Supervisor de Encarpe"** — no hace falta guardarlo en la base de datos, puede ir hardcodeado en la plantilla del correo.
+  - Los datos de camión (`{transporte}`, matrícula, rampla, `{conductor}`) son los de la revisión que se está informando — el mismo conductor por revisión de §2.6, no necesariamente el de la cabecera original del ticket. **Las patentes (matrícula y rampla) van en mayúscula** — conviértelas al mostrarlas (`.toUpperCase()`), no hace falta cambiar cómo se guardan en la base de datos.
+  - "Empresa" en la tabla repite el mismo valor de `transporte` que ya aparece en la frase de arriba — es intencional, va en ambos lugares.
+  - La lista numerada son **las observaciones de los ítems `no_conforme` de esa revisión, en el mismo orden del checklist** — solo el texto de la observación, sin repetir el nombre del ítem ni la foto; las fotos van únicamente en el PDF adjunto. Si la revisión no tiene ítems `no_conforme` (ticket `FINALIZADA_SIN_OBSERVACIONES`), reemplaza esa sección por una línea equivalente, por ejemplo: "No se detectan observaciones. El camión cumple con todas las exigencias del Check List." — no dejes la plantilla con un listado vacío.
+  - `{nombre} {apellido}` son los del supervisor que **envía el correo en ese momento** (el usuario autenticado) — no necesariamente el `supervisor_id` original del ticket, ya que desde §2.6 cualquier supervisor puede reinspeccionar y enviar el informe de un ticket "con observaciones". `apellido` es un campo nuevo en `personal` — ver más abajo. "Supervisor de Encarpe" sigue siendo un texto fijo, igual para todos, no varía por persona.
   - Elimina cualquier línea tipo "Ver informe:" que quede vacía o rota, y no agregues datos que no estén en esta plantilla (no repitas Nro de Inspección, Nro de Revisión, estado, ni los demás campos de cabecera dentro del cuerpo — esa información ya vive en el PDF adjunto).
+  - **Asunto del correo:** usa también "Check List camión de transportes {transporte}" (o algo igual de consistente con el cuerpo) — revisa si en algún lugar del código quedó un asunto o texto genérico tipo "Se realizó la inspección técnica del camión. Se adjunta checklist" y reemplázalo, para que no queden dos redacciones distintas convivendo en el mismo correo.
 - Adjunta ese mismo PDF a todos los destinatarios seleccionados en un solo envío.
+
+**Nuevo campo — Apellido del supervisor (obligatorio):** la firma del correo debe mostrar nombre **y apellido** (por ejemplo "Jaime Contreras"), no solo el nombre de pila como hasta ahora. Agrega la columna:
+
+```sql
+alter table personal
+  add column if not exists apellido text;
+```
+
+(Súmalo también al DDL base de `personal` en §7.) No la agregues como `not null` a nivel de base de datos — ya hay registros existentes sin este dato y eso rompería la migración. En cambio, hazlo **obligatorio a nivel de formulario**: agrega "Apellido" como campo requerido en "Agregar usuario" del panel de §2.10 (junto a Nombre), y también como campo editable ahí para completar el apellido de los usuarios ya creados que todavía no lo tengan. En la firma del correo y en el informe/PDF (§4), usa `nombre` + `apellido`; si algún usuario legado todavía no tiene `apellido` cargado, muestra solo `nombre` en vez de dejar un espacio en blanco o un "undefined".
 
 **Corrección — el envío hoy está en "modo prueba" y no llega a destino, hay que conectarlo a un proveedor real:** el botón "Enviar por correo" muestra un mensaje de éxito ("Informe enviado...") y una vista previa en "modo prueba", pero no está enviando el correo de verdad — corrige esto, no es opcional. **Decisión ya tomada: se envía vía Gmail / Google Workspace por SMTP**, usando una casilla de correo real de la empresa (no un proveedor transaccional como Resend/SendGrid).
 
@@ -518,6 +546,7 @@ create table personal (
   id uuid primary key default gen_random_uuid(),
   user_id uuid unique references auth.users(id), -- nulo mientras la invitación está pendiente, ver §2.10
   nombre text not null,
+  apellido text, -- obligatorio a nivel de formulario (§2.10), no a nivel de columna — ver §4.1
   rol rol_usuario not null,
   telefono text,
   email text,
