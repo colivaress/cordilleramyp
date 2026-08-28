@@ -189,10 +189,9 @@ export default async function DashboardPage() {
                       </TableCell>
                       <TableCell>{t.transporte}</TableCell>
                       <TableCell>
-                        <TicketStatusBadge
-                          estado={t.estado}
-                          revision={t.revision_actual}
-                        />
+                        {/* Solo el texto del estado — el nro de revisión ya está
+                            en su columna "Nro de Revisión". */}
+                        <TicketStatusBadge estado={t.estado} />
                       </TableCell>
                       <TableCell>
                         <CountdownBadge
