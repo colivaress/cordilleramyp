@@ -9,8 +9,8 @@ import {
 } from "@react-pdf/renderer";
 
 export type InformePDFDatos = {
-  nroRevisionGlobal: number | null;
-  revision: number;
+  numeroInspeccion: number;
+  numeroRevision: number;
   estado: string;
   emitidoEl: string;
   cabecera: {
@@ -158,7 +158,7 @@ export function InformePDF({ datos }: { datos: InformePDFDatos }) {
   const { cabecera: c, firmas } = datos;
   return (
     <Document
-      title={`Informe de Inspección de Flota - N° Revisión ${datos.nroRevisionGlobal ?? "s/n"}`}
+      title={`Informe de Inspección de Flota - Nro Inspección ${datos.numeroInspeccion} Rev ${datos.numeroRevision}`}
       author="Cordillera M&P"
     >
       <Page size="A4" style={s.page}>
@@ -166,8 +166,8 @@ export function InformePDF({ datos }: { datos: InformePDFDatos }) {
           <Text style={s.empresa}>Cordillera M&amp;P</Text>
           <Text style={s.titulo}>Informe de Inspección de Flota</Text>
           <Text style={s.sub}>
-            N° de Revisión {datos.nroRevisionGlobal ?? "s/n"} · Revisión #
-            {datos.revision} · {datos.estado}
+            Nro de Inspección {datos.numeroInspeccion} · Nro de Revisión{" "}
+            {datos.numeroRevision} · {datos.estado}
           </Text>
         </View>
 

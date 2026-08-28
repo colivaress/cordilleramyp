@@ -6,7 +6,9 @@ export type FallaResumen = {
 };
 
 type DatosVencimiento = {
-  nroRevisionGlobal: number | null;
+  // §2.6: identificación legible = par (Nro de Inspección, Nro de Revisión).
+  numeroInspeccion: number;
+  numeroRevision: number;
   patenteCamion: string;
   patenteRampla: string;
   transporte?: string | null;
@@ -26,8 +28,8 @@ const fmtFecha = (v: string | Date | null | undefined) =>
 
 /**
  * Plantilla de texto automatizada para el deep link de WhatsApp — §3 / §4.
- * Identifica la revisión por el correlativo `nro_revision_global` (legible para
- * una persona), nunca por el UUID interno del ticket.
+ * Identifica al ticket por el par (Nro de Inspección, Nro de Revisión), nunca por
+ * el UUID interno.
  */
 export function construirMensajeVencimiento(d: DatosVencimiento): string {
   const horas = horasRestantes(d.fechaVencimiento);
@@ -46,7 +48,8 @@ export function construirMensajeVencimiento(d: DatosVencimiento): string {
   return [
     "*Cordillera M&P — Alerta de vencimiento de corrección*",
     "",
-    `N° de Revisión: ${d.nroRevisionGlobal ?? "—"}`,
+    `N° de Inspección: ${d.numeroInspeccion}`,
+    `N° de Revisión: ${d.numeroRevision}`,
     d.transporte ? `Transporte: ${d.transporte}` : null,
     `Patente camión: ${d.patenteCamion}`,
     `Patente rampla: ${d.patenteRampla}`,
@@ -77,7 +80,8 @@ export function enlaceWhatsApp(telefono: string, mensaje: string): string {
 
 export type DatosInforme = {
   /** Solo para el asunto del correo; no se repite en el cuerpo (va en el PDF). */
-  nroRevisionGlobal: number | null;
+  numeroInspeccion: number;
+  numeroRevision: number;
   transporte: string;
   patenteCamion: string;
   patenteRampla: string;
@@ -93,9 +97,7 @@ export type DatosInforme = {
 const CARGO_SUPERVISOR = "Supervisor de Encarpe";
 
 export function construirAsuntoInforme(d: DatosInforme): string {
-  return `Informe de Inspección de Flota — ${d.patenteCamion} / ${d.patenteRampla} (N° Revisión ${
-    d.nroRevisionGlobal ?? "s/n"
-  })`;
+  return `Informe de Inspección de Flota — ${d.patenteCamion} / ${d.patenteRampla} (N° Inspección ${d.numeroInspeccion} · Rev. ${d.numeroRevision})`;
 }
 
 /**

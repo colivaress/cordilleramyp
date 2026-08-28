@@ -73,12 +73,15 @@ export default async function InformePage({
             Cordillera M&amp;P — Informe de Inspección de Flota
           </p>
           <p className="text-muted-foreground">
-            N° de Revisión{" "}
+            Nro de Inspección{" "}
             <span className="font-mono font-medium text-foreground">
-              {revision?.nro_revision_global ?? "s/n"}
+              {ticket.numero_inspeccion}
             </span>{" "}
-            · Revisión #{ticket.revision_actual} ·{" "}
-            {ETIQUETA_ESTADO[ticket.estado]}
+            · Nro de Revisión{" "}
+            <span className="font-mono font-medium text-foreground">
+              {ticket.revision_actual}
+            </span>{" "}
+            · {ETIQUETA_ESTADO[ticket.estado]}
           </p>
         </header>
 
@@ -166,7 +169,9 @@ export default async function InformePage({
       {puedeEnviarCorreo && (
         <div className="no-print mx-auto w-full max-w-3xl rounded-xl border p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <p className="text-sm font-medium">Informe en PDF</p>
+            <p className="text-sm font-medium">
+              Generar informe y enviar por correo
+            </p>
             <a
               href={`/api/informe/${ticket.id}/enviar`}
               target="_blank"

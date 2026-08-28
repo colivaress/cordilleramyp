@@ -68,7 +68,7 @@ export async function GET(
   const prep = await preparar(id);
   if (prep.error) return prep.error;
 
-  const nombre = `informe-revision-${prep.informe.meta.nroRevisionGlobal ?? "sn"}.pdf`;
+  const nombre = `informe-inspeccion-${prep.informe.meta.numeroInspeccion}-rev-${prep.informe.meta.numeroRevision}.pdf`;
   return new NextResponse(new Uint8Array(prep.informe.pdf), {
     status: 200,
     headers: {
@@ -114,7 +114,8 @@ export async function POST(
   const { supabase, informe } = prep;
 
   const datosCorreo = {
-    nroRevisionGlobal: informe.meta.nroRevisionGlobal,
+    numeroInspeccion: informe.meta.numeroInspeccion,
+    numeroRevision: informe.meta.numeroRevision,
     transporte: informe.meta.transporte,
     patenteCamion: informe.meta.patenteCamion,
     patenteRampla: informe.meta.patenteRampla,
@@ -130,9 +131,7 @@ export async function POST(
       asunto: construirAsuntoInforme(datosCorreo),
       cuerpo: construirCuerpoInforme(datosCorreo),
       pdf: informe.pdf,
-      nombreArchivo: `informe-revision-${
-        informe.meta.nroRevisionGlobal ?? "sn"
-      }.pdf`,
+      nombreArchivo: `informe-inspeccion-${informe.meta.numeroInspeccion}-rev-${informe.meta.numeroRevision}.pdf`,
     });
   } catch (e) {
     return NextResponse.json(

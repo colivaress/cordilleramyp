@@ -63,9 +63,11 @@ export default async function TicketDetallePage({
 
   const revs = revisiones ?? [];
   const resp = respuestas ?? [];
-  const nroRevisionGlobalActual =
-    revs.find((r) => r.numero_revision === ticket.revision_actual)
-      ?.nro_revision_global ?? null;
+  // §2.6: se identifica por el par (numero_inspeccion, numero_revision).
+  const numeroRevisionActual = Math.max(
+    ticket.revision_actual,
+    ...revs.map((r) => r.numero_revision),
+  );
 
   const urlFotos = await firmarRutas(
     supabase,
@@ -102,9 +104,9 @@ export default async function TicketDetallePage({
               {ticket.numero_inspeccion}
             </span>
             {"  ·  "}
-            N° de Revisión{" "}
+            Nro de Revisión{" "}
             <span className="font-mono font-medium text-foreground">
-              {nroRevisionGlobalActual ?? "s/n"}
+              {numeroRevisionActual}
             </span>
           </p>
         </div>
@@ -140,7 +142,8 @@ export default async function TicketDetallePage({
         )}
         <WhatsAppNotifyButton
           ticketId={ticket.id}
-          nroRevisionGlobal={nroRevisionGlobalActual}
+          numeroInspeccion={ticket.numero_inspeccion}
+          numeroRevision={numeroRevisionActual}
           patenteCamion={ticket.patente_camion}
           patenteRampla={ticket.patente_rampla}
           transporte={ticket.transporte}
@@ -180,12 +183,7 @@ export default async function TicketDetallePage({
         return (
           <Card key={rev.id}>
             <CardHeader>
-              <CardTitle>
-                Revisión #{rev.numero_revision}
-                <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">
-                  Nro de Revisión {rev.nro_revision_global}
-                </span>
-              </CardTitle>
+              <CardTitle>Revisión #{rev.numero_revision}</CardTitle>
               <CardDescription>
                 {fmt(rev.created_at)} · {" "}
                 <TicketStatusBadge estado={rev.estado_resultante} />

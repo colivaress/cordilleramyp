@@ -256,8 +256,11 @@ export function InspeccionForm({
           firmaConductorPath,
           firmaFiscalizadorPath,
         });
-        toast.success(`Inspección guardada (Nro ${res.numeroInspeccion}).`);
-        router.push(`/tickets/${res.ticketId}`);
+        toast.success(
+          `Inspección guardada (Nro ${res.numeroInspeccion}). Generar y enviar el informe.`,
+        );
+        // §2.6: lleva directo al informe con el selector de destinatarios listo.
+        router.push(`/tickets/${res.ticketId}/report`);
       } else {
         const res = await registrarReinspeccion({
           ticketId,
@@ -267,8 +270,8 @@ export function InspeccionForm({
           firmaConductorPath,
           firmaFiscalizadorPath,
         });
-        toast.success("Revisión guardada.");
-        router.push(`/tickets/${res.ticketId}`);
+        toast.success("Revisión guardada. Generar y enviar el informe.");
+        router.push(`/tickets/${res.ticketId}/report`);
       }
       router.refresh();
     } catch (error) {

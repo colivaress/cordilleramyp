@@ -35,7 +35,8 @@ export type InformeGenerado = {
     ticketId: string;
     supervisorId: string | null;
     supervisorNombre: string;
-    nroRevisionGlobal: number | null;
+    numeroInspeccion: number;
+    numeroRevision: number;
     patenteCamion: string;
     patenteRampla: string;
     transporte: string;
@@ -124,8 +125,8 @@ export async function generarInformePdf(
     }));
 
   const datos: InformePDFDatos = {
-    nroRevisionGlobal: revision?.nro_revision_global ?? null,
-    revision: ticket.revision_actual,
+    numeroInspeccion: ticket.numero_inspeccion,
+    numeroRevision: ticket.revision_actual,
     estado: ETIQUETA_ESTADO[ticket.estado],
     emitidoEl: fmt(new Date().toISOString()),
     cabecera: {
@@ -163,7 +164,8 @@ export async function generarInformePdf(
       ticketId: ticket.id,
       supervisorId: ticket.supervisor_id,
       supervisorNombre: ticket.supervisor?.nombre ?? "—",
-      nroRevisionGlobal: revision?.nro_revision_global ?? null,
+      numeroInspeccion: ticket.numero_inspeccion,
+      numeroRevision: ticket.revision_actual,
       patenteCamion: ticket.patente_camion,
       patenteRampla: ticket.patente_rampla,
       transporte: ticket.transporte,
