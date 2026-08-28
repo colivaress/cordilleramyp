@@ -64,8 +64,11 @@ export async function generarInformePdf(
     .eq("numero_revision", ticket.revision_actual)
     .maybeSingle();
 
-  // §2.6: el informe muestra el conductor de la revisión reportada.
+  // §2.6/§2.7: el informe muestra el conductor y el vencimiento de la revisión
+  // reportada.
   const conductorRevision = revision?.conductor ?? ticket.conductor;
+  const vencimientoRevision =
+    revision?.fecha_vencimiento ?? ticket.fecha_vencimiento;
 
   const { data: respuestas } = await supabase
     .from("ticket_checklist_respuestas")
@@ -94,8 +97,6 @@ export async function generarInformePdf(
       estado: ETIQUETA_ITEM[r.estado],
       esNoConforme: r.estado === "no_conforme",
       observacion: r.observacion,
-      correccionHasta:
-        r.estado === "no_conforme" ? fmt(r.fecha_vencimiento_item) : null,
       fotoDataUri:
         r.estado === "no_conforme" && r.foto_url
           ? await aDataUri(urlFotos[r.foto_url])
@@ -137,7 +138,7 @@ export async function generarInformePdf(
       patenteCamion: ticket.patente_camion,
       patenteRampla: ticket.patente_rampla,
       supervisor: ticket.supervisor?.nombre ?? "—",
-      vencimiento: fmt(ticket.fecha_vencimiento),
+      vencimiento: fmt(vencimientoRevision),
     },
     items,
     firmas: {

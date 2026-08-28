@@ -55,7 +55,7 @@ export default function RegistroPage() {
       return;
     }
     setOk(
-      "Cuenta creada. Revisá tu correo para confirmar la dirección y luego iniciá sesión.",
+      "Cuenta creada. Revisar el correo para confirmar la dirección y luego iniciar sesión.",
     );
   }
 
@@ -136,7 +136,7 @@ export default function RegistroPage() {
               {cargando ? "Creando…" : "Crear cuenta"}
             </Button>
             <p className="text-center text-sm text-muted-foreground">
-              ¿Ya tenés cuenta?{" "}
+              ¿Ya tiene cuenta?{" "}
               <Link href="/login" className="text-primary underline">
                 Iniciar sesión
               </Link>

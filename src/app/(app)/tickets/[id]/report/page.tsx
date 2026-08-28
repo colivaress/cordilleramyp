@@ -85,24 +85,27 @@ export default async function InformePage({
         <section className="mb-6 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
           <Dato k="Transporte" v={ticket.transporte} />
           <Dato k="Conductor" v={ticket.conductor} />
-          <Dato k="Fecha" v={fmt(ticket.fecha)} />
+          <Dato k="Fecha de inspección" v={fmt(ticket.fecha)} />
           <Dato k="Procedencia" v={ticket.procedencia} />
           <Dato k="Tipo de camión" v={ticket.tipo_camion} />
           <Dato k="Patente camión" v={ticket.patente_camion} />
           <Dato k="Patente rampla" v={ticket.patente_rampla} />
           <Dato k="Supervisor" v={ticket.supervisor?.nombre ?? "—"} />
-          <Dato k="Vencimiento corrección" v={fmt(ticket.fecha_vencimiento)} />
+          <Dato
+            k="Vencimiento de la corrección"
+            v={fmt(revision?.fecha_vencimiento ?? ticket.fecha_vencimiento)}
+          />
         </section>
 
         <section className="mb-6">
-          <h2 className="mb-2 font-semibold">Checklist (18 elementos)</h2>
+          <h2 className="mb-2 font-semibold">Elementos a Fiscalizar</h2>
           <table className="w-full border-collapse text-left">
             <thead>
               <tr className="border-b text-xs text-muted-foreground">
                 <th className="py-1 pr-2">#</th>
                 <th className="py-1 pr-2">Elemento</th>
                 <th className="py-1 pr-2">Resultado</th>
-                <th className="py-1">Observación / Corrección</th>
+                <th className="py-1">Observación</th>
               </tr>
             </thead>
             <tbody>
@@ -115,9 +118,6 @@ export default async function InformePage({
                     {r.estado === "no_conforme" ? (
                       <div className="grid gap-1">
                         <span>{r.observacion}</span>
-                        <span className="text-xs text-muted-foreground">
-                          Corrección hasta: {fmt(r.fecha_vencimiento_item)}
-                        </span>
                         {r.foto_url && urlFotos[r.foto_url] && (
                           <Image
                             src={urlFotos[r.foto_url]}

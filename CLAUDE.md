@@ -101,7 +101,8 @@ Cada respuesta `no_conforme` obliga en el formulario (validación de cliente + c
 
 - `observacion` (texto)
 - `foto_url` (subida obligatoria a Supabase Storage, bucket `fallas`, ruta `ticket_id/item_key/timestamp.ext`)
-- `fecha_vencimiento` a nivel de ítem (ver §3)
+
+La fecha de vencimiento **ya no se pide por ítem** — es un solo campo a nivel de la revisión completa, ubicado en la sección de cabecera del formulario, no aquí. Ver §2.7.
 
 En la vista de detalle del ticket (`/tickets/[id]`), cada foto de un ítem `no_conforme` se muestra como miniatura dentro de su fila del checklist; al hacer clic se abre en grande (lightbox/modal con la imagen a tamaño completo), no debe abrir la imagen en una pestaña nueva del navegador ni quedar solo como miniatura pequeña sin forma de verla ampliada.
 
@@ -145,11 +146,65 @@ Muestra este campo en la tabla de tickets (tanto en la vista de administrador co
 
 **Envío del informe por correo:** el botón "Enviar por correo" del informe (§4) lo acciona el **supervisor**, no el administrador — corrige esto si hoy está implementado como una acción exclusiva de administrador. Un supervisor solo puede enviar el informe de los tickets donde él es el `supervisor_id` (misma restricción de acceso que el punto anterior).
 
+### 2.7 Formulario "Nueva inspección": obligatoriedad, ubicación del vencimiento y textos
+
+**Esto es un ajuste sobre lo ya construido** (el formulario actual deja campos opcionales, ubica el vencimiento junto a la carga de fotos, y usa textos en voseo argentino que no corresponden al español de Chile) — corrige así:
+
+- **Todos los campos de "Datos de Inspección" son obligatorios**, sin excepción: los siete de §1 (`transporte`, `conductor`, `fecha`, `procedencia`, `tipo_camion`, `patente_camion`, `patente_rampla`) más el nuevo `fecha_vencimiento` de este punto. Esto es validación de cliente real — el botón para avanzar al checklist debe quedar deshabilitado (o mostrar los errores correspondientes) mientras falte cualquiera de estos campos, no solo confiar en el `not null` de la base de datos.
+- **Ubicación de `fecha_vencimiento`:** este campo (ver §2.4 y §3 — ya no se pide por ítem, es un solo campo por revisión) va **dentro de la sección de cabecera del formulario ("Datos de Inspección"), junto al resto de los campos de §1** — no al costado de la carga de fotos ni de ningún ítem del checklist, que es donde está hoy.
+- **Valor por defecto:** al completarse/cambiar la `fecha` de inspección, precarga `fecha_vencimiento` automáticamente como `fecha + 10 días`. El campo queda **editable** — el valor precargado es solo un punto de partida cómodo, el supervisor puede cambiarlo a cualquier otra fecha antes de guardar. Si el supervisor ya había modificado `fecha_vencimiento` a mano y luego cambia `fecha`, no pises ese valor editado manualmente (recalcula el default solo mientras el campo de vencimiento siga en su valor precargado, o bien recalcúlalo siempre y acepta que es un detalle menor de UX — a criterio de la implementación, pero el campo debe seguir siendo editable en cualquier caso).
+- **Cambios de texto (corrige cada instancia donde aparezca en la app, no solo en la pantalla principal del formulario):**
+
+  | Texto actual | Texto nuevo |
+  |---|---|
+  | "Continuar" (botón para pasar de la cabecera al checklist) | "Realizar revisión" |
+  | "Checklist de 18 elementos" (título de sección) | "Elementos a Fiscalizar" |
+  | "Datos de cabecera" (título de sección) | "Datos de Inspección" |
+  | "Completá" (y cualquier otra conjugación en voseo argentino) | "Completar" (o la forma neutra/chilena equivalente — este proyecto no usa voseo en ningún texto de interfaz) |
+  | "Completá la cabecera, luego el checklist de 18 elementos y las firmas." | "Completar los datos de inspección, luego realizar el checklist de los elementos a fiscalizar y firmar." |
+
+  Revisa todos los componentes del formulario (`/tickets/new`) y cualquier texto compartido (mensajes de ayuda, `placeholder`, `aria-label`) por si el voseo o los nombres antiguos de sección aparecen en más de un lugar.
+
+**Migración para bases de datos ya desplegadas** (si este entorno ya tiene la tabla `ticket_revisiones`/`ticket_checklist_respuestas` de una construcción anterior — mismo caso que las migraciones de `nro_revision_global` y `conductor` en §2.6):
+
+```sql
+alter table ticket_revisiones
+  add column if not exists fecha_vencimiento timestamptz;
+
+alter table ticket_checklist_respuestas
+  drop constraint if exists foto_y_vencimiento_obligatorios_si_no_conforme;
+
+alter table ticket_checklist_respuestas
+  drop column if exists fecha_vencimiento_item;
+
+alter table ticket_checklist_respuestas
+  add constraint foto_obligatoria_si_no_conforme check (
+    estado <> 'no_conforme' or foto_url is not null
+  );
+```
+
+Si `ticket_checklist_respuestas` no tenía la columna `fecha_vencimiento_item` (por ejemplo, en una instalación nueva que ya parte del esquema de §7), el `drop column if exists` no hace nada — es seguro correrlo igual.
+
+### 2.8 Persistencia inmediata de firmas y fotos (no deben perderse al navegar entre pasos)
+
+**Esto es un bug a corregir, no una mejora opcional:** hoy, si el supervisor firma o sube la foto de un ítem `no_conforme` durante el checklist, y luego usa el botón para volver a la sección de cabecera ("Datos de Inspección"), al reabrir el checklist esas firmas y esa foto **desaparecieron** — se pierde el trabajo ya hecho. Corrige así:
+
+- **Firmas (§2.5):** en cuanto el conductor o el fiscalizador terminan de firmar en el `SignaturePad`, exporta el trazo a PNG y **súbelo a Supabase Storage al instante** — no esperes al botón final "Finalizar revisión" para subirla. Guarda la URL resultante de inmediato (en el estado del formulario y/o directamente en el registro de `ticket_revisiones` si el flujo ya crea esa fila antes de completar todos los pasos), de forma que sobreviva a la navegación entre pasos del wizard. Si el supervisor vuelve a la cabecera y regresa después a la pantalla de firmas, el pad debe mostrar la firma ya guardada (o al menos no obligar a firmar de nuevo desde cero) — nunca aparecer vacío habiendo firmado antes.
+- **Fotos (§2.4):** mismo criterio — la foto de un ítem `no_conforme` se sube al bucket `fallas` **apenas se selecciona o se toma**, no al guardar el checklist completo ni al finalizar la revisión. La `foto_url` de ese ítem se guarda de inmediato y debe sobrevivir a la navegación entre pasos, igual que las firmas.
+- **Causa raíz probable, revísala:** el wizard "Datos de Inspección → Elementos a Fiscalizar → Firmas" parece resetear o desmontar el estado de los pasos ya completados al navegar hacia atrás, en vez de mantener un único estado de formulario compartido entre los tres pasos durante toda la sesión de creación/edición del ticket. Subir cada firma/foto a Storage apenas se captura (como se pide arriba) es la corrección robusta, porque deja de depender de que el estado sobreviva en memoria — pero además revisa que el wizard no esté desmontando por completo los componentes de los pasos ya visitados.
+
+**Selección de fotos: solo formatos de imagen fotográfica, con opción de cámara y de rehacer:**
+
+- El input de carga de foto solo debe aceptar formatos de imagen fotográfica: `image/jpeg`, `image/png`, `image/webp` (suma `image/heic`/`image/heif` si hay supervisores en iOS que suban ese formato) — cualquier otro tipo de archivo (PDF, video, etc.) se rechaza, tanto en el `accept` del input como validando el `type` real del archivo antes de subirlo.
+- Debe permitir **dos orígenes**: elegir un archivo existente de la galería/disco, o **tomar la foto directamente con la cámara del dispositivo** en el momento — por ejemplo con `<input type="file" accept="image/*" capture="environment">` (abre la cámara trasera en móviles) o un componente de captura propio vía `getUserMedia` si se necesita más control sobre el flujo; cualquiera de los dos cumple el requisito.
+- Al tomar o seleccionar la foto, se **guarda al instante** (sube a Storage de inmediato, como arriba) y se muestra una vista previa en la fila del ítem.
+- Sobre esa vista previa, agrega la **opción de borrar la foto y volver a tomarla/seleccionarla** (ícono de papelera o botón "Eliminar" junto a la miniatura): al borrar, limpia también `foto_url` de ese ítem en el estado/BD y vuelve a habilitar el input/la cámara para capturar una nueva. Esto no reemplaza el lightbox de fotos ya guardadas en `/tickets/[id]` (§2.4) — es solo para el momento de captura, dentro del formulario de la revisión.
+
 ---
 
 ## 3. Fecha de vencimiento y alertas automáticas
 
-- Si al cerrar el checklist queda al menos un ítem `no_conforme`, el formulario exige `fecha_vencimiento` (timestamp) **por cada ítem no conforme**, además de la foto de la falla (§2.4). El ticket expone también una `fecha_vencimiento` "efectiva" = la más próxima entre todos sus ítems abiertos (calculada, no se pide de nuevo a nivel ticket).
+- **Ajuste sobre lo ya construido:** la fecha de vencimiento dejó de pedirse por ítem — ahora es **un solo campo por revisión** (`ticket_revisiones.fecha_vencimiento`), visible en la sección de cabecera del formulario ("Datos de Inspección"), no junto a la foto de cada ítem no conforme. Ver detalle de la ubicación, el valor por defecto y la obligatoriedad en §2.7. El ticket sigue exponiendo una `fecha_vencimiento` efectiva para el dashboard: ahora es simplemente la de su revisión más reciente (ya no hace falta calcular un mínimo entre ítems).
 - **Cálculo de horas restantes:** `horas_restantes = (fecha_vencimiento - now()) en horas`, recalculado en cada carga del dashboard (no se persiste, se calcula al vuelo en el cliente o vía vista SQL).
 - **Estado derivado por ticket** (no persistido, se recalcula en cada render — mismo patrón que ya estaba prototipado en este repo antes de este blueprint):
 
@@ -200,7 +255,34 @@ Lo acciona el **supervisor** dueño de ese ticket (ver §2.6), no el administrad
 
 - **Genera un PDF real del informe y adjúntalo al correo** — hoy el correo se envía sin nada adjunto, eso es un bug a corregir, no una opción. Usa una librería de generación de PDF en el servidor (por ejemplo renderizar el HTML del informe con Puppeteer/Playwright, o `@react-pdf/renderer`) — el resultado tiene que ser un PDF real adjunto (`.pdf`), no un link.
 - **El PDF debe tener formato formal y profesional**: encabezado claro con el nombre de la empresa y "Informe de Inspección de Flota", tipografía y espaciado cuidados, tabla del checklist ordenada y legible, sección de firmas con las imágenes a un tamaño que se vea bien impreso, y **las fotos de los ítems no conformes en tamaño legible** (no miniaturas diminutas — deben poder distinguirse los detalles de la falla). Sigue la paleta y tipografía de §6 en la medida en que tenga sentido en un documento imprimible (fondo blanco, no los fondos de color del dashboard).
-- **Cuerpo del correo:** mantén los datos de cabecera que ya se muestran (N° de Revisión con el correlativo, no el UUID; estado; transporte; conductor; patente camión; patente rampla), y **agrega un resumen de las observaciones en texto** (ítem no conforme + su observación, uno por línea) — **sin fotos en el cuerpo del correo**, las fotos van únicamente en el PDF adjunto, legibles ahí. Elimina cualquier línea tipo "Ver informe:" que quede vacía o rota — si se quiere un link al informe online además del PDF, que apunte de verdad a `/tickets/[id]/report` y solo se agrega si funciona, no como placeholder.
+- **Cuerpo del correo (corrige lo ya construido: reemplaza el formato actual por esta plantilla exacta, con los datos reales de la revisión):**
+
+  ```
+  Estimados,
+
+  Se realiza Check List a camión de transportes {transporte}.
+  Matrícula {patente_camion}
+  Rampla {patente_rampla}
+  Conductor {conductor de la revisión, §2.6}.
+
+  Dentro de las observaciones se detecta lo siguiente
+
+  1. {observación del primer ítem no_conforme}
+  2. {observación del segundo ítem no_conforme}
+  ...
+
+  Se adjunta Check List y fotografías para ilustrar la condición
+
+  {nombre del supervisor} ( {cargo del supervisor} )
+  ```
+
+  Detalle de cada parte de la plantilla:
+
+  - Los datos de camión (`{transporte}`, `{patente_camion}`, `{patente_rampla}`, `{conductor}`) son los de la revisión que se está informando — el mismo conductor por revisión de §2.6, no necesariamente el de la cabecera original del ticket.
+  - La lista numerada son **las observaciones de los ítems `no_conforme` de esa revisión, una por línea, en el mismo orden del checklist** — solo el texto de la observación (como en el ejemplo), sin repetir el nombre del ítem ni la foto; las fotos van únicamente en el PDF adjunto.
+  - Si la revisión no tiene ítems `no_conforme` (ticket `FINALIZADA_SIN_OBSERVACIONES`), reemplaza la sección de observaciones por una línea equivalente, por ejemplo: "No se detectan observaciones. El camión cumple con todas las exigencias del Check List." — no dejes la plantilla con un listado vacío.
+  - `{nombre del supervisor}` es el nombre (`personal.nombre`) del supervisor que envía el correo (el mismo que es dueño del ticket, §2.6). `{cargo del supervisor}` es un texto **fijo para todos los supervisores**, no varía por persona: **"Supervisor de Encarpe"** — no hace falta guardarlo en la base de datos, puede ir hardcodeado en la plantilla del correo.
+  - Elimina cualquier línea tipo "Ver informe:" que quede vacía o rota, y no agregues datos que no estén en esta plantilla (no repitas N° de Revisión, estado, ni los demás campos de cabecera dentro del cuerpo — esa información ya vive en el PDF adjunto).
 - Adjunta ese mismo PDF a todos los destinatarios seleccionados en un solo envío.
 
 ---
@@ -333,6 +415,8 @@ Expón `--success` y `--warning` también en el bloque `@theme inline` que gener
 
 Ejecuta esto vía el conector MCP de Supabase (o como migración `supabase/schema.sql` si el MCP no está disponible en el entorno de ejecución).
 
+> **Nota de reconciliación:** el DDL de abajo es el esquema completo para una instalación **nueva** — ya incluye `nro_revision_global`, `conductor` y `fecha_vencimiento` en `ticket_revisiones`, y la versión final de la restricción de `ticket_checklist_respuestas`. Si este entorno ya tiene estas tablas desplegadas desde un ciclo de construcción anterior (el caso más probable a esta altura del proyecto), **no vuelvas a crear las tablas desde cero** — usa en su lugar los `alter table` incrementales de §2.6 (para `nro_revision_global` y `conductor`) y §2.7 (para `fecha_vencimiento` y el cambio de constraint), que son idempotentes o casi (`if not exists`/`if exists`) y seguros de correr sobre una base ya poblada con datos.
+
 ```sql
 -- ENUMS
 create type ticket_estado as enum (
@@ -389,7 +473,7 @@ create table tickets (
   estado ticket_estado not null default 'en_revision',
   revision_actual int not null default 1,
   supervisor_id uuid references personal(id),
-  fecha_vencimiento timestamptz, -- vencimiento efectivo (mínimo entre ítems abiertos)
+  fecha_vencimiento timestamptz, -- vencimiento efectivo: el de la revisión más reciente de este ticket (ver §2.6 y §3)
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -399,6 +483,9 @@ create table ticket_revisiones (
   id uuid primary key default gen_random_uuid(),
   ticket_id uuid not null references tickets(id) on delete cascade,
   numero_revision int not null,
+  nro_revision_global bigint generated always as identity unique not null, -- correlativo global, ver §2.6
+  conductor text, -- conductor de esta revisión específica, ver §2.6
+  fecha_vencimiento timestamptz, -- un solo vencimiento por revisión, ver §2.7 (ya no es por ítem)
   estado_resultante ticket_estado not null,
   supervisor_id uuid references personal(id),
   firma_conductor_url text,
@@ -416,11 +503,10 @@ create table ticket_checklist_respuestas (
   estado item_estado not null,
   observacion text,
   foto_url text,
-  fecha_vencimiento_item timestamptz,
   created_at timestamptz not null default now(),
   foreign key (ticket_id, revision_numero) references ticket_revisiones(ticket_id, numero_revision) on delete cascade,
-  constraint foto_y_vencimiento_obligatorios_si_no_conforme check (
-    estado <> 'no_conforme' or (foto_url is not null and fecha_vencimiento_item is not null)
+  constraint foto_obligatoria_si_no_conforme check (
+    estado <> 'no_conforme' or foto_url is not null
   )
 );
 

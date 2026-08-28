@@ -24,7 +24,7 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(
     params.get("error") === "perfil_no_encontrado"
-      ? "Tu usuario no tiene un perfil asociado. Contactá a un administrador."
+      ? "El usuario no tiene un perfil asociado. Contactar a un administrador."
       : null,
   );
   const [cargando, setCargando] = useState(false);
@@ -85,7 +85,7 @@ function LoginForm() {
             {cargando ? "Ingresando…" : "Ingresar"}
           </Button>
           <p className="text-center text-sm text-muted-foreground">
-            ¿No tenés cuenta?{" "}
+            ¿No tiene cuenta?{" "}
             <Link href="/registro" className="text-primary underline">
               Registrarse
             </Link>

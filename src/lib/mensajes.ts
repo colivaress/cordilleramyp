@@ -3,7 +3,6 @@ import { formatearTiempoRestante, horasRestantes } from "@/lib/vencimiento";
 export type FallaResumen = {
   nombre: string;
   observacion?: string | null;
-  fechaVencimientoItem?: string | null;
 };
 
 type DatosVencimiento = {

@@ -54,7 +54,7 @@ export function EmailRecipientsSelect({ ticketId }: { ticketId: string }) {
         .filter(Boolean),
     ];
     if (destinatarios.length === 0) {
-      toast.error("Seleccioná al menos un destinatario.");
+      toast.error("Seleccionar al menos un destinatario.");
       return;
     }
     setEnviando(true);
@@ -95,8 +95,8 @@ export function EmailRecipientsSelect({ ticketId }: { ticketId: string }) {
         <p className="text-sm text-muted-foreground">Cargando destinatarios…</p>
       ) : lista.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No hay destinatarios cargados en <code>destinatarios_correo</code>.
-          Podés escribir correos manualmente abajo.
+          No hay destinatarios cargados en <code>destinatarios_correo</code>. Se
+          pueden escribir correos manualmente abajo.
         </p>
       ) : (
         <ul className="grid gap-2 sm:grid-cols-2">

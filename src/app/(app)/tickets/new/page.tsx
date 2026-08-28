@@ -21,7 +21,8 @@ export default async function NuevaInspeccionPage() {
           Nueva inspección
         </h1>
         <p className="text-sm text-muted-foreground">
-          Completá la cabecera, luego el checklist de 18 elementos y las firmas.
+          Completar los datos de inspección, luego realizar el checklist de los
+          elementos a fiscalizar y firmar.
         </p>
       </div>
       <InspeccionForm modo="nueva" items={items ?? []} />

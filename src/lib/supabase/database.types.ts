@@ -131,7 +131,6 @@ export type Database = {
         Row: {
           created_at: string
           estado: Database["public"]["Enums"]["item_estado"]
-          fecha_vencimiento_item: string | null
           foto_url: string | null
           id: string
           item_key: string
@@ -142,7 +141,6 @@ export type Database = {
         Insert: {
           created_at?: string
           estado: Database["public"]["Enums"]["item_estado"]
-          fecha_vencimiento_item?: string | null
           foto_url?: string | null
           id?: string
           item_key: string
@@ -153,7 +151,6 @@ export type Database = {
         Update: {
           created_at?: string
           estado?: Database["public"]["Enums"]["item_estado"]
-          fecha_vencimiento_item?: string | null
           foto_url?: string | null
           id?: string
           item_key?: string
@@ -190,6 +187,7 @@ export type Database = {
           conductor: string | null
           created_at: string
           estado_resultante: Database["public"]["Enums"]["ticket_estado"]
+          fecha_vencimiento: string | null
           firma_conductor_url: string | null
           firma_fiscalizador_url: string | null
           id: string
@@ -202,6 +200,7 @@ export type Database = {
           conductor?: string | null
           created_at?: string
           estado_resultante: Database["public"]["Enums"]["ticket_estado"]
+          fecha_vencimiento?: string | null
           firma_conductor_url?: string | null
           firma_fiscalizador_url?: string | null
           id?: string
@@ -214,6 +213,7 @@ export type Database = {
           conductor?: string | null
           created_at?: string
           estado_resultante?: Database["public"]["Enums"]["ticket_estado"]
+          fecha_vencimiento?: string | null
           firma_conductor_url?: string | null
           firma_fiscalizador_url?: string | null
           id?: string

@@ -86,7 +86,6 @@ export default async function TicketDetallePage({
     .map((r) => ({
       nombre: r.item?.nombre ?? r.item_key,
       observacion: r.observacion,
-      fechaVencimientoItem: r.fecha_vencimiento_item,
     }));
 
   return (
@@ -151,18 +150,21 @@ export default async function TicketDetallePage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Datos de cabecera</CardTitle>
+          <CardTitle>Datos de Inspección</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
           <Dato k="Transporte" v={ticket.transporte} />
           <Dato k="Conductor (última revisión)" v={ticket.conductor} />
-          <Dato k="Fecha" v={fmt(ticket.fecha)} />
+          <Dato k="Fecha de inspección" v={fmt(ticket.fecha)} />
           <Dato k="Procedencia" v={ticket.procedencia} />
           <Dato k="Tipo de camión" v={ticket.tipo_camion} />
           <Dato k="Patente camión" v={ticket.patente_camion} />
           <Dato k="Patente rampla" v={ticket.patente_rampla} />
           <Dato k="Supervisor" v={ticket.supervisor?.nombre ?? "—"} />
-          <Dato k="Vence" v={fmt(ticket.fecha_vencimiento)} />
+          <Dato
+            k="Vencimiento corrección (última revisión)"
+            v={fmt(ticket.fecha_vencimiento)}
+          />
         </CardContent>
       </Card>
 
@@ -185,7 +187,17 @@ export default async function TicketDetallePage({
                 {rev.conductor ? (
                   <>
                     {" "}
-                    · Conductor: <span className="font-medium">{rev.conductor}</span>
+                    · Conductor:{" "}
+                    <span className="font-medium">{rev.conductor}</span>
+                  </>
+                ) : null}
+                {rev.fecha_vencimiento ? (
+                  <>
+                    {" "}
+                    · Vencimiento corrección:{" "}
+                    <span className="font-medium">
+                      {fmt(rev.fecha_vencimiento)}
+                    </span>
                   </>
                 ) : null}
               </CardDescription>
@@ -200,12 +212,7 @@ export default async function TicketDetallePage({
                     </div>
                     {r.estado === "no_conforme" && (
                       <div className="grid gap-2 text-sm sm:grid-cols-[1fr_auto]">
-                        <div>
-                          <p>{r.observacion}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Corrección hasta: {fmt(r.fecha_vencimiento_item)}
-                          </p>
-                        </div>
+                        <p>{r.observacion}</p>
                         {r.foto_url && urlFotos[r.foto_url] && (
                           <FotoFalla
                             src={urlFotos[r.foto_url]}

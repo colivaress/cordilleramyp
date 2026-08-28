@@ -11,14 +11,12 @@ export type RespuestaEditable = {
   estado: ItemEstado;
   observacion: string;
   fotoFile: File | null;
-  fechaVencimiento: string; // datetime-local
 };
 
 export const respuestaVacia = (): RespuestaEditable => ({
   estado: "conforme",
   observacion: "",
   fotoFile: null,
-  fechaVencimiento: "",
 });
 
 const OPCIONES: { value: ItemEstado; label: string }[] = [
@@ -83,8 +81,10 @@ export function ChecklistItemRow({
               placeholder="Describir la falla detectada"
             />
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor={`foto-${item.key}`}>Foto de la falla (obligatoria)</Label>
+          <div className="grid gap-1.5 sm:col-span-2">
+            <Label htmlFor={`foto-${item.key}`}>
+              Foto de la falla (obligatoria)
+            </Label>
             <Input
               id={`foto-${item.key}`}
               type="file"
@@ -100,20 +100,6 @@ export function ChecklistItemRow({
                 {valor.fotoFile.name}
               </span>
             )}
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor={`venc-${item.key}`}>
-              Fecha límite de corrección (obligatoria)
-            </Label>
-            <Input
-              id={`venc-${item.key}`}
-              type="datetime-local"
-              required
-              value={valor.fechaVencimiento}
-              onChange={(e) =>
-                onChange({ ...valor, fechaVencimiento: e.target.value })
-              }
-            />
           </div>
         </div>
       )}

@@ -30,7 +30,6 @@ export type InformePDFDatos = {
     estado: string;
     esNoConforme: boolean;
     observacion: string | null;
-    correccionHasta: string | null;
     fotoDataUri: string | null;
   }[];
   firmas: {
@@ -184,12 +183,12 @@ export function InformePDF({ datos }: { datos: InformePDFDatos }) {
           <Dato k="Vencimiento corrección" v={c.vencimiento} />
         </View>
 
-        <Text style={s.seccion}>Checklist (18 elementos)</Text>
+        <Text style={s.seccion}>Elementos a Fiscalizar</Text>
         <View style={s.filaHead}>
           <Text style={[s.cN, s.headTxt]}>#</Text>
           <Text style={[s.cElemento, s.headTxt]}>Elemento</Text>
           <Text style={[s.cResultado, s.headTxt]}>Resultado</Text>
-          <Text style={[s.cObs, s.headTxt]}>Observación / Corrección</Text>
+          <Text style={[s.cObs, s.headTxt]}>Observación</Text>
         </View>
 
         {datos.items.map((it) => (
@@ -203,11 +202,6 @@ export function InformePDF({ datos }: { datos: InformePDFDatos }) {
               {it.esNoConforme ? (
                 <>
                   <Text>{it.observacion || "—"}</Text>
-                  {it.correccionHasta ? (
-                    <Text style={s.fotoCaption}>
-                      Corrección hasta: {it.correccionHasta}
-                    </Text>
-                  ) : null}
                   {it.fotoDataUri ? (
                     <View style={s.fotoWrap}>
                       <Image style={s.foto} src={it.fotoDataUri} />

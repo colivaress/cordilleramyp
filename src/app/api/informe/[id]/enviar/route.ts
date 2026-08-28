@@ -50,7 +50,7 @@ async function preparar(id: string) {
   if (informe.meta.supervisorId !== perfil.id) {
     return {
       error: NextResponse.json(
-        { error: "Solo podés acceder a informes de tus propios tickets." },
+        { error: "Solo se puede acceder a informes de tickets propios." },
         { status: 403 },
       ),
     };
@@ -103,7 +103,7 @@ export async function POST(
         error:
           invalidos.length > 0
             ? `Correos inválidos: ${invalidos.join(", ")}`
-            : "Seleccioná al menos un destinatario.",
+            : "Seleccionar al menos un destinatario.",
       },
       { status: 400 },
     );

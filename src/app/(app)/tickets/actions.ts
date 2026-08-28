@@ -16,7 +16,6 @@ export type RespuestaInput = {
   estado: ItemEstado;
   observacion: string | null;
   fotoPath: string | null;
-  fechaVencimientoISO: string | null;
 };
 
 export type CabeceraInput = {
@@ -32,18 +31,12 @@ export type CabeceraInput = {
 export type CrearInspeccionInput = {
   ticketId: string;
   cabecera: CabeceraInput;
+  // §2.7: un solo vencimiento por revisión, tomado de "Datos de Inspección".
+  fechaVencimientoISO: string;
   respuestas: RespuestaInput[];
   firmaConductorPath: string;
   firmaFiscalizadorPath: string;
 };
-
-function vencimientoEfectivo(respuestas: RespuestaInput[]): string | null {
-  const fechas = respuestas
-    .filter((r) => r.estado === "no_conforme" && r.fechaVencimientoISO)
-    .map((r) => new Date(r.fechaVencimientoISO as string).getTime());
-  if (fechas.length === 0) return null;
-  return new Date(Math.min(...fechas)).toISOString();
-}
 
 function validarRespuestas(respuestas: RespuestaInput[]) {
   if (respuestas.length === 0) throw new Error("El checklist está vacío.");
@@ -53,8 +46,6 @@ function validarRespuestas(respuestas: RespuestaInput[]) {
         throw new Error(`Falta la observación en "${r.itemKey}".`);
       if (!r.fotoPath)
         throw new Error(`Falta la foto de la falla en "${r.itemKey}".`);
-      if (!r.fechaVencimientoISO)
-        throw new Error(`Falta la fecha de corrección en "${r.itemKey}".`);
     }
   }
 }
@@ -64,6 +55,8 @@ export async function crearInspeccion(input: CrearInspeccionInput) {
   const supabase = await createClient();
 
   validarRespuestas(input.respuestas);
+  if (!input.fechaVencimientoISO)
+    throw new Error("Falta la fecha de vencimiento de la corrección.");
   if (!input.firmaConductorPath || !input.firmaFiscalizadorPath)
     throw new Error("Faltan las firmas del conductor y/o del fiscalizador.");
 
@@ -71,7 +64,6 @@ export async function crearInspeccion(input: CrearInspeccionInput) {
     (r) => r.estado === "no_conforme",
   );
   const estado = estadoTrasChecklist(hayNoConformes);
-  const fechaVenc = vencimientoEfectivo(input.respuestas);
 
   const { error: eTicket } = await supabase.from("tickets").insert({
     id: input.ticketId,
@@ -79,7 +71,8 @@ export async function crearInspeccion(input: CrearInspeccionInput) {
     estado,
     revision_actual: 1,
     supervisor_id: perfil.id,
-    fecha_vencimiento: fechaVenc,
+    // §2.7: el vencimiento efectivo del ticket es el de su revisión más reciente.
+    fecha_vencimiento: input.fechaVencimientoISO,
   });
   if (eTicket) throw new Error(`No se pudo crear el ticket: ${eTicket.message}`);
 
@@ -90,6 +83,8 @@ export async function crearInspeccion(input: CrearInspeccionInput) {
     supervisor_id: perfil.id,
     // §2.6: la revisión #1 guarda el conductor de la cabecera del ticket.
     conductor: input.cabecera.conductor,
+    // §2.7: un solo vencimiento por revisión.
+    fecha_vencimiento: input.fechaVencimientoISO,
     firma_conductor_url: input.firmaConductorPath,
     firma_fiscalizador_url: input.firmaFiscalizadorPath,
   });
@@ -103,8 +98,6 @@ export async function crearInspeccion(input: CrearInspeccionInput) {
       estado: r.estado,
       observacion: r.estado === "no_conforme" ? r.observacion : null,
       foto_url: r.fotoPath,
-      fecha_vencimiento_item:
-        r.estado === "no_conforme" ? r.fechaVencimientoISO : null,
     })),
   );
   if (eResp) throw new Error(`No se pudieron guardar las respuestas: ${eResp.message}`);
@@ -144,6 +137,7 @@ export async function iniciarReparacion(ticketId: string) {
 export async function registrarReinspeccion(input: {
   ticketId: string;
   conductor: string;
+  fechaVencimientoISO: string;
   respuestas: RespuestaInput[];
   firmaConductorPath: string;
   firmaFiscalizadorPath: string;
@@ -154,6 +148,8 @@ export async function registrarReinspeccion(input: {
   validarRespuestas(input.respuestas);
   if (!input.conductor?.trim())
     throw new Error("Falta el conductor de esta revisión.");
+  if (!input.fechaVencimientoISO)
+    throw new Error("Falta la fecha de vencimiento de la corrección.");
   if (!input.firmaConductorPath || !input.firmaFiscalizadorPath)
     throw new Error("Faltan las firmas del conductor y/o del fiscalizador.");
 
@@ -171,8 +167,6 @@ export async function registrarReinspeccion(input: {
   const nuevaRevision = ticket.revision_actual + 1;
   const hayNoConformes = input.respuestas.some((r) => r.estado === "no_conforme");
   const estado = estadoTrasChecklist(hayNoConformes);
-  const fechaVenc = vencimientoEfectivo(input.respuestas);
-
   const conductor = input.conductor.trim();
 
   const { error: eRev } = await supabase.from("ticket_revisiones").insert({
@@ -183,6 +177,8 @@ export async function registrarReinspeccion(input: {
     // §2.6: el conductor de ESTA revisión (puede diferir de las previas y no
     // toca sus filas).
     conductor,
+    // §2.7: un solo vencimiento por revisión.
+    fecha_vencimiento: input.fechaVencimientoISO,
     firma_conductor_url: input.firmaConductorPath,
     firma_fiscalizador_url: input.firmaFiscalizadorPath,
   });
@@ -198,8 +194,6 @@ export async function registrarReinspeccion(input: {
         estado: r.estado,
         observacion: r.estado === "no_conforme" ? r.observacion : null,
         foto_url: r.fotoPath,
-        fecha_vencimiento_item:
-          r.estado === "no_conforme" ? r.fechaVencimientoISO : null,
       })),
     );
   if (eResp) throw new Error(`No se pudieron guardar las respuestas: ${eResp.message}`);
@@ -209,7 +203,7 @@ export async function registrarReinspeccion(input: {
     .update({
       estado,
       revision_actual: nuevaRevision,
-      fecha_vencimiento: fechaVenc,
+      fecha_vencimiento: input.fechaVencimientoISO,
       // La cabecera del ticket refleja el conductor de la última revisión (para
       // la tabla resumen y el informe); el histórico vive en ticket_revisiones.
       conductor,

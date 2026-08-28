@@ -18,7 +18,9 @@ export default async function ReinspeccionPage({
 
   const { data: ticket } = await supabase
     .from("tickets")
-    .select("id, estado, revision_actual, patente_camion, patente_rampla, conductor")
+    .select(
+      "id, estado, revision_actual, patente_camion, patente_rampla, conductor, fecha_vencimiento",
+    )
     .eq("id", id)
     .maybeSingle();
   if (!ticket) notFound();
@@ -39,8 +41,8 @@ export default async function ReinspeccionPage({
           Re-inspección — {ticket.patente_camion} / {ticket.patente_rampla}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Revisión #{ticket.revision_actual + 1}. Volvé a evaluar el checklist
-          completo y capturá las dos firmas.
+          Revisión #{ticket.revision_actual + 1}. Volver a evaluar todos los
+          elementos a fiscalizar y firmar.
         </p>
       </div>
       <InspeccionForm
@@ -49,6 +51,7 @@ export default async function ReinspeccionPage({
         ticketId={id}
         numeroRevision={ticket.revision_actual + 1}
         conductorInicial={ticket.conductor}
+        fechaVencimientoInicial={ticket.fecha_vencimiento}
       />
     </div>
   );
