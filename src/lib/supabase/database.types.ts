@@ -187,6 +187,7 @@ export type Database = {
       }
       ticket_revisiones: {
         Row: {
+          conductor: string | null
           created_at: string
           estado_resultante: Database["public"]["Enums"]["ticket_estado"]
           firma_conductor_url: string | null
@@ -198,6 +199,7 @@ export type Database = {
           ticket_id: string
         }
         Insert: {
+          conductor?: string | null
           created_at?: string
           estado_resultante: Database["public"]["Enums"]["ticket_estado"]
           firma_conductor_url?: string | null
@@ -209,6 +211,7 @@ export type Database = {
           ticket_id: string
         }
         Update: {
+          conductor?: string | null
           created_at?: string
           estado_resultante?: Database["public"]["Enums"]["ticket_estado"]
           firma_conductor_url?: string | null

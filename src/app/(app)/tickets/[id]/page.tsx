@@ -155,7 +155,7 @@ export default async function TicketDetallePage({
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
           <Dato k="Transporte" v={ticket.transporte} />
-          <Dato k="Conductor" v={ticket.conductor} />
+          <Dato k="Conductor (última revisión)" v={ticket.conductor} />
           <Dato k="Fecha" v={fmt(ticket.fecha)} />
           <Dato k="Procedencia" v={ticket.procedencia} />
           <Dato k="Tipo de camión" v={ticket.tipo_camion} />
@@ -182,6 +182,12 @@ export default async function TicketDetallePage({
               <CardDescription>
                 {fmt(rev.created_at)} · {" "}
                 <TicketStatusBadge estado={rev.estado_resultante} />
+                {rev.conductor ? (
+                  <>
+                    {" "}
+                    · Conductor: <span className="font-medium">{rev.conductor}</span>
+                  </>
+                ) : null}
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">

@@ -72,15 +72,20 @@ export function InspeccionForm({
   items,
   ticketId: ticketIdProp,
   numeroRevision = 1,
+  conductorInicial = "",
 }: {
   modo: "nueva" | "reinspeccion";
   items: ChecklistItem[];
   ticketId?: string;
   numeroRevision?: number;
+  conductorInicial?: string;
 }) {
   const router = useRouter();
   const [paso, setPaso] = useState<1 | 2>(modo === "nueva" ? 1 : 2);
   const [cabecera, setCabecera] = useState<Cabecera>(cabeceraVacia);
+  // §2.6: conductor de ESTA revisión (solo modo re-inspección). Prellenado con
+  // el de la revisión anterior; el supervisor lo confirma o lo cambia.
+  const [conductorRevision, setConductorRevision] = useState(conductorInicial);
   const [respuestas, setRespuestas] = useState<Record<string, RespuestaEditable>>(
     () => Object.fromEntries(items.map((i) => [i.key, respuestaVacia()])),
   );
@@ -104,6 +109,8 @@ export function InspeccionForm({
   }
 
   function validarChecklist(): string | null {
+    if (modo === "reinspeccion" && !conductorRevision.trim())
+      return "Indicá el conductor de esta revisión.";
     for (const item of items) {
       const r = respuestas[item.key];
       if (r.estado === "no_conforme") {
@@ -190,6 +197,7 @@ export function InspeccionForm({
       } else {
         await registrarReinspeccion({
           ticketId,
+          conductor: conductorRevision.trim(),
           respuestas: respuestasInput,
           firmaConductorPath,
           firmaFiscalizadorPath,
@@ -250,6 +258,30 @@ export function InspeccionForm({
 
       {paso === 2 && (
         <>
+          {modo === "reinspeccion" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Conductor de esta revisión</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid max-w-sm gap-1.5">
+                  <Label htmlFor="conductor-revision">Conductor</Label>
+                  <Input
+                    id="conductor-revision"
+                    required
+                    value={conductorRevision}
+                    onChange={(e) => setConductorRevision(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Prellenado con el de la revisión anterior. Confirmalo o
+                    ingresá el chofer que se presentó ahora — no cambia el
+                    conductor de las revisiones previas.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle>

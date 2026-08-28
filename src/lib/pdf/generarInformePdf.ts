@@ -64,6 +64,9 @@ export async function generarInformePdf(
     .eq("numero_revision", ticket.revision_actual)
     .maybeSingle();
 
+  // §2.6: el informe muestra el conductor de la revisión reportada.
+  const conductorRevision = revision?.conductor ?? ticket.conductor;
+
   const { data: respuestas } = await supabase
     .from("ticket_checklist_respuestas")
     .select("*, item:checklist_items(nombre, orden)")
@@ -127,7 +130,7 @@ export async function generarInformePdf(
     emitidoEl: fmt(new Date().toISOString()),
     cabecera: {
       transporte: ticket.transporte,
-      conductor: ticket.conductor,
+      conductor: conductorRevision,
       fecha: fmt(ticket.fecha),
       procedencia: ticket.procedencia,
       tipoCamion: ticket.tipo_camion,
@@ -139,7 +142,7 @@ export async function generarInformePdf(
     items,
     firmas: {
       conductor: {
-        nombre: ticket.conductor,
+        nombre: conductorRevision,
         fecha: fmt(revision?.created_at ?? null),
         dataUri: firmaConductorUri,
       },
@@ -165,7 +168,7 @@ export async function generarInformePdf(
       patenteCamion: ticket.patente_camion,
       patenteRampla: ticket.patente_rampla,
       transporte: ticket.transporte,
-      conductor: ticket.conductor,
+      conductor: conductorRevision,
       observaciones,
     },
   };

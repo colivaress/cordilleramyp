@@ -18,7 +18,7 @@ export default async function ReinspeccionPage({
 
   const { data: ticket } = await supabase
     .from("tickets")
-    .select("id, estado, revision_actual, patente_camion, patente_rampla")
+    .select("id, estado, revision_actual, patente_camion, patente_rampla, conductor")
     .eq("id", id)
     .maybeSingle();
   if (!ticket) notFound();
@@ -48,6 +48,7 @@ export default async function ReinspeccionPage({
         items={items ?? []}
         ticketId={id}
         numeroRevision={ticket.revision_actual + 1}
+        conductorInicial={ticket.conductor}
       />
     </div>
   );

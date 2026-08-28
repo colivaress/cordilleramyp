@@ -88,6 +88,8 @@ export async function crearInspeccion(input: CrearInspeccionInput) {
     numero_revision: 1,
     estado_resultante: estado,
     supervisor_id: perfil.id,
+    // §2.6: la revisión #1 guarda el conductor de la cabecera del ticket.
+    conductor: input.cabecera.conductor,
     firma_conductor_url: input.firmaConductorPath,
     firma_fiscalizador_url: input.firmaFiscalizadorPath,
   });
@@ -141,6 +143,7 @@ export async function iniciarReparacion(ticketId: string) {
 
 export async function registrarReinspeccion(input: {
   ticketId: string;
+  conductor: string;
   respuestas: RespuestaInput[];
   firmaConductorPath: string;
   firmaFiscalizadorPath: string;
@@ -149,6 +152,8 @@ export async function registrarReinspeccion(input: {
   const supabase = await createClient();
 
   validarRespuestas(input.respuestas);
+  if (!input.conductor?.trim())
+    throw new Error("Falta el conductor de esta revisión.");
   if (!input.firmaConductorPath || !input.firmaFiscalizadorPath)
     throw new Error("Faltan las firmas del conductor y/o del fiscalizador.");
 
@@ -168,11 +173,16 @@ export async function registrarReinspeccion(input: {
   const estado = estadoTrasChecklist(hayNoConformes);
   const fechaVenc = vencimientoEfectivo(input.respuestas);
 
+  const conductor = input.conductor.trim();
+
   const { error: eRev } = await supabase.from("ticket_revisiones").insert({
     ticket_id: input.ticketId,
     numero_revision: nuevaRevision,
     estado_resultante: estado,
     supervisor_id: perfil.id,
+    // §2.6: el conductor de ESTA revisión (puede diferir de las previas y no
+    // toca sus filas).
+    conductor,
     firma_conductor_url: input.firmaConductorPath,
     firma_fiscalizador_url: input.firmaFiscalizadorPath,
   });
@@ -200,6 +210,9 @@ export async function registrarReinspeccion(input: {
       estado,
       revision_actual: nuevaRevision,
       fecha_vencimiento: fechaVenc,
+      // La cabecera del ticket refleja el conductor de la última revisión (para
+      // la tabla resumen y el informe); el histórico vive en ticket_revisiones.
+      conductor,
       updated_at: new Date().toISOString(),
     })
     .eq("id", input.ticketId);
