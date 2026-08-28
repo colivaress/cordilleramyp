@@ -8,14 +8,9 @@ import {
   puedeIniciarReparacion,
   puedeReinspeccionar,
 } from "@/lib/ticket-state-machine";
-import type { ItemEstado } from "@/lib/tipos";
+import type { ItemEstado, TicketEstado } from "@/lib/tipos";
 
-export type RespuestaInput = {
-  itemKey: string;
-  estado: ItemEstado;
-  observacion: string | null;
-  fotoPath: string | null;
-};
+type SupabaseServer = Awaited<ReturnType<typeof createClient>>;
 
 export type CabeceraInput = {
   transporte: string;
@@ -39,24 +34,14 @@ export type IniciarInspeccionInput = {
   fechaVencimientoISO: string;
 };
 
-export type FinalizarInspeccionInput = {
+export type GuardarRespuestaItemInput = {
   ticketId: string;
-  respuestas: RespuestaInput[];
-  firmaConductorPath: string;
-  firmaFiscalizadorPath: string;
+  revisionNumero: number;
+  itemKey: string;
+  estado: ItemEstado;
+  observacion: string | null;
+  fotoPath: string | null;
 };
-
-function validarRespuestas(respuestas: RespuestaInput[]) {
-  if (respuestas.length === 0) throw new Error("El checklist está vacío.");
-  for (const r of respuestas) {
-    if (r.estado === "no_conforme") {
-      if (!r.observacion?.trim())
-        throw new Error(`Falta la observación en "${r.itemKey}".`);
-      if (!r.fotoPath)
-        throw new Error(`Falta la foto de la falla en "${r.itemKey}".`);
-    }
-  }
-}
 
 function validarCabecera(c: CabeceraInput) {
   for (const [k, v] of Object.entries(c)) {
@@ -66,13 +51,142 @@ function validarCabecera(c: CabeceraInput) {
 }
 
 /**
+ * Deja lista una revisión para que se pueda ir guardando por partes (§2.8):
+ * garantiza la fila en `ticket_revisiones` (es el padre FK de las respuestas) y
+ * siembra las 18 filas de `ticket_checklist_respuestas` en estado `conforme` —
+ * así los ítems que el supervisor no toca igual quedan registrados y "Finalizar
+ * revisión" solo tiene que cerrar sobre datos ya guardados. Es idempotente: si
+ * el supervisor vuelve atrás y reingresa, no pisa lo ya marcado.
+ */
+async function prepararRevision(
+  supabase: SupabaseServer,
+  opts: {
+    ticketId: string;
+    numeroRevision: number;
+    supervisorId: string;
+    conductor: string;
+    fechaVencimientoISO: string;
+  },
+) {
+  const { data: revExistente } = await supabase
+    .from("ticket_revisiones")
+    .select("id")
+    .eq("ticket_id", opts.ticketId)
+    .eq("numero_revision", opts.numeroRevision)
+    .maybeSingle();
+
+  if (revExistente) {
+    const { error } = await supabase
+      .from("ticket_revisiones")
+      .update({
+        conductor: opts.conductor,
+        fecha_vencimiento: opts.fechaVencimientoISO,
+      })
+      .eq("id", revExistente.id);
+    if (error)
+      throw new Error(`No se pudo actualizar la revisión: ${error.message}`);
+  } else {
+    const { error } = await supabase.from("ticket_revisiones").insert({
+      ticket_id: opts.ticketId,
+      numero_revision: opts.numeroRevision,
+      estado_resultante: "en_revision",
+      supervisor_id: opts.supervisorId,
+      conductor: opts.conductor,
+      fecha_vencimiento: opts.fechaVencimientoISO,
+    });
+    if (error)
+      throw new Error(`No se pudo iniciar la revisión: ${error.message}`);
+  }
+
+  const { data: items } = await supabase.from("checklist_items").select("key");
+  const filas = (items ?? []).map((i) => ({
+    ticket_id: opts.ticketId,
+    revision_numero: opts.numeroRevision,
+    item_key: i.key,
+    estado: "conforme" as const,
+  }));
+  if (filas.length > 0) {
+    const { error } = await supabase
+      .from("ticket_checklist_respuestas")
+      .upsert(filas, {
+        onConflict: "ticket_id,revision_numero,item_key",
+        ignoreDuplicates: true,
+      });
+    if (error)
+      throw new Error(
+        `No se pudieron inicializar las respuestas: ${error.message}`,
+      );
+  }
+}
+
+/**
+ * Verifica que la revisión tenga las 18 respuestas guardadas (§2.8: se fueron
+ * guardando por ítem) y ambas firmas, calcula el estado resultante (§2.3) y lo
+ * escribe en `ticket_revisiones.estado_resultante`. Devuelve el estado para que
+ * el llamador actualice el ticket. NO inserta respuestas: solo cierra sobre lo
+ * ya guardado.
+ */
+async function cerrarRevision(
+  supabase: SupabaseServer,
+  ticketId: string,
+  numeroRevision: number,
+): Promise<TicketEstado> {
+  const { data: rev } = await supabase
+    .from("ticket_revisiones")
+    .select("id, firma_conductor_url, firma_fiscalizador_url")
+    .eq("ticket_id", ticketId)
+    .eq("numero_revision", numeroRevision)
+    .maybeSingle();
+  if (!rev)
+    throw new Error(
+      "La revisión no está iniciada. Volver a los datos y presionar 'Realizar revisión'.",
+    );
+  if (!rev.firma_conductor_url || !rev.firma_fiscalizador_url)
+    throw new Error("Faltan las firmas del conductor y/o del fiscalizador.");
+
+  const { data: items } = await supabase.from("checklist_items").select("key");
+  const { data: respuestas } = await supabase
+    .from("ticket_checklist_respuestas")
+    .select("item_key, estado, observacion, foto_url")
+    .eq("ticket_id", ticketId)
+    .eq("revision_numero", numeroRevision);
+
+  const claves = (items ?? []).map((i) => i.key);
+  const guardadas = respuestas ?? [];
+  const respondidas = new Set(guardadas.map((r) => r.item_key));
+  const faltan = claves.filter((k) => !respondidas.has(k));
+  if (claves.length === 0 || faltan.length > 0)
+    throw new Error(
+      `Quedan ${
+        faltan.length || claves.length
+      } elemento(s) del checklist por completar (marcarlos, y adjuntar la foto en los no conformes).`,
+    );
+  for (const r of guardadas) {
+    if (r.estado === "no_conforme" && (!r.observacion?.trim() || !r.foto_url))
+      throw new Error("Hay un elemento no conforme sin observación o sin foto.");
+  }
+
+  const estado = estadoTrasChecklist(
+    guardadas.some((r) => r.estado === "no_conforme"),
+  );
+  const { error } = await supabase
+    .from("ticket_revisiones")
+    .update({ estado_resultante: estado })
+    .eq("id", rev.id);
+  if (error) throw new Error(`No se pudo cerrar la revisión: ${error.message}`);
+  return estado;
+}
+
+/**
  * §2.6: la fila en `tickets` se crea cuando el supervisor pasa de la cabecera al
  * checklist ("Realizar revisión"), no al finalizar — así `numero_inspeccion` ya
  * existe y §2.8 tiene un `ticket_id` real para subir firmas/fotos a Storage.
- * El ticket nace en `en_revision` (§2.3). Es un upsert: si el supervisor vuelve
- * atrás, edita la cabecera y avanza de nuevo, actualiza la misma fila.
- * La unicidad de `numero_inspeccion` entre inspectores simultáneos la garantiza
- * el `generated always as identity` de Postgres.
+ * También deja lista la revisión #1 (fila en `ticket_revisiones` + las 18
+ * respuestas sembradas) para poder guardar por ítem. El ticket nace en
+ * `en_revision` (§2.3). Es un upsert idempotente: si el supervisor vuelve atrás,
+ * edita la cabecera y avanza de nuevo, actualiza la misma fila sin perder lo ya
+ * marcado. La unicidad de `numero_inspeccion` entre inspectores simultáneos la
+ * garantiza el `generated always as identity` de Postgres.
  */
 export async function iniciarInspeccion(
   input: IniciarInspeccionInput,
@@ -107,33 +221,126 @@ export async function iniciarInspeccion(
       `No se pudo iniciar la inspección: ${error?.message ?? "sin datos"}`,
     );
 
+  await prepararRevision(supabase, {
+    ticketId: input.ticketId,
+    numeroRevision: 1,
+    supervisorId: perfil.id,
+    conductor: input.cabecera.conductor,
+    fechaVencimientoISO: input.fechaVencimientoISO,
+  });
+
   revalidatePath("/dashboard");
   return { ticketId: input.ticketId, numeroInspeccion: data.numero_inspeccion };
 }
 
 /**
- * Cierra la revisión #1 de una inspección ya iniciada: crea `ticket_revisiones`
- * y `ticket_checklist_respuestas`, y pasa el ticket al estado final según el
- * checklist. Idempotente/retryable si un intento anterior falló a mitad.
+ * §2.8: guarda UNA respuesta del checklist apenas el supervisor la marca, no
+ * todas juntas al final. Un ítem `no_conforme` no se puede persistir hasta que
+ * tenga foto (constraint `foto_obligatoria_si_no_conforme`); mientras no la
+ * tenga se borra su fila para que "Finalizar revisión" no tome un estado viejo.
  */
-export async function finalizarInspeccion(
-  input: FinalizarInspeccionInput,
-): Promise<InspeccionResultado> {
+export async function guardarRespuestaItem(
+  input: GuardarRespuestaItemInput,
+): Promise<{ guardado: boolean }> {
   const { perfil } = await getSesion();
   const supabase = await createClient();
 
-  validarRespuestas(input.respuestas);
-  if (!input.firmaConductorPath || !input.firmaFiscalizadorPath)
-    throw new Error("Faltan las firmas del conductor y/o del fiscalizador.");
-
-  const { data: ticket, error: eGet } = await supabase
+  const { data: ticket } = await supabase
     .from("tickets")
-    .select(
-      "estado, supervisor_id, numero_inspeccion, conductor, fecha_vencimiento",
-    )
+    .select("supervisor_id, estado")
     .eq("id", input.ticketId)
     .maybeSingle();
-  if (eGet || !ticket)
+  if (!ticket) throw new Error("No se encontró la inspección.");
+  if (ticket.supervisor_id !== perfil.id)
+    throw new Error("Solo el supervisor a cargo puede editar la inspección.");
+  if (ticket.estado !== "en_revision")
+    throw new Error("La revisión ya fue finalizada.");
+
+  const esNoConforme = input.estado === "no_conforme";
+
+  if (esNoConforme && !input.fotoPath) {
+    const { error } = await supabase
+      .from("ticket_checklist_respuestas")
+      .delete()
+      .eq("ticket_id", input.ticketId)
+      .eq("revision_numero", input.revisionNumero)
+      .eq("item_key", input.itemKey);
+    if (error)
+      throw new Error(`No se pudo actualizar la respuesta: ${error.message}`);
+    return { guardado: false };
+  }
+
+  const { error } = await supabase.from("ticket_checklist_respuestas").upsert(
+    {
+      ticket_id: input.ticketId,
+      revision_numero: input.revisionNumero,
+      item_key: input.itemKey,
+      estado: input.estado,
+      observacion: esNoConforme ? input.observacion?.trim() || null : null,
+      foto_url: esNoConforme ? input.fotoPath : null,
+    },
+    { onConflict: "ticket_id,revision_numero,item_key" },
+  );
+  if (error)
+    throw new Error(`No se pudo guardar la respuesta: ${error.message}`);
+  return { guardado: true };
+}
+
+/**
+ * §2.8: persiste la ruta de una firma en `ticket_revisiones` apenas se captura
+ * (el PNG ya se subió a Storage), para que sobreviva a la navegación entre pasos
+ * y a una falla de "Finalizar revisión".
+ */
+export async function guardarFirmaRevision(input: {
+  ticketId: string;
+  revisionNumero: number;
+  quien: "conductor" | "fiscalizador";
+  path: string | null;
+}) {
+  const { perfil } = await getSesion();
+  const supabase = await createClient();
+
+  const { data: ticket } = await supabase
+    .from("tickets")
+    .select("supervisor_id, estado")
+    .eq("id", input.ticketId)
+    .maybeSingle();
+  if (!ticket) throw new Error("No se encontró la inspección.");
+  if (ticket.supervisor_id !== perfil.id)
+    throw new Error("Solo el supervisor a cargo puede editar la inspección.");
+  if (ticket.estado !== "en_revision")
+    throw new Error("La revisión ya fue finalizada.");
+
+  const cambio =
+    input.quien === "conductor"
+      ? { firma_conductor_url: input.path }
+      : { firma_fiscalizador_url: input.path };
+  const { error } = await supabase
+    .from("ticket_revisiones")
+    .update(cambio)
+    .eq("ticket_id", input.ticketId)
+    .eq("numero_revision", input.revisionNumero);
+  if (error) throw new Error(`No se pudo guardar la firma: ${error.message}`);
+}
+
+/**
+ * §2.8: "Finalizar revisión" pasa a ser SOLO el cierre — calcula el estado
+ * resultante y actualiza el ticket sobre datos que ya están guardados (las
+ * respuestas por ítem y las firmas se fueron guardando antes). Una falla acá ya
+ * no borra el trabajo del checklist. Idempotente/retryable.
+ */
+export async function finalizarInspeccion(input: {
+  ticketId: string;
+}): Promise<InspeccionResultado> {
+  const { perfil } = await getSesion();
+  const supabase = await createClient();
+
+  const { data: ticket } = await supabase
+    .from("tickets")
+    .select("estado, supervisor_id, numero_inspeccion")
+    .eq("id", input.ticketId)
+    .maybeSingle();
+  if (!ticket)
     throw new Error(
       "No se encontró la inspección iniciada. Volver a 'Datos de Inspección' y presionar 'Realizar revisión'.",
     );
@@ -142,46 +349,7 @@ export async function finalizarInspeccion(
   if (ticket.estado !== "en_revision")
     throw new Error("Esta inspección ya fue finalizada.");
 
-  const hayNoConformes = input.respuestas.some(
-    (r) => r.estado === "no_conforme",
-  );
-  const estado = estadoTrasChecklist(hayNoConformes);
-
-  const { error: eRev } = await supabase.from("ticket_revisiones").upsert(
-    {
-      ticket_id: input.ticketId,
-      numero_revision: 1,
-      estado_resultante: estado,
-      supervisor_id: perfil.id,
-      // §2.6/§2.7: conductor y vencimiento se fijaron al iniciar la inspección.
-      conductor: ticket.conductor,
-      fecha_vencimiento: ticket.fecha_vencimiento,
-      firma_conductor_url: input.firmaConductorPath,
-      firma_fiscalizador_url: input.firmaFiscalizadorPath,
-    },
-    { onConflict: "ticket_id,numero_revision" },
-  );
-  if (eRev) throw new Error(`No se pudo guardar la revisión: ${eRev.message}`);
-
-  await supabase
-    .from("ticket_checklist_respuestas")
-    .delete()
-    .eq("ticket_id", input.ticketId)
-    .eq("revision_numero", 1);
-  const { error: eResp } = await supabase
-    .from("ticket_checklist_respuestas")
-    .insert(
-      input.respuestas.map((r) => ({
-        ticket_id: input.ticketId,
-        revision_numero: 1,
-        item_key: r.itemKey,
-        estado: r.estado,
-        observacion: r.estado === "no_conforme" ? r.observacion : null,
-        foto_url: r.fotoPath,
-      })),
-    );
-  if (eResp)
-    throw new Error(`No se pudieron guardar las respuestas: ${eResp.message}`);
+  const estado = await cerrarRevision(supabase, input.ticketId, 1);
 
   const { error: eUpd } = await supabase
     .from("tickets")
@@ -225,83 +393,125 @@ export async function iniciarReparacion(ticketId: string) {
   revalidatePath("/dashboard");
 }
 
-export async function registrarReinspeccion(input: {
+/**
+ * §2.8: arranque de una re-inspección — mismo criterio que `iniciarInspeccion`.
+ * Pasa el ticket a `en_revision` con `revision_actual += 1`, deja lista la fila
+ * de `ticket_revisiones` de la nueva revisión y siembra sus 18 respuestas, para
+ * poder guardar por ítem. Idempotente si el supervisor reingresa a la misma
+ * revisión en curso.
+ */
+export async function iniciarReinspeccion(input: {
   ticketId: string;
   conductor: string;
   fechaVencimientoISO: string;
-  respuestas: RespuestaInput[];
-  firmaConductorPath: string;
-  firmaFiscalizadorPath: string;
-}) {
+}): Promise<{ ticketId: string; numeroRevision: number }> {
   const { perfil } = await getSesion();
+  if (perfil.rol !== "supervisor")
+    throw new Error("Solo un supervisor puede registrar re-inspecciones.");
   const supabase = await createClient();
 
-  validarRespuestas(input.respuestas);
   if (!input.conductor?.trim())
     throw new Error("Falta el conductor de esta revisión.");
   if (!input.fechaVencimientoISO)
     throw new Error("Falta la fecha de vencimiento de la corrección.");
-  if (!input.firmaConductorPath || !input.firmaFiscalizadorPath)
-    throw new Error("Faltan las firmas del conductor y/o del fiscalizador.");
 
-  const { data: ticket, error } = await supabase
+  const { data: ticket } = await supabase
     .from("tickets")
-    .select("estado, revision_actual")
+    .select("estado, revision_actual, supervisor_id")
     .eq("id", input.ticketId)
-    .single();
-  if (error || !ticket) throw new Error("Ticket no encontrado.");
-  if (!puedeReinspeccionar(ticket.estado))
+    .maybeSingle();
+  if (!ticket) throw new Error("Ticket no encontrado.");
+  if (ticket.supervisor_id !== perfil.id)
+    throw new Error("Solo el supervisor a cargo puede re-inspeccionar.");
+
+  // Puede venir desde "en_reparacion_de_observaciones" (primer ingreso) o ya
+  // estar "en_revision" si el supervisor volvió a los datos y reingresó.
+  const yaEnCurso = ticket.estado === "en_revision";
+  if (!yaEnCurso && !puedeReinspeccionar(ticket.estado))
     throw new Error(
       "Solo se puede re-inspeccionar un ticket 'En reparación de observaciones'.",
     );
 
-  const nuevaRevision = ticket.revision_actual + 1;
-  const hayNoConformes = input.respuestas.some((r) => r.estado === "no_conforme");
-  const estado = estadoTrasChecklist(hayNoConformes);
+  const numeroRevision = yaEnCurso
+    ? ticket.revision_actual
+    : ticket.revision_actual + 1;
   const conductor = input.conductor.trim();
 
-  const { error: eRev } = await supabase.from("ticket_revisiones").insert({
-    ticket_id: input.ticketId,
-    numero_revision: nuevaRevision,
-    estado_resultante: estado,
-    supervisor_id: perfil.id,
-    // §2.6: el conductor de ESTA revisión (puede diferir de las previas y no
-    // toca sus filas).
+  await prepararRevision(supabase, {
+    ticketId: input.ticketId,
+    numeroRevision,
+    supervisorId: perfil.id,
     conductor,
-    // §2.7: un solo vencimiento por revisión.
-    fecha_vencimiento: input.fechaVencimientoISO,
-    firma_conductor_url: input.firmaConductorPath,
-    firma_fiscalizador_url: input.firmaFiscalizadorPath,
+    fechaVencimientoISO: input.fechaVencimientoISO,
   });
-  if (eRev) throw new Error(`No se pudo crear la revisión: ${eRev.message}`);
 
-  const { error: eResp } = await supabase
-    .from("ticket_checklist_respuestas")
-    .insert(
-      input.respuestas.map((r) => ({
-        ticket_id: input.ticketId,
-        revision_numero: nuevaRevision,
-        item_key: r.itemKey,
-        estado: r.estado,
-        observacion: r.estado === "no_conforme" ? r.observacion : null,
-        foto_url: r.fotoPath,
-      })),
+  if (!yaEnCurso) {
+    const { error } = await supabase
+      .from("tickets")
+      .update({
+        estado: "en_revision",
+        revision_actual: numeroRevision,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", input.ticketId);
+    if (error) throw new Error(error.message);
+  }
+
+  revalidatePath(`/tickets/${input.ticketId}`);
+  revalidatePath("/dashboard");
+  return { ticketId: input.ticketId, numeroRevision };
+}
+
+/**
+ * §2.8: cierre de una re-inspección sobre datos ya guardados (§2.3). El
+ * conductor y el vencimiento de esta revisión se fijaron en `iniciarReinspeccion`
+ * y se copian a la cabecera del ticket (para la tabla resumen y el informe).
+ */
+export async function finalizarReinspeccion(input: {
+  ticketId: string;
+  revisionNumero: number;
+}): Promise<{ ticketId: string }> {
+  const { perfil } = await getSesion();
+  const supabase = await createClient();
+
+  const { data: ticket } = await supabase
+    .from("tickets")
+    .select("estado, supervisor_id")
+    .eq("id", input.ticketId)
+    .maybeSingle();
+  if (!ticket) throw new Error("Ticket no encontrado.");
+  if (ticket.supervisor_id !== perfil.id)
+    throw new Error(
+      "Solo el supervisor a cargo puede finalizar la re-inspección.",
     );
-  if (eResp) throw new Error(`No se pudieron guardar las respuestas: ${eResp.message}`);
+  if (ticket.estado !== "en_revision")
+    throw new Error("Esta re-inspección ya fue finalizada.");
 
-  const { error: eUpd } = await supabase
+  const { data: rev } = await supabase
+    .from("ticket_revisiones")
+    .select("conductor, fecha_vencimiento")
+    .eq("ticket_id", input.ticketId)
+    .eq("numero_revision", input.revisionNumero)
+    .maybeSingle();
+  if (!rev) throw new Error("La revisión no está iniciada.");
+
+  const estado = await cerrarRevision(
+    supabase,
+    input.ticketId,
+    input.revisionNumero,
+  );
+
+  const { error } = await supabase
     .from("tickets")
     .update({
       estado,
-      revision_actual: nuevaRevision,
-      fecha_vencimiento: input.fechaVencimientoISO,
-      // La cabecera del ticket refleja el conductor de la última revisión (para
-      // la tabla resumen y el informe); el histórico vive en ticket_revisiones.
-      conductor,
+      revision_actual: input.revisionNumero,
+      fecha_vencimiento: rev.fecha_vencimiento,
+      conductor: rev.conductor ?? undefined,
       updated_at: new Date().toISOString(),
     })
     .eq("id", input.ticketId);
-  if (eUpd) throw new Error(eUpd.message);
+  if (error) throw new Error(error.message);
 
   revalidatePath(`/tickets/${input.ticketId}`);
   revalidatePath("/dashboard");

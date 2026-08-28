@@ -18,6 +18,7 @@ import { FotoFalla } from "@/components/FotoFalla";
 import { CountdownBadge } from "@/components/CountdownBadge";
 import { WhatsAppNotifyButton } from "@/components/WhatsAppNotifyButton";
 import { BotonIniciarReparacion } from "@/components/BotonIniciarReparacion";
+import { BotonFinalizarPendiente } from "@/components/BotonFinalizarPendiente";
 import {
   puedeIniciarReparacion,
   puedeReinspeccionar,
@@ -79,6 +80,11 @@ export default async function TicketDetallePage({
     ...revs.map((r) => r.firma_fiscalizador_url),
   ]);
 
+  // §2.8: inspección que quedó a medio finalizar (el checklist y las firmas ya
+  // están guardados, pero "Finalizar revisión" no llegó a cerrarla).
+  const esDueño = esSupervisor && ticket.supervisor_id === perfil.id;
+  const finalizacionPendiente = esDueño && ticket.estado === "en_revision";
+
   const fallasAbiertas: FallaResumen[] = resp
     .filter(
       (r) =>
@@ -121,6 +127,26 @@ export default async function TicketDetallePage({
           />
         </div>
       </div>
+
+      {finalizacionPendiente && (
+        <Card className="border-warning-200 bg-warning-50">
+          <CardHeader>
+            <CardTitle className="text-warning-700">
+              Inspección sin finalizar
+            </CardTitle>
+            <CardDescription>
+              El checklist y las firmas de esta revisión ya están guardados, pero
+              el cierre no se completó. Se puede finalizar ahora sin rehacer nada.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <BotonFinalizarPendiente
+              ticketId={id}
+              revisionNumero={numeroRevisionActual}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex flex-wrap gap-2">
         <Link

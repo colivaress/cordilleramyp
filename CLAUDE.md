@@ -207,7 +207,7 @@ alter table ticket_checklist_respuestas
 
 Si `ticket_checklist_respuestas` no tenía la columna `fecha_vencimiento_item` (por ejemplo, en una instalación nueva que ya parte del esquema de §7), el `drop column if exists` no hace nada — es seguro correrlo igual.
 
-### 2.8 Persistencia inmediata de firmas y fotos (no deben perderse al navegar entre pasos)
+### 2.8 Persistencia inmediata de firmas, fotos y respuestas del checklist (no deben perderse al navegar entre pasos ni si falla "Finalizar revisión")
 
 **Esto es un bug a corregir, no una mejora opcional — sigue sin corregirse, verifícalo de verdad esta vez, no solo leas el código y asumas que ya está bien:** hoy, si el supervisor firma o sube la foto de un ítem `no_conforme` durante el checklist, y luego usa el botón para volver a la sección de cabecera ("Datos de Inspección"), al presionar de nuevo "Realizar revisión" para volver al checklist/firmas, esas firmas (y esas fotos) **desaparecieron** — se pierde el trabajo ya hecho y el supervisor tiene que firmar de nuevo. Corrige así:
 
@@ -215,6 +215,7 @@ Si `ticket_checklist_respuestas` no tenía la columna `fecha_vencimiento_item` (
 - **Fotos (§2.4):** mismo criterio — la foto de un ítem `no_conforme` se sube al bucket `fallas` **apenas se selecciona o se toma**, no al guardar el checklist completo ni al finalizar la revisión. La `foto_url` de ese ítem se guarda de inmediato y debe sobrevivir a la navegación entre pasos, igual que las firmas.
 - **Causa raíz probable, revísala:** el wizard "Datos de Inspección → Elementos a Fiscalizar → Firmas" parece resetear o desmontar el estado de los pasos ya completados al navegar hacia atrás, en vez de mantener un único estado de formulario compartido entre los tres pasos durante toda la sesión de creación/edición del ticket. Subir cada firma/foto a Storage apenas se captura (como se pide arriba) es la corrección robusta, porque deja de depender de que el estado sobreviva en memoria — pero además revisa que el wizard no esté desmontando por completo los componentes de los pasos ya visitados.
 - **Reproducción exacta reportada (síguela paso a paso para confirmar que quedó resuelto):** 1) crear una inspección nueva, completar "Datos de Inspección" y avanzar; 2) en el checklist/firmas, firmar (conductor y/o fiscalizador); 3) presionar el botón para volver a "Datos de Inspección"; 4) presionar de nuevo "Realizar revisión" para volver al checklist. **Criterio de aceptación:** las firmas ingresadas en el paso 2 deben seguir presentes y visibles al llegar al paso 4 — si el pad de firma aparece vacío, el bug sigue presente y no está resuelto.
+- **Bug relacionado, encontrado en pruebas — las respuestas del checklist también se pierden si falla "Finalizar revisión":** se reprodujo así: se completó el checklist entero (18 ítems) y ambas firmas, pero al presionar "Finalizar revisión" el navegador tenía una página desactualizada (error transitorio de Next.js, "Server Action ... was not found on the server" — típico de un reinicio del servidor de desarrollo mientras la página estaba abierta) y el envío nunca llegó al servidor. Resultado: el ticket quedó creado (con sus datos de cabecera, eso sí se había guardado antes, §2.6) pero **atascado en `EN_REVISION`, sin ninguna respuesta del checklist guardada** — todo el trabajo de marcar los 18 ítems se perdió, aunque las firmas en teoría ya deberían haberse subido de inmediato por el punto anterior. Corrige esto con el mismo criterio que firmas y fotos: **cada respuesta de un ítem del checklist (`estado`, y `observacion`/`foto_url` cuando aplique) se guarda en `ticket_checklist_respuestas` apenas el supervisor la marca**, no todas juntas recién al presionar "Finalizar revisión". Así, "Finalizar revisión" pasa a ser solo el paso que **cierra** la revisión (calcula el estado resultante según §2.3 y actualiza `tickets.estado`) sobre datos que ya están guardados — no el único momento en que se guarda todo, para que una falla ahí (de red, de sesión, o como este error de Next.js) no borre el trabajo completo de una inspección.
 
 **Selección de fotos: solo formatos de imagen fotográfica, con opción de cámara y de rehacer:**
 
@@ -232,6 +233,28 @@ Si `ticket_checklist_respuestas` no tenía la columna `fecha_vencimiento_item` (
 3. **Manejo de errores visible:** si el guardado falla por cualquier motivo (RLS, validación, red), el formulario debe mostrarle un error claro al supervisor — nunca comportarse como si se hubiera guardado con éxito cuando no fue así.
 4. **Orden de escritura del guardado completo:** confirma el orden real: se crea primero la fila en `tickets`, luego la primera fila en `ticket_revisiones` (revisión #1, con las firmas y `fecha_vencimiento` de §2.7-2.8 ya subidas), y luego las filas de `ticket_checklist_respuestas`. Si algún paso falla a mitad de camino, no debe quedar un ticket "fantasma" a medio guardar sin que el supervisor se entere.
 5. **Verificación manual:** crea una inspección de prueba como supervisor, confirma directamente en la tabla `tickets` de Supabase que la fila existe con el `supervisor_id` correcto, y confirma que aparece de inmediato en "Mis inspecciones" sin necesidad de recargar la página.
+
+### 2.10 Panel de administración de usuarios ("Usuarios")
+
+**Nueva funcionalidad, exclusiva del rol Administrador:** agrega un link "Usuarios" al nav, visible solo para `administrador` (mismo patrón de control de acceso real de §2.6 — ruta y RLS, no solo ocultar el link), con una pantalla para ver y agregar supervisores y administradores.
+
+- **Corrección de seguridad relacionada, hay que resolverla junto con esto:** hoy el registro público (correo/contraseña) deja **elegir el rol libremente** en un selector — eso significa que cualquier persona que llegue a la pantalla de registro podría crearse una cuenta como "administrador" sin que nadie se lo autorice. **Elimina ese selector de rol del registro público.** De ahora en adelante, la única forma de obtener una cuenta nueva en el sistema es que un administrador la cree desde este panel — nadie se auto-asigna un rol.
+- **Tabla "Usuarios":** lista todo `personal` — Nombre, Correo, Rol (badge Supervisor/Administrador), Teléfono, Estado (Activo / Inactivo / "Invitación pendiente" si aún no ha iniciado sesión nunca), y Acciones (editar rol o teléfono, activar/desactivar, reenviar invitación si sigue pendiente).
+- **Botón "Agregar usuario"** abre un formulario: Nombre, Correo, Rol (Supervisor / Administrador), Teléfono (opcional). Al guardar:
+  1. Crea la fila en `personal` con esos datos, `activo = true` y **`user_id` en `null`** (queda "pendiente" hasta que esa persona inicie sesión por primera vez).
+  2. Desde una Server Action (nunca desde el cliente), usando el cliente de Supabase con `SUPABASE_SERVICE_ROLE_KEY` (server-only, mismo tratamiento de secreto que el resto — §9), llama a `supabaseAdmin.auth.admin.inviteUserByEmail(correo, { data: { nombre, rol } })`. Supabase le manda un correo de invitación a esa persona; al hacer clic define su propia contraseña y ya puede entrar. Como alternativa, esa misma persona también puede entrar directo con "Iniciar sesión con Google" usando ese mismo correo, sin depender del correo de invitación — cualquiera de las dos vías debe funcionar.
+- **Ajusta el trigger `handle_new_user`** (ya existente, ver §8) para que, en vez de crear siempre una fila nueva en `personal` con un rol elegido por quien se registra: busque primero una fila en `personal` con ese mismo correo y `user_id` nulo (una invitación pendiente creada desde este panel) — si la encuentra, vincula ahí el `user_id` recién creado (adopta el rol y nombre que el administrador ya definió, no crea una fila duplicada). **Si no encuentra ninguna fila pendiente con ese correo, rechaza el acceso** — no crees una fila nueva con un rol por defecto; muestra un mensaje claro como "Tu cuenta no está autorizada. Contacta a un administrador de Cordillera M&P." Esto aplica tanto al flujo de invitación por correo como al de "Iniciar sesión con Google".
+- **Desactivar un usuario** (botón en la tabla, pone `personal.activo = false`) debe bloquear su acceso real a la app, no solo dejar de mostrarlo en listados — agrega la verificación de `activo = true` en las políticas RLS relevantes (o en el middleware de sesión) para que una cuenta desactivada no pueda seguir usando el sistema aunque su sesión de Supabase Auth siga técnicamente vigente.
+- **Nota sobre el correo de invitación:** el correo de invitación de Supabase Auth es un sistema aparte del envío de informes por Gmail (§4.1) — Supabase lo manda con su propio servicio de correo, que en el plan gratuito tiene un límite bajo de envíos por hora. Si al agregar varios usuarios seguidos las invitaciones no llegan, configura un SMTP propio para Supabase Auth en el panel de Supabase (Authentication → Settings → SMTP Settings) — puedes reutilizar la misma casilla y contraseña de aplicación de Gmail que ya configuramos en §4.1 para esto.
+
+```sql
+-- Si `personal.user_id` no existe aún en este entorno (ya debería existir, lo usan
+-- las políticas RLS de §2.6 vía "user_id = auth.uid()"; agrégalo solo si falta):
+alter table personal
+  add column if not exists user_id uuid unique references auth.users(id);
+```
+
+(Súmalo también al DDL base de `personal` en §7 si no está — misma nota de reconciliación de §7.)
 
 ---
 
@@ -493,6 +516,7 @@ create type notificacion_tipo as enum ('whatsapp', 'email');
 -- CATÁLOGO DE PERSONAL (supervisores / conductores / administradores)
 create table personal (
   id uuid primary key default gen_random_uuid(),
+  user_id uuid unique references auth.users(id), -- nulo mientras la invitación está pendiente, ver §2.10
   nombre text not null,
   rol rol_usuario not null,
   telefono text,
@@ -617,7 +641,7 @@ Buckets de Storage a crear: `firmas` (privado, firmas digitales) y `fallas` (pri
 
 - ~~Proveedor de envío de correo~~ — **resuelto: Gmail / Google Workspace vía SMTP**, con la casilla de correo de la empresa. Ver el detalle de implementación en §4.1.
 - Si el envío de WhatsApp queda solo como enlace `wa.me` (manual, como pide el prompt original) o si en el futuro se integra WhatsApp Business API.
-- ~~Autenticación de usuarios~~ — **resuelto:** ya se implementó Supabase Auth (correo + contraseña) con selector de rol y trigger `handle_new_user` que crea la fila en `personal` al registrarse. Ver el siguiente punto para el paso pendiente sobre esto.
+- ~~Autenticación de usuarios~~ — **resuelto, con una corrección de seguridad importante en §2.10:** ya se implementó Supabase Auth (correo + contraseña). La versión original dejaba elegir el rol libremente en un selector al registrarse — eso ya no debe existir, ver §2.10 para el reemplazo (alta de cuentas solo desde el panel "Usuarios" del administrador).
 - **Login con Google (siguiente iteración, no bloquea lo ya construido):** agregar un botón "Iniciar sesión con Google" además del login por correo/contraseña que ya existe, usando Supabase Auth con el proveedor `google` (OAuth). Pasos:
   1. En Google Cloud Console → [Clients](https://console.cloud.google.com/auth/clients), crear un OAuth Client ID de tipo "Web application".
   2. En "Authorized JavaScript origins" agregar la URL de producción y `http://localhost:3000` para desarrollo local.
@@ -625,7 +649,7 @@ Buckets de Storage a crear: `firmas` (privado, firmas digitales) y `fallas` (pri
   4. Copiar el Client ID y Client Secret generados por Google y pegarlos en Supabase → Authentication → Providers → Google (habilitar el proveedor ahí). **Estas credenciales de Google también son secretos** — nunca las pegues en código ni en archivos versionados; solo van en el panel de Supabase (Supabase las guarda de su lado, la app no necesita tenerlas en `.env`).
   5. En el frontend, agregar el botón que dispara `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: '<url>/auth/callback' } })`, junto al formulario de login por correo existente (no reemplazarlo, ambos métodos conviven).
   6. Manejar la ruta `/auth/callback` (Route Handler) que intercambia el código de autorización por la sesión (`exchangeCodeForSession`), si no existe ya como parte del flujo de Supabase Auth SSR ya implementado.
-  7. El trigger `handle_new_user` (ya existente) debe funcionar igual para usuarios que entran por Google — verifica que cree la fila en `personal` también en ese flujo, no solo en el registro por correo.
+  7. El trigger `handle_new_user` debe comportarse igual que para el flujo de invitación por correo (§2.10): busca una fila en `personal` con ese correo y `user_id` nulo y la vincula; si no existe ninguna invitación pendiente con ese correo, rechaza el acceso — un inicio de sesión con Google **no** debe crear una fila nueva en `personal` con un rol por defecto.
 - **Logo de Cordillera M&P:** se generará más adelante con el MCP de Replicate (ya conectado en este entorno) y se integrará en el header de la app y en el informe (§4). No es parte de esta primera construcción — no bloquear el desarrollo por esto ni generar un logo placeholder improvisado; usa por ahora solo el nombre de la empresa en texto donde corresponda un logo.
 
 ## 9. Seguridad y manejo de credenciales
