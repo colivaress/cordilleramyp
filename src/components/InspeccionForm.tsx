@@ -1,18 +1,19 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import {
   ChecklistItemRow,
   respuestaVacia,
   type RespuestaEditable,
 } from "@/components/ChecklistItemRow";
-import { SignaturePad, type SignaturePadHandle } from "@/components/SignaturePad";
+import { SignaturePad } from "@/components/SignaturePad";
 import { createClient } from "@/lib/supabase/client";
 import {
   crearInspeccion,
@@ -111,7 +112,21 @@ export function InspeccionForm({
   fechaVencimientoInicial?: string | null;
 }) {
   const router = useRouter();
+
+  // §2.8: el id del ticket y el nro de revisión se fijan al montar, así la firma
+  // se puede subir a Storage con una ruta estable ANTES de "Finalizar revisión".
+  const [ticketId] = useState(
+    () => ticketIdProp ?? crypto.randomUUID(),
+  );
+  const rev = modo === "nueva" ? 1 : numeroRevision;
+
   const [paso, setPaso] = useState<1 | 2>(modo === "nueva" ? 1 : 2);
+  // El paso 2 se monta una sola vez y NO se desmonta al volver atrás (§2.8) — se
+  // oculta con CSS para que el <canvas> de las firmas conserve su contenido.
+  const [pasoMaxVisto, setPasoMaxVisto] = useState<1 | 2>(
+    modo === "nueva" ? 1 : 2,
+  );
+
   const [cabecera, setCabecera] = useState<Cabecera>(cabeceraVacia);
   // ¿el supervisor editó la fecha de vencimiento a mano? Si sí, no la pisamos al
   // cambiar la fecha de inspección (§2.7).
@@ -129,8 +144,42 @@ export function InspeccionForm({
   );
   const [enviando, setEnviando] = useState(false);
 
-  const firmaConductor = useRef<SignaturePadHandle>(null);
-  const firmaFiscalizador = useRef<SignaturePadHandle>(null);
+  // §2.8: firmas persistidas en el estado del formulario (sobreviven a navegar
+  // entre pasos) + subidas a Storage apenas se capturan.
+  const [firmaConductorUrl, setFirmaConductorUrl] = useState<string | null>(null);
+  const [firmaFiscalizadorUrl, setFirmaFiscalizadorUrl] = useState<string | null>(
+    null,
+  );
+
+  const rutaFirma = (quien: "conductor" | "fiscalizador") =>
+    `${ticketId}/${rev}/${quien}.png`;
+
+  async function persistirFirma(
+    quien: "conductor" | "fiscalizador",
+    dataUrl: string | null,
+  ) {
+    if (quien === "conductor") setFirmaConductorUrl(dataUrl);
+    else setFirmaFiscalizadorUrl(dataUrl);
+
+    const supabase = createClient();
+    try {
+      if (dataUrl) {
+        await subirArchivo(
+          "firmas",
+          rutaFirma(quien),
+          await dataUrlABlob(dataUrl),
+          "image/png",
+        );
+      } else {
+        await supabase.storage.from("firmas").remove([rutaFirma(quien)]);
+      }
+    } catch {
+      // Subida diferida: se reintenta sí o sí en onSubmit antes de guardar.
+      toast.warning(
+        "No se pudo guardar la firma todavía; se reintentará al finalizar.",
+      );
+    }
+  }
 
   // §2.7: validación de cliente real — todos los campos deben estar completos.
   const cabeceraCompleta = useMemo(
@@ -160,6 +209,11 @@ export function InspeccionForm({
     setRespuestas((prev) => ({ ...prev, [key]: v }));
   }
 
+  function irAlChecklist() {
+    setPaso(2);
+    setPasoMaxVisto(2);
+  }
+
   function validarChecklist(): string | null {
     if (modo === "reinspeccion") {
       if (!conductorRevision.trim())
@@ -175,9 +229,8 @@ export function InspeccionForm({
         if (!r.fotoFile) return `Falta la foto de la falla en "${item.nombre}".`;
       }
     }
-    if (firmaConductor.current?.isEmpty() ?? true)
-      return "Falta la firma del conductor.";
-    if (firmaFiscalizador.current?.isEmpty() ?? true)
+    if (!firmaConductorUrl) return "Falta la firma del conductor.";
+    if (!firmaFiscalizadorUrl)
       return "Falta la firma del fiscalizador/supervisor.";
     return null;
   }
@@ -191,10 +244,6 @@ export function InspeccionForm({
     }
     setEnviando(true);
     try {
-      const ticketId =
-        modo === "nueva" ? crypto.randomUUID() : (ticketIdProp as string);
-      const rev = modo === "nueva" ? 1 : numeroRevision;
-
       const fechaVencimientoISO = new Date(
         modo === "nueva" ? cabecera.fechaVencimiento : vencRevision,
       ).toISOString();
@@ -222,17 +271,18 @@ export function InspeccionForm({
         });
       }
 
-      // Subir firmas
+      // §2.8: las firmas ya se fueron subiendo al capturarse; acá se re-suben con
+      // el trazo actual para dejar el estado final consistente sí o sí.
       const firmaConductorPath = await subirArchivo(
         "firmas",
-        `${ticketId}/${rev}/conductor.png`,
-        await dataUrlABlob(firmaConductor.current!.toDataURL()),
+        rutaFirma("conductor"),
+        await dataUrlABlob(firmaConductorUrl as string),
         "image/png",
       );
       const firmaFiscalizadorPath = await subirArchivo(
         "firmas",
-        `${ticketId}/${rev}/fiscalizador.png`,
-        await dataUrlABlob(firmaFiscalizador.current!.toDataURL()),
+        rutaFirma("fiscalizador"),
+        await dataUrlABlob(firmaFiscalizadorUrl as string),
         "image/png",
       );
 
@@ -287,7 +337,7 @@ export function InspeccionForm({
   return (
     <form onSubmit={onSubmit} className="grid gap-6">
       {modo === "nueva" && (
-        <Card>
+        <Card className={cn(paso === 2 && "hidden")}>
           <CardHeader>
             <CardTitle>1. Datos de Inspección</CardTitle>
           </CardHeader>
@@ -321,28 +371,26 @@ export function InspeccionForm({
                 )}
               </div>
             ))}
-            {paso === 1 && (
-              <div className="sm:col-span-2">
-                <Button
-                  type="button"
-                  disabled={!cabeceraCompleta}
-                  onClick={() => setPaso(2)}
-                >
-                  Realizar revisión
-                </Button>
-                {!cabeceraCompleta && (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    Completar todos los campos para avanzar.
-                  </p>
-                )}
-              </div>
-            )}
+            <div className="sm:col-span-2">
+              <Button
+                type="button"
+                disabled={!cabeceraCompleta}
+                onClick={irAlChecklist}
+              >
+                Realizar revisión
+              </Button>
+              {!cabeceraCompleta && (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  Completar todos los campos para avanzar.
+                </p>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
 
-      {paso === 2 && (
-        <>
+      {pasoMaxVisto === 2 && (
+        <div className={cn("grid gap-6", paso === 1 && "hidden")}>
           {modo === "reinspeccion" && (
             <Card>
               <CardHeader>
@@ -424,10 +472,17 @@ export function InspeccionForm({
               <CardTitle>Firmas digitales</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-6 sm:grid-cols-2">
-              <SignaturePad ref={firmaConductor} label="Firma Conductor" />
               <SignaturePad
-                ref={firmaFiscalizador}
+                label="Firma Conductor"
+                visible={paso === 2}
+                initialDataUrl={firmaConductorUrl}
+                onChange={(d) => persistirFirma("conductor", d)}
+              />
+              <SignaturePad
                 label="Firma Fiscalizador/Supervisor"
+                visible={paso === 2}
+                initialDataUrl={firmaFiscalizadorUrl}
+                onChange={(d) => persistirFirma("fiscalizador", d)}
               />
             </CardContent>
           </Card>
@@ -447,7 +502,7 @@ export function InspeccionForm({
               </Button>
             )}
           </div>
-        </>
+        </div>
       )}
     </form>
   );
