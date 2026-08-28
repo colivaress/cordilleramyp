@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSesion } from "@/lib/auth";
 import {
@@ -50,7 +49,14 @@ function validarRespuestas(respuestas: RespuestaInput[]) {
   }
 }
 
-export async function crearInspeccion(input: CrearInspeccionInput) {
+export type CrearInspeccionResultado = {
+  ticketId: string;
+  numeroInspeccion: number;
+};
+
+export async function crearInspeccion(
+  input: CrearInspeccionInput,
+): Promise<CrearInspeccionResultado> {
   const { perfil } = await getSesion();
   const supabase = await createClient();
 
@@ -65,45 +71,68 @@ export async function crearInspeccion(input: CrearInspeccionInput) {
   );
   const estado = estadoTrasChecklist(hayNoConformes);
 
-  const { error: eTicket } = await supabase.from("tickets").insert({
-    id: input.ticketId,
-    ...input.cabecera,
-    estado,
-    revision_actual: 1,
-    supervisor_id: perfil.id,
-    // §2.7: el vencimiento efectivo del ticket es el de su revisión más reciente.
-    fecha_vencimiento: input.fechaVencimientoISO,
-  });
-  if (eTicket) throw new Error(`No se pudo crear el ticket: ${eTicket.message}`);
+  // 1) tickets — se devuelve el numero_inspeccion asignado (identity).
+  const { data: ticketCreado, error: eTicket } = await supabase
+    .from("tickets")
+    .insert({
+      id: input.ticketId,
+      ...input.cabecera,
+      estado,
+      revision_actual: 1,
+      supervisor_id: perfil.id,
+      // §2.7: el vencimiento efectivo del ticket es el de su revisión más reciente.
+      fecha_vencimiento: input.fechaVencimientoISO,
+    })
+    .select("numero_inspeccion")
+    .single();
+  if (eTicket || !ticketCreado)
+    throw new Error(
+      `No se pudo crear el ticket: ${eTicket?.message ?? "sin datos"}`,
+    );
 
-  const { error: eRev } = await supabase.from("ticket_revisiones").insert({
-    ticket_id: input.ticketId,
-    numero_revision: 1,
-    estado_resultante: estado,
-    supervisor_id: perfil.id,
-    // §2.6: la revisión #1 guarda el conductor de la cabecera del ticket.
-    conductor: input.cabecera.conductor,
-    // §2.7: un solo vencimiento por revisión.
-    fecha_vencimiento: input.fechaVencimientoISO,
-    firma_conductor_url: input.firmaConductorPath,
-    firma_fiscalizador_url: input.firmaFiscalizadorPath,
-  });
-  if (eRev) throw new Error(`No se pudo crear la revisión: ${eRev.message}`);
-
-  const { error: eResp } = await supabase.from("ticket_checklist_respuestas").insert(
-    input.respuestas.map((r) => ({
+  // 2) revisión #1 + 3) respuestas del checklist. Si algo falla, se borra el
+  //    ticket recién creado para no dejar un "ticket fantasma" (§2.9).
+  try {
+    const { error: eRev } = await supabase.from("ticket_revisiones").insert({
       ticket_id: input.ticketId,
-      revision_numero: 1,
-      item_key: r.itemKey,
-      estado: r.estado,
-      observacion: r.estado === "no_conforme" ? r.observacion : null,
-      foto_url: r.fotoPath,
-    })),
-  );
-  if (eResp) throw new Error(`No se pudieron guardar las respuestas: ${eResp.message}`);
+      numero_revision: 1,
+      estado_resultante: estado,
+      supervisor_id: perfil.id,
+      // §2.6: la revisión #1 guarda el conductor de la cabecera del ticket.
+      conductor: input.cabecera.conductor,
+      // §2.7: un solo vencimiento por revisión.
+      fecha_vencimiento: input.fechaVencimientoISO,
+      firma_conductor_url: input.firmaConductorPath,
+      firma_fiscalizador_url: input.firmaFiscalizadorPath,
+    });
+    if (eRev) throw new Error(`No se pudo crear la revisión: ${eRev.message}`);
+
+    const { error: eResp } = await supabase
+      .from("ticket_checklist_respuestas")
+      .insert(
+        input.respuestas.map((r) => ({
+          ticket_id: input.ticketId,
+          revision_numero: 1,
+          item_key: r.itemKey,
+          estado: r.estado,
+          observacion: r.estado === "no_conforme" ? r.observacion : null,
+          foto_url: r.fotoPath,
+        })),
+      );
+    if (eResp)
+      throw new Error(`No se pudieron guardar las respuestas: ${eResp.message}`);
+  } catch (err) {
+    await supabase.from("tickets").delete().eq("id", input.ticketId);
+    throw err instanceof Error
+      ? err
+      : new Error("No se pudo guardar la inspección.");
+  }
 
   revalidatePath("/dashboard");
-  redirect(`/tickets/${input.ticketId}`);
+  return {
+    ticketId: input.ticketId,
+    numeroInspeccion: ticketCreado.numero_inspeccion,
+  };
 }
 
 export async function iniciarReparacion(ticketId: string) {
@@ -214,5 +243,5 @@ export async function registrarReinspeccion(input: {
 
   revalidatePath(`/tickets/${input.ticketId}`);
   revalidatePath("/dashboard");
-  redirect(`/tickets/${input.ticketId}`);
+  return { ticketId: input.ticketId };
 }

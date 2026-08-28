@@ -144,6 +144,18 @@ Usar `generated always as identity` (no calcular el siguiente número a mano en 
 
 Muestra este campo en la tabla de tickets (tanto en la vista de administrador como en la de supervisor) bajo la etiqueta **"Nro de Revisión"**. No lo confundas con `numero_revision` (el "Revisión #N" que ya se muestra en el badge de estado) — son dos campos distintos con propósitos distintos, ambos coexisten.
 
+**Número de inspección correlativo del ticket (`numero_inspeccion`):** además de `nro_revision_global` (que es por revisión, arriba) y `numero_revision` (que reinicia por ticket, §2.3), agrega un **tercer correlativo, este a nivel de `tickets`**, que identifica al ticket mismo de forma legible para una persona — no uses el `id` UUID interno para esto, tal como ya se evita en el informe y el correo (§4). Se asigna **una sola vez**, al crear el ticket (su primera inspección), y no vuelve a cambiar aunque el ticket pase por varias revisiones.
+
+```sql
+alter table tickets
+  add column if not exists numero_inspeccion bigint generated always as identity unique not null;
+```
+
+(Súmalo también al DDL base de `tickets` en §7, con el mismo patrón de `nro_revision_global` en `ticket_revisiones` — misma nota de reconciliación de §7: en una base ya desplegada usa el `alter table` de arriba, no recrees la tabla.)
+
+- **En el formulario de "Datos de Inspección":** muestra este campo bajo la etiqueta **"Nro de Inspección"**, como campo de **solo lectura** (no editable por el supervisor — se asigna automáticamente al guardar el ticket, nunca se ingresa a mano). En una inspección nueva que aún no se ha guardado no hay valor que mostrar todavía; muéstralo apenas el ticket queda creado (por ejemplo, al pasar de cabecera al checklist, si el ticket ya se crea en ese punto — ver también el bug de guardado descrito más abajo).
+- **En el listado de tickets:** agrega la columna "Nro de Inspección" (tanto en el dashboard de administrador como en "Mis inspecciones" del supervisor), junto a la columna "Nro de Revisión" que ya existe — son dos columnas distintas y ambas deben verse: una identifica al ticket, la otra a su revisión más reciente.
+
 **Envío del informe por correo:** el botón "Enviar por correo" del informe (§4) lo acciona el **supervisor**, no el administrador — corrige esto si hoy está implementado como una acción exclusiva de administrador. Un supervisor solo puede enviar el informe de los tickets donde él es el `supervisor_id` (misma restricción de acceso que el punto anterior).
 
 ### 2.7 Formulario "Nueva inspección": obligatoriedad, ubicación del vencimiento y textos
@@ -199,6 +211,16 @@ Si `ticket_checklist_respuestas` no tenía la columna `fecha_vencimiento_item` (
 - Debe permitir **dos orígenes**: elegir un archivo existente de la galería/disco, o **tomar la foto directamente con la cámara del dispositivo** en el momento — por ejemplo con `<input type="file" accept="image/*" capture="environment">` (abre la cámara trasera en móviles) o un componente de captura propio vía `getUserMedia` si se necesita más control sobre el flujo; cualquiera de los dos cumple el requisito.
 - Al tomar o seleccionar la foto, se **guarda al instante** (sube a Storage de inmediato, como arriba) y se muestra una vista previa en la fila del ítem.
 - Sobre esa vista previa, agrega la **opción de borrar la foto y volver a tomarla/seleccionarla** (ícono de papelera o botón "Eliminar" junto a la miniatura): al borrar, limpia también `foto_url` de ese ítem en el estado/BD y vuelve a habilitar el input/la cámara para capturar una nueva. Esto no reemplaza el lightbox de fotos ya guardadas en `/tickets/[id]` (§2.4) — es solo para el momento de captura, dentro del formulario de la revisión.
+
+### 2.9 Bug: la inspección no se guarda ni aparece en "Mis inspecciones"
+
+**Síntoma reportado:** al completar una nueva inspección (cabecera, checklist y firmas) y guardar, el ticket no queda guardado, o queda guardado pero no aparece en el listado "Mis inspecciones" del supervisor que la creó. Esto es un bug bloqueante — sin esto la app no cumple su función básica — investiga y corrige la causa real, no un síntoma parcial. Revisa en orden:
+
+1. **Políticas RLS de escritura:** §2.6 ajustó las políticas RLS de `select` para que el supervisor solo vea sus propios tickets, pero no toda política de lectura implica que exista una de **`insert`** equivalente para ese mismo rol. Confirma que `tickets`, `ticket_revisiones` y `ticket_checklist_respuestas` tengan una política `insert` que permita al rol supervisor crear filas (típicamente `with check (supervisor_id = (select id from personal where user_id = auth.uid()))` en `tickets`, y una condición análoga en las tablas hijas vía `ticket_id`). Si falta, el insert falla del lado de Supabase — Postgres/PostgREST devuelve un error, confirma que ese error se esté propagando hasta la UI y no quedando silenciado en un `catch` vacío.
+2. **`supervisor_id` al crear el ticket:** confirma que el insert de `tickets` esté guardando `supervisor_id = id de personal del usuario autenticado` (vía `auth.uid()` → `personal.user_id`), no `auth.uid()` directamente (son valores distintos: uno es el id de Supabase Auth, el otro el id de la fila en `personal`) ni un valor nulo. Si `supervisor_id` queda mal seteado o nulo, el ticket puede haberse guardado igual pero la consulta de "Mis inspecciones" (filtrada por `supervisor_id`, §2.6) nunca lo va a traer.
+3. **Manejo de errores visible:** si el guardado falla por cualquier motivo (RLS, validación, red), el formulario debe mostrarle un error claro al supervisor — nunca comportarse como si se hubiera guardado con éxito cuando no fue así.
+4. **Orden de escritura del guardado completo:** confirma el orden real: se crea primero la fila en `tickets`, luego la primera fila en `ticket_revisiones` (revisión #1, con las firmas y `fecha_vencimiento` de §2.7-2.8 ya subidas), y luego las filas de `ticket_checklist_respuestas`. Si algún paso falla a mitad de camino, no debe quedar un ticket "fantasma" a medio guardar sin que el supervisor se entere.
+5. **Verificación manual:** crea una inspección de prueba como supervisor, confirma directamente en la tabla `tickets` de Supabase que la fila existe con el `supervisor_id` correcto, y confirma que aparece de inmediato en "Mis inspecciones" sin necesidad de recargar la página.
 
 ---
 
@@ -463,6 +485,7 @@ create table checklist_items (
 -- TICKET (identidad única de la inspección)
 create table tickets (
   id uuid primary key default gen_random_uuid(),
+  numero_inspeccion bigint generated always as identity unique not null, -- "Nro de Inspección" legible, ver §2.6
   transporte text not null,
   conductor text not null,
   fecha timestamptz not null, -- fecha y hora de la inspección

@@ -97,6 +97,11 @@ export default async function TicketDetallePage({
             <span className="text-muted-foreground">/ {ticket.patente_rampla}</span>
           </h1>
           <p className="text-sm text-muted-foreground">
+            Nro de Inspección{" "}
+            <span className="font-mono font-medium text-foreground">
+              {ticket.numero_inspeccion}
+            </span>
+            {"  ·  "}
             N° de Revisión{" "}
             <span className="font-mono font-medium text-foreground">
               {nroRevisionGlobalActual ?? "s/n"}

@@ -159,6 +159,7 @@ export default async function DashboardPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Nro de Inspección</TableHead>
                   <TableHead>Nro de Revisión</TableHead>
                   <TableHead>Camión / Rampla</TableHead>
                   <TableHead>Transporte</TableHead>
@@ -171,7 +172,7 @@ export default async function DashboardPage() {
               <TableBody>
                 {lista.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-muted-foreground">
+                    <TableCell colSpan={8} className="text-muted-foreground">
                       No hay tickets todavía.
                     </TableCell>
                   </TableRow>
@@ -180,6 +181,9 @@ export default async function DashboardPage() {
                   const nivel = nivelAlerta(t.fecha_vencimiento, t.estado);
                   return (
                     <TableRow key={t.id} className={cn(clasesFilaAlerta(nivel))}>
+                      <TableCell className="font-mono tabular-nums">
+                        {t.numero_inspeccion}
+                      </TableCell>
                       <TableCell className="font-mono tabular-nums">
                         {nroRevisionGlobal(t.id) ?? "—"}
                       </TableCell>

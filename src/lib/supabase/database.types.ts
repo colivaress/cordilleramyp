@@ -247,6 +247,7 @@ export type Database = {
           fecha: string
           fecha_vencimiento: string | null
           id: string
+          numero_inspeccion: number
           patente_camion: string
           patente_rampla: string
           procedencia: string
@@ -263,6 +264,7 @@ export type Database = {
           fecha: string
           fecha_vencimiento?: string | null
           id?: string
+          numero_inspeccion?: never
           patente_camion: string
           patente_rampla: string
           procedencia: string
@@ -279,6 +281,7 @@ export type Database = {
           fecha?: string
           fecha_vencimiento?: string | null
           id?: string
+          numero_inspeccion?: never
           patente_camion?: string
           patente_rampla?: string
           procedencia?: string

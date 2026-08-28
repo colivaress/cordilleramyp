@@ -97,6 +97,7 @@ export function InspeccionForm({
   items,
   ticketId: ticketIdProp,
   numeroRevision = 1,
+  numeroInspeccion = null,
   conductorInicial = "",
   fechaVencimientoInicial = null,
 }: {
@@ -104,6 +105,8 @@ export function InspeccionForm({
   items: ChecklistItem[];
   ticketId?: string;
   numeroRevision?: number;
+  /** §2.6: correlativo legible del ticket (solo lectura). Null en inspección nueva sin guardar. */
+  numeroInspeccion?: number | null;
   conductorInicial?: string;
   fechaVencimientoInicial?: string | null;
 }) {
@@ -233,8 +236,11 @@ export function InspeccionForm({
         "image/png",
       );
 
+      // §2.9: las server actions DEVUELVEN el resultado (ya no hacen redirect
+      // adentro — el redirect quedaba atrapado en este try/catch y el usuario
+      // veía un falso error). La navegación se hace acá.
       if (modo === "nueva") {
-        await crearInspeccion({
+        const res = await crearInspeccion({
           ticketId,
           cabecera: {
             transporte: cabecera.transporte,
@@ -250,8 +256,10 @@ export function InspeccionForm({
           firmaConductorPath,
           firmaFiscalizadorPath,
         });
+        toast.success(`Inspección guardada (Nro ${res.numeroInspeccion}).`);
+        router.push(`/tickets/${res.ticketId}`);
       } else {
-        await registrarReinspeccion({
+        const res = await registrarReinspeccion({
           ticketId,
           conductor: conductorRevision.trim(),
           fechaVencimientoISO,
@@ -259,8 +267,9 @@ export function InspeccionForm({
           firmaConductorPath,
           firmaFiscalizadorPath,
         });
+        toast.success("Revisión guardada.");
+        router.push(`/tickets/${res.ticketId}`);
       }
-      // Las server actions redirigen; este refresh es por si acaso.
       router.refresh();
     } catch (error) {
       setEnviando(false);
@@ -280,6 +289,17 @@ export function InspeccionForm({
             <CardTitle>1. Datos de Inspección</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
+            {/* §2.6: correlativo del ticket, solo lectura. Se asigna al guardar. */}
+            <div className="grid gap-1.5">
+              <Label htmlFor="numero-inspeccion">Nro de Inspección</Label>
+              <Input
+                id="numero-inspeccion"
+                readOnly
+                disabled
+                value={numeroInspeccion != null ? String(numeroInspeccion) : ""}
+                placeholder="Se asigna automáticamente al guardar"
+              />
+            </div>
             {CAMPOS_CABECERA.map((c) => (
               <div key={c.key} className="grid gap-1.5">
                 <Label htmlFor={c.key}>{c.label}</Label>
@@ -326,6 +346,17 @@ export function InspeccionForm({
                 <CardTitle>Datos de esta revisión</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-4 sm:grid-cols-2">
+                {numeroInspeccion != null && (
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="numero-inspeccion-re">Nro de Inspección</Label>
+                    <Input
+                      id="numero-inspeccion-re"
+                      readOnly
+                      disabled
+                      value={String(numeroInspeccion)}
+                    />
+                  </div>
+                )}
                 <div className="grid gap-1.5">
                   <Label htmlFor="conductor-revision">Conductor</Label>
                   <Input
