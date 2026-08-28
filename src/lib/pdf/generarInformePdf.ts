@@ -34,9 +34,8 @@ export type InformeGenerado = {
   meta: {
     ticketId: string;
     supervisorId: string | null;
+    supervisorNombre: string;
     nroRevisionGlobal: number | null;
-    revision: number;
-    estado: string;
     patenteCamion: string;
     patenteRampla: string;
     transporte: string;
@@ -163,9 +162,8 @@ export async function generarInformePdf(
     meta: {
       ticketId: ticket.id,
       supervisorId: ticket.supervisor_id,
+      supervisorNombre: ticket.supervisor?.nombre ?? "—",
       nroRevisionGlobal: revision?.nro_revision_global ?? null,
-      revision: ticket.revision_actual,
-      estado: ETIQUETA_ESTADO[ticket.estado],
       patenteCamion: ticket.patente_camion,
       patenteRampla: ticket.patente_rampla,
       transporte: ticket.transporte,

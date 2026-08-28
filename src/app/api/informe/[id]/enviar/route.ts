@@ -115,12 +115,11 @@ export async function POST(
 
   const datosCorreo = {
     nroRevisionGlobal: informe.meta.nroRevisionGlobal,
-    revision: informe.meta.revision,
+    transporte: informe.meta.transporte,
     patenteCamion: informe.meta.patenteCamion,
     patenteRampla: informe.meta.patenteRampla,
-    transporte: informe.meta.transporte,
     conductor: informe.meta.conductor,
-    estado: informe.meta.estado,
+    supervisorNombre: informe.meta.supervisorNombre,
     observaciones: informe.meta.observaciones,
   };
 

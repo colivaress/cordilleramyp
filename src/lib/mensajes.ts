@@ -76,17 +76,21 @@ export function enlaceWhatsApp(telefono: string, mensaje: string): string {
 }
 
 export type DatosInforme = {
+  /** Solo para el asunto del correo; no se repite en el cuerpo (va en el PDF). */
   nroRevisionGlobal: number | null;
-  revision: number;
+  transporte: string;
   patenteCamion: string;
   patenteRampla: string;
-  transporte: string;
+  /** Conductor de la revisión informada (§2.6). */
   conductor: string;
-  estado: string;
-  observaciones: { nombre: string; observacion: string | null }[];
-  /** Link real al informe online; se omite del cuerpo si no se pasa. */
-  urlInforme?: string | null;
+  /** Nombre del supervisor que envía (personal.nombre). */
+  supervisorNombre: string;
+  /** Ítems no_conforme de la revisión, en orden de checklist. */
+  observaciones: { observacion: string | null }[];
 };
+
+/** Cargo fijo para todos los supervisores (§4.1), no se guarda en BD. */
+const CARGO_SUPERVISOR = "Supervisor de Encarpe";
 
 export function construirAsuntoInforme(d: DatosInforme): string {
   return `Informe de Inspección de Flota — ${d.patenteCamion} / ${d.patenteRampla} (N° Revisión ${
@@ -95,37 +99,37 @@ export function construirAsuntoInforme(d: DatosInforme): string {
 }
 
 /**
- * Cuerpo del correo (§4.1): datos de cabecera + resumen de observaciones EN TEXTO.
- * Sin fotos (van solo en el PDF adjunto). Sin líneas de link vacías.
+ * Cuerpo del correo — plantilla exacta de §4.1. No repite datos que ya van en el
+ * PDF adjunto (N° de Revisión, estado, etc.). Sin fotos (van solo en el PDF).
  */
 export function construirCuerpoInforme(d: DatosInforme): string {
-  const resumenObs =
-    d.observaciones.length > 0
-      ? [
-          "",
-          "Observaciones:",
-          ...d.observaciones.map(
-            (o) =>
-              `  - ${o.nombre}${o.observacion ? `: ${o.observacion}` : ""}`,
-          ),
-        ]
-      : ["", "Sin observaciones: todos los elementos conformes."];
+  const obs = d.observaciones
+    .map((o) => (o.observacion ?? "").trim())
+    .filter(Boolean);
 
-  const linkLinea =
-    d.urlInforme && /^https?:\/\//.test(d.urlInforme)
-      ? ["", `Informe online: ${d.urlInforme}`]
-      : [];
+  const seccionObservaciones =
+    obs.length > 0
+      ? [
+          "Dentro de las observaciones se detecta lo siguiente",
+          "",
+          ...obs.map((texto, i) => `${i + 1}. ${texto}`),
+        ]
+      : [
+          "No se detectan observaciones. El camión cumple con todas las exigencias del Check List.",
+        ];
 
   return [
-    "Adjunto (PDF) el Informe de Inspección de Flota de Cordillera M&P.",
+    "Estimados,",
     "",
-    `N° de Revisión: ${d.nroRevisionGlobal ?? "—"}`,
-    `Estado: ${d.estado}`,
-    `Transporte: ${d.transporte}`,
-    `Conductor: ${d.conductor}`,
-    `Patente camión: ${d.patenteCamion}`,
-    `Patente rampla: ${d.patenteRampla}`,
-    ...resumenObs,
-    ...linkLinea,
+    `Se realiza Check List a camión de transportes ${d.transporte}.`,
+    `Matrícula ${d.patenteCamion}`,
+    `Rampla ${d.patenteRampla}`,
+    `Conductor ${d.conductor}.`,
+    "",
+    ...seccionObservaciones,
+    "",
+    "Se adjunta Check List y fotografías para ilustrar la condición",
+    "",
+    `${d.supervisorNombre} ( ${CARGO_SUPERVISOR} )`,
   ].join("\n");
 }
