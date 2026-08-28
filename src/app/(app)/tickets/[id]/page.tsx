@@ -35,7 +35,8 @@ export default async function TicketDetallePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await getSesion();
+  const { perfil } = await getSesion();
+  const esSupervisor = perfil.rol === "supervisor";
   const supabase = await createClient();
 
   const { data: ticket } = await supabase
@@ -125,7 +126,7 @@ export default async function TicketDetallePage({
         {puedeIniciarReparacion(ticket.estado) && (
           <BotonIniciarReparacion ticketId={id} />
         )}
-        {puedeReinspeccionar(ticket.estado) && (
+        {esSupervisor && puedeReinspeccionar(ticket.estado) && (
           <Link
             href={`/tickets/${id}/reinspeccion`}
             className={buttonVariants({})}

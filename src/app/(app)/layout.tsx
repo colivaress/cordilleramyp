@@ -10,6 +10,7 @@ export default async function AppLayout({
 }) {
   const { perfil } = await getSesion();
   const esAdmin = perfil.rol === "administrador";
+  const esSupervisor = perfil.rol === "supervisor";
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
@@ -28,12 +29,15 @@ export default async function AppLayout({
                 Dashboard
               </Link>
             )}
-            <Link
-              href="/tickets/new"
-              className={buttonVariants({ variant: "ghost", size: "sm" })}
-            >
-              Nueva inspección
-            </Link>
+            {/* §2.6: solo el supervisor crea inspecciones; el admin no ve el link. */}
+            {esSupervisor && (
+              <Link
+                href="/tickets/new"
+                className={buttonVariants({ variant: "ghost", size: "sm" })}
+              >
+                Nueva inspección
+              </Link>
+            )}
           </nav>
           <div className="ml-auto flex items-center gap-3 text-sm">
             <span className="hidden text-muted-foreground sm:inline">

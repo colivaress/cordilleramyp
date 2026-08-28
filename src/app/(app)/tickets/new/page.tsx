@@ -5,7 +5,8 @@ import { InspeccionForm } from "@/components/InspeccionForm";
 export const dynamic = "force-dynamic";
 
 export default async function NuevaInspeccionPage() {
-  await requireRol("supervisor", "administrador");
+  // §2.6: solo el supervisor crea inspecciones. Bloquea el acceso directo por URL.
+  await requireRol("supervisor");
   const supabase = await createClient();
 
   const { data: items } = await supabase

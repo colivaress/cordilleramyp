@@ -12,7 +12,8 @@ export default async function ReinspeccionPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await requireRol("supervisor", "administrador");
+  // §2.6: registrar una re-inspección es crear una inspección → solo supervisor.
+  await requireRol("supervisor");
   const supabase = await createClient();
 
   const { data: ticket } = await supabase

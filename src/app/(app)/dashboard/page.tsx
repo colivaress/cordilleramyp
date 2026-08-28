@@ -36,6 +36,7 @@ export default async function DashboardPage() {
   // en la UI y en el query.
   const { perfil } = await getSesion();
   const esAdmin = perfil.rol === "administrador";
+  const esSupervisor = perfil.rol === "supervisor";
   const supabase = await createClient();
 
   let ticketsQuery = supabase
@@ -46,21 +47,32 @@ export default async function DashboardPage() {
     .order("created_at", { ascending: false });
   if (!esAdmin) ticketsQuery = ticketsQuery.eq("supervisor_id", perfil.id);
 
+  // §2.6: UNA fila por ticket (nunca una por revisión). El orden lo da el ticket
+  // (created_at). La tabla ya itera sobre `tickets`, no sobre `ticket_revisiones`.
   const { data: tickets } = await ticketsQuery;
   const lista = tickets ?? [];
 
-  // Nro de Revisión (correlativo global) de la revisión vigente de cada ticket — §2.6.
+  // Por cada ticket, su revisión MÁS RECIENTE (mayor numero_revision). La columna
+  // "Nro de Revisión" muestra el nro_revision_global de esa última revisión.
   const { data: revisiones } = await supabase
     .from("ticket_revisiones")
     .select("ticket_id, numero_revision, nro_revision_global");
 
-  const nroRevisionGlobal = new Map<string, number>();
-  for (const t of lista) {
-    const rev = (revisiones ?? []).find(
-      (r) => r.ticket_id === t.id && r.numero_revision === t.revision_actual,
-    );
-    if (rev) nroRevisionGlobal.set(t.id, rev.nro_revision_global);
+  const ultimaRevPorTicket = new Map<
+    string,
+    { numero_revision: number; nro_revision_global: number }
+  >();
+  for (const r of revisiones ?? []) {
+    const previa = ultimaRevPorTicket.get(r.ticket_id);
+    if (!previa || r.numero_revision > previa.numero_revision) {
+      ultimaRevPorTicket.set(r.ticket_id, {
+        numero_revision: r.numero_revision,
+        nro_revision_global: r.nro_revision_global,
+      });
+    }
   }
+  const nroRevisionGlobal = (ticketId: string): number | null =>
+    ultimaRevPorTicket.get(ticketId)?.nro_revision_global ?? null;
 
   // Fallas abiertas (no conformes de la última revisión) por ticket, para el mensaje de WhatsApp.
   const { data: respuestas } = await supabase
@@ -109,9 +121,12 @@ export default async function DashboardPage() {
               : "Tus tickets de inspección y alertas de vencimiento."}
           </p>
         </div>
-        <Link href="/tickets/new" className={buttonVariants({})}>
-          Nueva inspección
-        </Link>
+        {/* §2.6: solo el supervisor crea inspecciones. */}
+        {esSupervisor && (
+          <Link href="/tickets/new" className={buttonVariants({})}>
+            Nueva inspección
+          </Link>
+        )}
       </div>
 
       {esAdmin && (
@@ -166,7 +181,7 @@ export default async function DashboardPage() {
                   return (
                     <TableRow key={t.id} className={cn(clasesFilaAlerta(nivel))}>
                       <TableCell className="font-mono tabular-nums">
-                        {nroRevisionGlobal.get(t.id) ?? "—"}
+                        {nroRevisionGlobal(t.id) ?? "—"}
                       </TableCell>
                       <TableCell className="font-medium">
                         {t.patente_camion}
@@ -194,7 +209,7 @@ export default async function DashboardPage() {
                           <WhatsAppNotifyButton
                             size="xs"
                             ticketId={t.id}
-                            nroRevisionGlobal={nroRevisionGlobal.get(t.id) ?? null}
+                            nroRevisionGlobal={nroRevisionGlobal(t.id)}
                             patenteCamion={t.patente_camion}
                             patenteRampla={t.patente_rampla}
                             transporte={t.transporte}
