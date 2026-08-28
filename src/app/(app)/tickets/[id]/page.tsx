@@ -17,12 +17,9 @@ import { ItemEstadoBadge } from "@/components/ItemEstadoBadge";
 import { FotoFalla } from "@/components/FotoFalla";
 import { CountdownBadge } from "@/components/CountdownBadge";
 import { WhatsAppNotifyButton } from "@/components/WhatsAppNotifyButton";
-import { BotonIniciarReparacion } from "@/components/BotonIniciarReparacion";
 import { BotonFinalizarPendiente } from "@/components/BotonFinalizarPendiente";
-import {
-  puedeIniciarReparacion,
-  puedeReinspeccionar,
-} from "@/lib/ticket-state-machine";
+import { EmailRecipientsSelect } from "@/components/EmailRecipientsSelect";
+import { puedeReinspeccionar } from "@/lib/ticket-state-machine";
 import type { FallaResumen } from "@/lib/mensajes";
 
 export const dynamic = "force-dynamic";
@@ -80,10 +77,24 @@ export default async function TicketDetallePage({
     ...revs.map((r) => r.firma_fiscalizador_url),
   ]);
 
+  const revActual = revs.find((r) => r.numero_revision === numeroRevisionActual);
+  const conObservaciones =
+    ticket.estado === "finalizada_con_observaciones" ||
+    ticket.estado === "en_reparacion_de_observaciones";
+
   // §2.8: inspección que quedó a medio finalizar (el checklist y las firmas ya
-  // están guardados, pero "Finalizar revisión" no llegó a cerrarla).
-  const esDueño = esSupervisor && ticket.supervisor_id === perfil.id;
-  const finalizacionPendiente = esDueño && ticket.estado === "en_revision";
+  // están guardados, pero "Finalizar revisión" no llegó a cerrarla). La puede
+  // cerrar el creador del ticket o el supervisor que hizo esa revisión (§2.6).
+  const finalizacionPendiente =
+    esSupervisor &&
+    ticket.estado === "en_revision" &&
+    (ticket.supervisor_id === perfil.id ||
+      revActual?.supervisor_id === perfil.id);
+
+  // §2.6: el envío del informe por correo lo acciona un supervisor — el dueño del
+  // ticket, o cualquiera si el ticket está "con observaciones".
+  const puedeEnviarCorreo =
+    esSupervisor && (ticket.supervisor_id === perfil.id || conObservaciones);
 
   const fallasAbiertas: FallaResumen[] = resp
     .filter(
@@ -155,9 +166,9 @@ export default async function TicketDetallePage({
         >
           Ver informe
         </Link>
-        {puedeIniciarReparacion(ticket.estado) && (
-          <BotonIniciarReparacion ticketId={id} />
-        )}
+        {/* §2.3/§2.6: desde "Finalizada con observaciones" la única acción es
+            reinspeccionar directamente — sin paso manual de "Iniciar reparación".
+            Cualquier supervisor puede tomarla, no solo el creador del ticket. */}
         {esSupervisor && puedeReinspeccionar(ticket.estado) && (
           <Link
             href={`/tickets/${id}/reinspeccion`}
@@ -181,6 +192,31 @@ export default async function TicketDetallePage({
           estadoTicket={ticket.estado}
         />
       </div>
+
+      {/* §2.6: enviar el informe por correo sin tener que entrar antes a
+          "Ver informe" — mismo selector de destinatarios de §4.1. */}
+      {puedeEnviarCorreo && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Enviar informe por correo</CardTitle>
+            <CardDescription>
+              Genera el PDF del informe en el servidor y lo envía adjunto a los
+              destinatarios seleccionados en un solo correo.{" "}
+              <Link
+                href={`/api/informe/${id}/enviar`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline"
+              >
+                Ver / descargar PDF
+              </Link>
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <EmailRecipientsSelect ticketId={id} />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

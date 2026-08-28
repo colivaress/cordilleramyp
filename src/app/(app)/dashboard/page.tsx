@@ -39,13 +39,17 @@ export default async function DashboardPage() {
   const esSupervisor = perfil.rol === "supervisor";
   const supabase = await createClient();
 
-  let ticketsQuery = supabase
+  // §2.6: el administrador ve todo; el supervisor ve sus propios tickets MÁS los
+  // que estén "con observaciones" (cualquier supervisor puede tomar la siguiente
+  // re-inspección). Esto ya lo hace cumplir la política RLS de `select` de
+  // `tickets`, así que no hace falta filtrar acá — un filtro `.eq(supervisor_id)`
+  // ocultaría de más.
+  const ticketsQuery = supabase
     .from("tickets")
     .select(
       "*, supervisor:personal!tickets_supervisor_id_fkey(id, nombre, telefono)",
     )
     .order("numero_inspeccion", { ascending: false });
-  if (!esAdmin) ticketsQuery = ticketsQuery.eq("supervisor_id", perfil.id);
 
   // §2.6: UNA fila por ticket (nunca una por revisión). El orden lo da el ticket
   // (numero_inspeccion). La tabla itera sobre `tickets`, no sobre `ticket_revisiones`.

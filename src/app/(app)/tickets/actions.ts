@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/server";
 import { getSesion } from "@/lib/auth";
 import {
   estadoTrasChecklist,
-  puedeIniciarReparacion,
   puedeReinspeccionar,
 } from "@/lib/ticket-state-machine";
 import type { ItemEstado, TicketEstado } from "@/lib/tipos";
@@ -234,6 +233,38 @@ export async function iniciarInspeccion(
 }
 
 /**
+ * §2.6: puede escribir en una revisión en curso el supervisor dueño del ticket
+ * O el supervisor que abrió esa revisión (`ticket_revisiones.supervisor_id`) —
+ * una re-inspección la puede tomar un supervisor distinto al creador del ticket.
+ */
+async function autorizarRevisionEnCurso(
+  supabase: SupabaseServer,
+  perfilId: string,
+  ticketId: string,
+  revisionNumero: number,
+) {
+  const { data: ticket } = await supabase
+    .from("tickets")
+    .select("supervisor_id, estado")
+    .eq("id", ticketId)
+    .maybeSingle();
+  if (!ticket) throw new Error("No se encontró la inspección.");
+  if (ticket.estado !== "en_revision")
+    throw new Error("La revisión ya fue finalizada.");
+  if (ticket.supervisor_id === perfilId) return;
+
+  const { data: rev } = await supabase
+    .from("ticket_revisiones")
+    .select("supervisor_id")
+    .eq("ticket_id", ticketId)
+    .eq("numero_revision", revisionNumero)
+    .maybeSingle();
+  if (rev?.supervisor_id === perfilId) return;
+
+  throw new Error("Solo el supervisor a cargo de esta revisión puede editarla.");
+}
+
+/**
  * §2.8: guarda UNA respuesta del checklist apenas el supervisor la marca, no
  * todas juntas al final. Un ítem `no_conforme` no se puede persistir hasta que
  * tenga foto (constraint `foto_obligatoria_si_no_conforme`); mientras no la
@@ -244,17 +275,12 @@ export async function guardarRespuestaItem(
 ): Promise<{ guardado: boolean }> {
   const { perfil } = await getSesion();
   const supabase = await createClient();
-
-  const { data: ticket } = await supabase
-    .from("tickets")
-    .select("supervisor_id, estado")
-    .eq("id", input.ticketId)
-    .maybeSingle();
-  if (!ticket) throw new Error("No se encontró la inspección.");
-  if (ticket.supervisor_id !== perfil.id)
-    throw new Error("Solo el supervisor a cargo puede editar la inspección.");
-  if (ticket.estado !== "en_revision")
-    throw new Error("La revisión ya fue finalizada.");
+  await autorizarRevisionEnCurso(
+    supabase,
+    perfil.id,
+    input.ticketId,
+    input.revisionNumero,
+  );
 
   const esNoConforme = input.estado === "no_conforme";
 
@@ -299,17 +325,12 @@ export async function guardarFirmaRevision(input: {
 }) {
   const { perfil } = await getSesion();
   const supabase = await createClient();
-
-  const { data: ticket } = await supabase
-    .from("tickets")
-    .select("supervisor_id, estado")
-    .eq("id", input.ticketId)
-    .maybeSingle();
-  if (!ticket) throw new Error("No se encontró la inspección.");
-  if (ticket.supervisor_id !== perfil.id)
-    throw new Error("Solo el supervisor a cargo puede editar la inspección.");
-  if (ticket.estado !== "en_revision")
-    throw new Error("La revisión ya fue finalizada.");
+  await autorizarRevisionEnCurso(
+    supabase,
+    perfil.id,
+    input.ticketId,
+    input.revisionNumero,
+  );
 
   const cambio =
     input.quien === "conductor"
@@ -365,40 +386,15 @@ export async function finalizarInspeccion(input: {
   };
 }
 
-export async function iniciarReparacion(ticketId: string) {
-  await getSesion();
-  const supabase = await createClient();
-
-  const { data: ticket, error } = await supabase
-    .from("tickets")
-    .select("estado")
-    .eq("id", ticketId)
-    .single();
-  if (error || !ticket) throw new Error("Ticket no encontrado.");
-  if (!puedeIniciarReparacion(ticket.estado))
-    throw new Error(
-      "Solo se puede iniciar reparación desde 'Finalizada con observaciones'.",
-    );
-
-  const { error: eUpd } = await supabase
-    .from("tickets")
-    .update({
-      estado: "en_reparacion_de_observaciones",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", ticketId);
-  if (eUpd) throw new Error(eUpd.message);
-
-  revalidatePath(`/tickets/${ticketId}`);
-  revalidatePath("/dashboard");
-}
-
 /**
  * §2.8: arranque de una re-inspección — mismo criterio que `iniciarInspeccion`.
- * Pasa el ticket a `en_revision` con `revision_actual += 1`, deja lista la fila
- * de `ticket_revisiones` de la nueva revisión y siembra sus 18 respuestas, para
- * poder guardar por ítem. Idempotente si el supervisor reingresa a la misma
- * revisión en curso.
+ * §2.3/§2.6: se entra directo desde "Finalizada con observaciones" (o el legado
+ * "En reparación de observaciones"), sin paso manual de "Iniciar reparación", y
+ * la puede tomar CUALQUIER supervisor, no solo el que creó el ticket. Pasa el
+ * ticket a `en_revision` con `revision_actual += 1`, deja lista la fila de
+ * `ticket_revisiones` de la nueva revisión (con `supervisor_id` = quien hace
+ * ESTA revisión) y siembra sus 18 respuestas. Idempotente si el mismo supervisor
+ * reingresa a la revisión en curso.
  */
 export async function iniciarReinspeccion(input: {
   ticketId: string;
@@ -421,16 +417,33 @@ export async function iniciarReinspeccion(input: {
     .eq("id", input.ticketId)
     .maybeSingle();
   if (!ticket) throw new Error("Ticket no encontrado.");
-  if (ticket.supervisor_id !== perfil.id)
-    throw new Error("Solo el supervisor a cargo puede re-inspeccionar.");
 
-  // Puede venir desde "en_reparacion_de_observaciones" (primer ingreso) o ya
-  // estar "en_revision" si el supervisor volvió a los datos y reingresó.
+  // Puede venir desde "finalizada_con_observaciones" (o el legado
+  // "en_reparacion_de_observaciones") en el primer ingreso, o ya estar
+  // "en_revision" si el supervisor volvió a los datos y reingresó.
   const yaEnCurso = ticket.estado === "en_revision";
   if (!yaEnCurso && !puedeReinspeccionar(ticket.estado))
     throw new Error(
-      "Solo se puede re-inspeccionar un ticket 'En reparación de observaciones'.",
+      "Solo se puede re-inspeccionar un ticket con observaciones pendientes.",
     );
+
+  if (yaEnCurso) {
+    // Otra persona no puede continuar una re-inspección que ya arrancó otro.
+    const { data: revEnCurso } = await supabase
+      .from("ticket_revisiones")
+      .select("supervisor_id")
+      .eq("ticket_id", input.ticketId)
+      .eq("numero_revision", ticket.revision_actual)
+      .maybeSingle();
+    if (
+      revEnCurso &&
+      revEnCurso.supervisor_id !== perfil.id &&
+      ticket.supervisor_id !== perfil.id
+    )
+      throw new Error(
+        "Otro supervisor ya está realizando la re-inspección de este ticket.",
+      );
+  }
 
   const numeroRevision = yaEnCurso
     ? ticket.revision_actual
@@ -480,20 +493,21 @@ export async function finalizarReinspeccion(input: {
     .eq("id", input.ticketId)
     .maybeSingle();
   if (!ticket) throw new Error("Ticket no encontrado.");
-  if (ticket.supervisor_id !== perfil.id)
-    throw new Error(
-      "Solo el supervisor a cargo puede finalizar la re-inspección.",
-    );
   if (ticket.estado !== "en_revision")
     throw new Error("Esta re-inspección ya fue finalizada.");
 
   const { data: rev } = await supabase
     .from("ticket_revisiones")
-    .select("conductor, fecha_vencimiento")
+    .select("conductor, fecha_vencimiento, supervisor_id")
     .eq("ticket_id", input.ticketId)
     .eq("numero_revision", input.revisionNumero)
     .maybeSingle();
   if (!rev) throw new Error("La revisión no está iniciada.");
+  // §2.6: la finaliza quien la hizo (o el creador del ticket / un admin).
+  if (ticket.supervisor_id !== perfil.id && rev.supervisor_id !== perfil.id)
+    throw new Error(
+      "Solo el supervisor a cargo de esta re-inspección puede finalizarla.",
+    );
 
   const estado = await cerrarRevision(
     supabase,

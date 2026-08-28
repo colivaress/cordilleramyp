@@ -55,10 +55,15 @@ export default async function InformePage({
     revision?.firma_fiscalizador_url,
   ]);
 
-  // §2.6: el envío del informe por correo lo acciona el supervisor dueño del
-  // ticket, no el administrador.
+  // §2.6: el envío del informe por correo lo acciona un supervisor (no el
+  // administrador) — el dueño del ticket, o cualquier supervisor si el ticket
+  // está "con observaciones" (o el legado "en reparación").
+  const conObservaciones =
+    ticket.estado === "finalizada_con_observaciones" ||
+    ticket.estado === "en_reparacion_de_observaciones";
   const puedeEnviarCorreo =
-    perfil.rol === "supervisor" && ticket.supervisor_id === perfil.id;
+    perfil.rol === "supervisor" &&
+    (ticket.supervisor_id === perfil.id || conObservaciones);
 
   return (
     <div className="grid gap-6">

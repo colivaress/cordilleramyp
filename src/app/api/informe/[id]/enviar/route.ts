@@ -47,7 +47,19 @@ async function preparar(id: string) {
       ),
     };
   }
-  if (informe.meta.supervisorId !== perfil.id) {
+
+  // §2.6: puede enviar/ver el informe el supervisor dueño del ticket, o
+  // cualquier supervisor si el ticket está "con observaciones" (o el legado
+  // "en reparación") — la segunda inspección la puede tomar otro supervisor.
+  const { data: estadoTicket } = await supabase
+    .from("tickets")
+    .select("estado")
+    .eq("id", id)
+    .maybeSingle();
+  const conObservaciones =
+    estadoTicket?.estado === "finalizada_con_observaciones" ||
+    estadoTicket?.estado === "en_reparacion_de_observaciones";
+  if (informe.meta.supervisorId !== perfil.id && !conObservaciones) {
     return {
       error: NextResponse.json(
         { error: "Solo se puede acceder a informes de tickets propios." },
