@@ -21,7 +21,6 @@ export function EmailRecipientsSelect({ ticketId }: { ticketId: string }) {
   const [extra, setExtra] = useState("");
   const [cargando, setCargando] = useState(true);
   const [enviando, setEnviando] = useState(false);
-  const [preview, setPreview] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -58,29 +57,22 @@ export function EmailRecipientsSelect({ ticketId }: { ticketId: string }) {
       return;
     }
     setEnviando(true);
-    setPreview(null);
     try {
       const res = await fetch(`/api/informe/${ticketId}/enviar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ destinatarios }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      // §4.1: sin modo prueba. Solo "éxito" si el correo salió de verdad.
       if (!res.ok || !data.ok) {
-        toast.error(data.error ?? "No se pudo enviar el informe.");
+        toast.error(data.error ?? "No se pudo enviar el informe por correo.");
         return;
       }
       const kb = Math.round((data.pdfBytes ?? 0) / 1024);
-      if (data.modo === "ethereal") {
-        setPreview(data.previewUrl ?? null);
-        toast.success(
-          `Informe enviado a ${data.enviados} destinatario(s) — PDF adjunto (${kb} KB). Modo prueba: ver abajo.`,
-        );
-      } else {
-        toast.success(
-          `Informe enviado a ${data.enviados} destinatario(s) con el PDF adjunto (${kb} KB).`,
-        );
-      }
+      toast.success(
+        `Informe enviado a ${data.enviados} destinatario(s) con el PDF adjunto (${kb} KB).`,
+      );
     } catch {
       toast.error("Error de red al enviar el informe.");
     } finally {
@@ -138,19 +130,6 @@ export function EmailRecipientsSelect({ ticketId }: { ticketId: string }) {
         <MailIcon />
         {enviando ? "Enviando…" : "Enviar por correo"}
       </Button>
-      {preview && (
-        <p className="text-xs text-muted-foreground">
-          Vista previa del correo enviado (modo prueba):{" "}
-          <a
-            href={preview}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-primary underline"
-          >
-            abrir
-          </a>
-        </p>
-      )}
     </div>
   );
 }

@@ -16,7 +16,8 @@ import {
 import { SignaturePad } from "@/components/SignaturePad";
 import { createClient } from "@/lib/supabase/client";
 import {
-  crearInspeccion,
+  iniciarInspeccion,
+  finalizarInspeccion,
   registrarReinspeccion,
   type RespuestaInput,
 } from "@/app/(app)/tickets/actions";
@@ -126,6 +127,10 @@ export function InspeccionForm({
   const [pasoMaxVisto, setPasoMaxVisto] = useState<1 | 2>(
     modo === "nueva" ? 1 : 2,
   );
+  const [iniciando, setIniciando] = useState(false);
+  // §2.6: en inspección nueva el numero_inspeccion se conoce recién al crear el
+  // ticket (al pasar de la cabecera al checklist). En re-inspección viene por prop.
+  const [numInsp, setNumInsp] = useState<number | null>(numeroInspeccion);
 
   const [cabecera, setCabecera] = useState<Cabecera>(cabeceraVacia);
   // ¿el supervisor editó la fecha de vencimiento a mano? Si sí, no la pisamos al
@@ -209,9 +214,35 @@ export function InspeccionForm({
     setRespuestas((prev) => ({ ...prev, [key]: v }));
   }
 
-  function irAlChecklist() {
-    setPaso(2);
-    setPasoMaxVisto(2);
+  async function irAlChecklist() {
+    if (!cabeceraCompleta || iniciando) return;
+    setIniciando(true);
+    try {
+      // §2.6: crea (o actualiza) la fila en `tickets` YA — así numero_inspeccion
+      // existe y §2.8 tiene ticket_id real para subir firmas/fotos.
+      const res = await iniciarInspeccion({
+        ticketId,
+        cabecera: {
+          transporte: cabecera.transporte,
+          conductor: cabecera.conductor,
+          fecha: new Date(cabecera.fecha).toISOString(),
+          procedencia: cabecera.procedencia,
+          tipo_camion: cabecera.tipo_camion,
+          patente_camion: cabecera.patente_camion,
+          patente_rampla: cabecera.patente_rampla,
+        },
+        fechaVencimientoISO: new Date(cabecera.fechaVencimiento).toISOString(),
+      });
+      setNumInsp(res.numeroInspeccion);
+      setPaso(2);
+      setPasoMaxVisto(2);
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "No se pudo iniciar la inspección.",
+      );
+    } finally {
+      setIniciando(false);
+    }
   }
 
   function validarChecklist(): string | null {
@@ -244,10 +275,6 @@ export function InspeccionForm({
     }
     setEnviando(true);
     try {
-      const fechaVencimientoISO = new Date(
-        modo === "nueva" ? cabecera.fechaVencimiento : vencRevision,
-      ).toISOString();
-
       // Subir fotos de fallas
       const respuestasInput: RespuestaInput[] = [];
       for (const item of items) {
@@ -290,18 +317,10 @@ export function InspeccionForm({
       // adentro — el redirect quedaba atrapado en este try/catch y el usuario
       // veía un falso error). La navegación se hace acá.
       if (modo === "nueva") {
-        const res = await crearInspeccion({
+        // El ticket ya existe (se creó en "Realizar revisión", §2.6). Acá se
+        // cierra la revisión #1.
+        const res = await finalizarInspeccion({
           ticketId,
-          cabecera: {
-            transporte: cabecera.transporte,
-            conductor: cabecera.conductor,
-            fecha: new Date(cabecera.fecha).toISOString(),
-            procedencia: cabecera.procedencia,
-            tipo_camion: cabecera.tipo_camion,
-            patente_camion: cabecera.patente_camion,
-            patente_rampla: cabecera.patente_rampla,
-          },
-          fechaVencimientoISO,
           respuestas: respuestasInput,
           firmaConductorPath,
           firmaFiscalizadorPath,
@@ -315,7 +334,7 @@ export function InspeccionForm({
         const res = await registrarReinspeccion({
           ticketId,
           conductor: conductorRevision.trim(),
-          fechaVencimientoISO,
+          fechaVencimientoISO: new Date(vencRevision).toISOString(),
           respuestas: respuestasInput,
           firmaConductorPath,
           firmaFiscalizadorPath,
@@ -342,15 +361,16 @@ export function InspeccionForm({
             <CardTitle>1. Datos de Inspección</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
-            {/* §2.6: correlativo del ticket, solo lectura. Se asigna al guardar. */}
+            {/* §2.6: correlativo del ticket, solo lectura. Se asigna al pasar
+                al checklist ("Realizar revisión"). */}
             <div className="grid gap-1.5">
               <Label htmlFor="numero-inspeccion">Nro de Inspección</Label>
               <Input
                 id="numero-inspeccion"
                 readOnly
                 disabled
-                value={numeroInspeccion != null ? String(numeroInspeccion) : ""}
-                placeholder="Se asigna automáticamente al guardar"
+                value={numInsp != null ? String(numInsp) : ""}
+                placeholder="Se asigna al presionar “Realizar revisión”"
               />
             </div>
             {CAMPOS_CABECERA.map((c) => (
@@ -374,10 +394,10 @@ export function InspeccionForm({
             <div className="sm:col-span-2">
               <Button
                 type="button"
-                disabled={!cabeceraCompleta}
+                disabled={!cabeceraCompleta || iniciando}
                 onClick={irAlChecklist}
               >
-                Realizar revisión
+                {iniciando ? "Creando inspección…" : "Realizar revisión"}
               </Button>
               {!cabeceraCompleta && (
                 <p className="mt-1.5 text-xs text-muted-foreground">

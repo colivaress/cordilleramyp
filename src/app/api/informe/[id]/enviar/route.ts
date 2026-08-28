@@ -124,9 +124,8 @@ export async function POST(
     observaciones: informe.meta.observaciones,
   };
 
-  let resultado;
   try {
-    resultado = await enviarInformePorCorreo({
+    await enviarInformePorCorreo({
       destinatarios,
       asunto: construirAsuntoInforme(datosCorreo),
       cuerpo: construirCuerpoInforme(datosCorreo),
@@ -134,6 +133,7 @@ export async function POST(
       nombreArchivo: `informe-inspeccion-${informe.meta.numeroInspeccion}-rev-${informe.meta.numeroRevision}.pdf`,
     });
   } catch (e) {
+    // §4.1: si el envío falla, error real — nunca un falso "enviado con éxito".
     return NextResponse.json(
       {
         error: `No se pudo enviar el correo: ${
@@ -144,6 +144,7 @@ export async function POST(
     );
   }
 
+  // Solo se registra el envío si el correo salió de verdad.
   await supabase.from("notificaciones").insert(
     destinatarios.map((email) => ({
       ticket_id: id,
@@ -156,8 +157,6 @@ export async function POST(
   return NextResponse.json({
     ok: true,
     enviados: destinatarios.length,
-    modo: resultado.modo,
-    previewUrl: resultado.previewUrl ?? null,
     pdfBytes: informe.pdf.length,
   });
 }

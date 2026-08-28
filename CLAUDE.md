@@ -148,7 +148,9 @@ alter table tickets
 
 (Súmalo también al DDL base de `tickets` en §7, con el mismo patrón de `nro_revision_global` en `ticket_revisiones` — misma nota de reconciliación de §7: en una base ya desplegada usa el `alter table` de arriba, no recrees la tabla.)
 
-- **En el formulario de "Datos de Inspección":** muestra este campo bajo la etiqueta **"Nro de Inspección"**, como campo de **solo lectura** (no editable por el supervisor — se asigna automáticamente al guardar el ticket, nunca se ingresa a mano). En una inspección nueva que aún no se ha guardado no hay valor que mostrar todavía; muéstralo apenas el ticket queda creado (por ejemplo, al pasar de cabecera al checklist, si el ticket ya se crea en ese punto — ver también el bug de guardado descrito más abajo).
+- **En el formulario de "Datos de Inspección":** muestra este campo bajo la etiqueta **"Nro de Inspección"**, como campo de **solo lectura** (no editable por el supervisor — se asigna automáticamente, nunca se ingresa a mano).
+- **Corrección — se debe asignar de inmediato al crear la inspección, no quedar pendiente:** hoy el campo se queda mostrando el placeholder "Se asigna automáticamente al guardar" y nunca llega a mostrar un número real durante el flujo. Corrige el momento en que se crea la fila en `tickets`: debe crearse **apenas el supervisor completa la cabecera y presiona "Realizar revisión"** (la transición del paso 1 al paso 2, §2.7), no recién al finalizar toda la revisión — así el `numero_inspeccion` ya existe y se puede mostrar como un número real desde que el supervisor entra al checklist en adelante, no un placeholder. Esto es además un requisito para que la persistencia inmediata de firmas y fotos de §2.8 funcione (necesitan un `ticket_id` real para subir a Storage y guardar la URL).
+- **Sin duplicados entre inspectores simultáneos:** esto ya queda garantizado por `generated always as identity` (§7) — Postgres asigna el siguiente número de forma atómica aunque dos supervisores creen su ticket en el mismo instante, nunca hace falta calcularlo a mano en el código ni coordinarlo entre pestañas/usuarios.
 - **En el listado de tickets:** agrega la columna "Nro de Inspección" (tanto en el dashboard de administrador como en "Mis inspecciones" del supervisor), junto a la columna "Nro de Revisión" que ya existe — son dos columnas distintas y ambas deben verse: una identifica al ticket, la otra a su revisión más reciente.
 
 **Envío del informe por correo:** el botón "Enviar por correo" del informe (§4) lo acciona el **supervisor**, no el administrador — corrige esto si hoy está implementado como una acción exclusiva de administrador. Un supervisor solo puede enviar el informe de los tickets donde él es el `supervisor_id` (misma restricción de acceso que el punto anterior).
@@ -304,6 +306,31 @@ Lo acciona el **supervisor** dueño de ese ticket (ver §2.6), no el administrad
   - `{nombre del supervisor}` es el nombre (`personal.nombre`) del supervisor que envía el correo (el mismo que es dueño del ticket, §2.6). `{cargo del supervisor}` es un texto **fijo para todos los supervisores**, no varía por persona: **"Supervisor de Encarpe"** — no hace falta guardarlo en la base de datos, puede ir hardcodeado en la plantilla del correo.
   - Elimina cualquier línea tipo "Ver informe:" que quede vacía o rota, y no agregues datos que no estén en esta plantilla (no repitas Nro de Inspección, Nro de Revisión, estado, ni los demás campos de cabecera dentro del cuerpo — esa información ya vive en el PDF adjunto).
 - Adjunta ese mismo PDF a todos los destinatarios seleccionados en un solo envío.
+
+**Corrección — el envío hoy está en "modo prueba" y no llega a destino, hay que conectarlo a un proveedor real:** el botón "Enviar por correo" muestra un mensaje de éxito ("Informe enviado...") y una vista previa en "modo prueba", pero no está enviando el correo de verdad — corrige esto, no es opcional. **Decisión ya tomada: se envía vía Gmail / Google Workspace por SMTP**, usando una casilla de correo real de la empresa (no un proveedor transaccional como Resend/SendGrid).
+
+- Usa `nodemailer` con un transporte SMTP apuntando a Gmail:
+
+  ```ts
+  import nodemailer from "nodemailer";
+
+  const transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true, // true para el puerto 465, false para 587 con STARTTLS
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASSWORD,
+    },
+  });
+  ```
+
+- **Variables de entorno nuevas** (mismo tratamiento que el resto de secretos, §9 — solo en `.env.local`/variables del hosting, nunca en código ni versionadas, y agrégalas a `.env.example` sin valores reales):
+  - `SMTP_USER`: la casilla de Gmail/Google Workspace desde la que se envían los informes (ej. `inspecciones@cordilleramyp.cl` o la que el usuario indique).
+  - `SMTP_PASSWORD`: **no es la contraseña normal de esa cuenta de Google** — Google ya no permite autenticar apps externas con la contraseña de la cuenta. Es una "contraseña de aplicación" (App Password) de 16 caracteres, que se genera así: 1) activar la verificación en dos pasos en esa cuenta de Google (Cuenta de Google → Seguridad → Verificación en dos pasos); 2) ir a `myaccount.google.com/apppasswords`, crear una nueva contraseña de aplicación (nombre sugerido: "Cordillera M&P"); 3) copiar el código de 16 caracteres (sin espacios) y pegarlo como `SMTP_PASSWORD` en `.env.local`. Esta contraseña de aplicación es un secreto igual que cualquier otro — mismo tratamiento que el resto de credenciales en §9.
+  - El "de" (`from`) del correo debe ser esa misma casilla (`SMTP_USER`); opcionalmente configura el nombre visible como "Cordillera M&P" (`from: '"Cordillera M&P" <${process.env.SMTP_USER}>'`).
+- **Elimina el "modo prueba"** una vez conectado el SMTP real: el envío debe intentar entregar el correo de verdad, y si falla (credenciales mal puestas, SMTP rechaza el envío, etc.) debe mostrarle un error real al supervisor — nunca un mensaje de "enviado con éxito" cuando en realidad no salió. Si por algún motivo el proyecto necesita seguir teniendo un modo de prueba para desarrollo local, dependa de una variable de entorno explícita (por ejemplo `EMAIL_MODO_PRUEBA=true`) que **no** esté activada en producción — nunca que sea el comportamiento por defecto silencioso como hoy.
+- Ten en cuenta los límites de envío de Gmail/Google Workspace (bajos volúmenes por día, del orden de cientos) — más que suficiente para este proyecto, pero si en el futuro el volumen de informes crece mucho, quedaría como decisión pendiente migrar a un proveedor transaccional (Resend/SendGrid).
 
 ---
 
@@ -577,7 +604,7 @@ Buckets de Storage a crear: `firmas` (privado, firmas digitales) y `fallas` (pri
 
 ## 8. Decisiones pendientes (no asumir, preguntar al usuario si se necesita antes de continuar)
 
-- Proveedor de envío de correo (Resend, SendGrid, SMTP propio, etc.) y sus credenciales.
+- ~~Proveedor de envío de correo~~ — **resuelto: Gmail / Google Workspace vía SMTP**, con la casilla de correo de la empresa. Ver el detalle de implementación en §4.1.
 - Si el envío de WhatsApp queda solo como enlace `wa.me` (manual, como pide el prompt original) o si en el futuro se integra WhatsApp Business API.
 - ~~Autenticación de usuarios~~ — **resuelto:** ya se implementó Supabase Auth (correo + contraseña) con selector de rol y trigger `handle_new_user` que crea la fila en `personal` al registrarse. Ver el siguiente punto para el paso pendiente sobre esto.
 - **Login con Google (siguiente iteración, no bloquea lo ya construido):** agregar un botón "Iniciar sesión con Google" además del login por correo/contraseña que ya existe, usando Supabase Auth con el proveedor `google` (OAuth). Pasos:
