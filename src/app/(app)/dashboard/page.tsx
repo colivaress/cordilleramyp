@@ -20,152 +20,158 @@ import {
 import { TicketStatusBadge } from "@/components/TicketStatusBadge";
 import { CountdownBadge } from "@/components/CountdownBadge";
 import { WhatsAppNotifyButton } from "@/components/WhatsAppNotifyButton";
-import { MesFilter } from "@/components/MesFilter";
+import { DashboardFilters } from "@/components/DashboardFilters";
+import { Paginacion } from "@/components/Paginacion";
 import { cn } from "@/lib/utils";
+import { clasesFilaAlerta, nivelAlerta } from "@/lib/vencimiento";
 import {
-  clasesFilaAlerta,
-  estadoVencimiento,
-  nivelAlerta,
-} from "@/lib/vencimiento";
+  ESTADOS_FILTRO,
+  calcularResumen,
+  mesEtiqueta,
+  mesKey,
+} from "@/lib/dashboard";
+import { nombreCompleto } from "@/lib/mensajes";
 import type { FallaResumen } from "@/lib/mensajes";
+import type { TicketEstado } from "@/lib/tipos";
 
 export const dynamic = "force-dynamic";
 
-const MESES_ES = [
-  "Enero",
-  "Febrero",
-  "Marzo",
-  "Abril",
-  "Mayo",
-  "Junio",
-  "Julio",
-  "Agosto",
-  "Septiembre",
-  "Octubre",
-  "Noviembre",
-  "Diciembre",
-];
-
-/** "YYYY-MM" del `created_at` en horario de Chile — §2.6 filtro por mes. */
-function mesKey(iso: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Santiago",
-    year: "numeric",
-    month: "2-digit",
-  }).format(new Date(iso));
-}
-
-/** "Agosto 2026" a partir de "2026-08". */
-function mesEtiqueta(key: string): string {
-  const [y, m] = key.split("-").map(Number);
-  return `${MESES_ES[m - 1]} ${y}`;
-}
+const POR_PAGINA = 15;
 
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ mes?: string }>;
+  searchParams: Promise<{
+    mes?: string;
+    estado?: string;
+    supervisor?: string;
+    page?: string;
+  }>;
 }) {
-  const { mes } = await searchParams;
-  // §2.6: el administrador ve todo; el supervisor ve solo sus tickets, sin
-  // tarjetas de resumen. La RLS ya filtra a nivel de BD; acá además se refleja
-  // en la UI y en el query.
+  const { mes, estado, supervisor, page } = await searchParams;
   const { perfil } = await getSesion();
   const esAdmin = perfil.rol === "administrador";
   const esSupervisor = perfil.rol === "supervisor";
   const supabase = await createClient();
 
-  // §2.6: el administrador ve todo; el supervisor ve sus propios tickets MÁS los
-  // que estén "con observaciones" (cualquier supervisor puede tomar la siguiente
-  // re-inspección). Esto ya lo hace cumplir la política RLS de `select` de
-  // `tickets`, así que no hace falta filtrar acá — un filtro `.eq(supervisor_id)`
-  // ocultaría de más.
-  const ticketsQuery = supabase
+  // §2.6: la RLS de `select` ya limita qué tickets ve cada rol (el admin todos;
+  // el supervisor los suyos + los "con observaciones"). No filtramos por
+  // supervisor_id acá — un filtro extra ocultaría de más.
+  const { data: tickets } = await supabase
     .from("tickets")
     .select(
-      "*, supervisor:personal!tickets_supervisor_id_fkey(id, nombre, telefono)",
+      "*, supervisor:personal!tickets_supervisor_id_fkey(id, nombre, apellido, telefono)",
     )
     .order("numero_inspeccion", { ascending: false });
-
-  // §2.6: UNA fila por ticket (nunca una por revisión). El orden lo da el ticket
-  // (numero_inspeccion). La tabla itera sobre `tickets`, no sobre `ticket_revisiones`.
-  const { data: tickets } = await ticketsQuery;
   const lista = tickets ?? [];
 
-  // §2.6: filtro por mes (por `created_at`), SOLO en el dashboard de admin.
-  const mesesDisponibles = esAdmin
-    ? [...new Set(lista.map((t) => mesKey(t.created_at)))]
-        .sort()
-        .reverse()
-        .map((k) => ({ valor: k, etiqueta: mesEtiqueta(k) }))
-    : [];
-  const mesSeleccionado =
-    esAdmin && mes && mesesDisponibles.some((o) => o.valor === mes) ? mes : "";
-  const listaVisible = mesSeleccionado
-    ? lista.filter((t) => mesKey(t.created_at) === mesSeleccionado)
-    : lista;
-
-  // Por cada ticket, el `numero_revision` de su revisión MÁS RECIENTE (contador
-  // que reinicia en 1 por ticket — §2.6, ya NO se usa nro_revision_global en UI).
+  // Revisión más reciente por ticket (contador que reinicia en 1 por ticket).
   const { data: revisiones } = await supabase
     .from("ticket_revisiones")
     .select("ticket_id, numero_revision");
-
   const ultimoNumeroRevision = new Map<string, number>();
   for (const r of revisiones ?? []) {
-    const previa = ultimoNumeroRevision.get(r.ticket_id) ?? 0;
-    if (r.numero_revision > previa)
+    if (r.numero_revision > (ultimoNumeroRevision.get(r.ticket_id) ?? 0))
       ultimoNumeroRevision.set(r.ticket_id, r.numero_revision);
   }
   const numeroRevision = (t: { id: string; revision_actual: number }): number =>
     ultimoNumeroRevision.get(t.id) ?? t.revision_actual;
 
-  // Fallas abiertas (no conformes de la última revisión) por ticket, para el mensaje de WhatsApp.
+  // No conformes de la última revisión, por ticket — para el mensaje de WhatsApp.
   const { data: respuestas } = await supabase
     .from("ticket_checklist_respuestas")
     .select(
       "ticket_id, revision_numero, estado, observacion, item:checklist_items(nombre)",
     )
     .eq("estado", "no_conforme");
-
   const fallasPorTicket = new Map<string, FallaResumen[]>();
   for (const t of lista) {
-    const abiertas = (respuestas ?? [])
-      .filter(
-        (r) => r.ticket_id === t.id && r.revision_numero === t.revision_actual,
-      )
-      .map((r) => ({
-        nombre: r.item?.nombre ?? r.ticket_id,
-        observacion: r.observacion,
-      }));
-    fallasPorTicket.set(t.id, abiertas);
+    fallasPorTicket.set(
+      t.id,
+      (respuestas ?? [])
+        .filter(
+          (r) =>
+            r.ticket_id === t.id && r.revision_numero === t.revision_actual,
+        )
+        .map((r) => ({
+          nombre: r.item?.nombre ?? r.ticket_id,
+          observacion: r.observacion,
+        })),
+    );
   }
 
-  const resumen = {
-    total: listaVisible.length,
-    porVencer: listaVisible.filter(
-      (t) => estadoVencimiento(t.fecha_vencimiento, t.estado) === "por_vencer",
-    ).length,
-    vencidos: listaVisible.filter(
-      (t) => estadoVencimiento(t.fecha_vencimiento, t.estado) === "vencido",
-    ).length,
-    // §2.6: "con fallas pendientes de corregir". Desde que se quitó el paso
-    // manual "Iniciar reparación" (§2.3) ningún ticket nuevo llega a
-    // `en_reparacion_de_observaciones`; se cuentan los `finalizada_con_observaciones`
-    // (+ el legado para no perder datos antiguos).
-    enReparacion: listaVisible.filter(
-      (t) =>
-        t.estado === "finalizada_con_observaciones" ||
-        t.estado === "en_reparacion_de_observaciones",
-    ).length,
-  };
+  // §2.6/§2.11: las tarjetas muestran los totales globales (sin filtrar), para
+  // que coincidan con la página de analítica (§2.11).
+  const resumen = calcularResumen(lista);
+
+  // ---- Filtros de la tabla (§2.6): mes + supervisor solo admin; estado ambos ----
+  const mesesDisponibles = esAdmin
+    ? [...new Set(lista.map((t) => mesKey(t.created_at)))]
+        .sort()
+        .reverse()
+        .map((k) => ({ valor: k, etiqueta: mesEtiqueta(k) }))
+    : [];
+  const mesSel =
+    esAdmin && mes && mesesDisponibles.some((o) => o.valor === mes) ? mes : "";
+
+  const estadosValidos = new Set(ESTADOS_FILTRO.map((e) => e.valor));
+  const estadoSel =
+    estado && estadosValidos.has(estado as TicketEstado)
+      ? (estado as TicketEstado)
+      : "";
+
+  const supervisoresDisponibles = esAdmin
+    ? [
+        ...new Map(
+          lista
+            .filter((t) => t.supervisor)
+            .map((t) => [
+              t.supervisor!.id,
+              {
+                valor: t.supervisor!.id,
+                etiqueta: nombreCompleto(
+                  t.supervisor!.nombre,
+                  t.supervisor!.apellido,
+                ),
+              },
+            ]),
+        ).values(),
+      ].sort((a, b) => a.etiqueta.localeCompare(b.etiqueta, "es"))
+    : [];
+  const supervisorSel =
+    esAdmin && supervisor && supervisoresDisponibles.some((o) => o.valor === supervisor)
+      ? supervisor
+      : "";
+
+  const listaFiltrada = lista.filter(
+    (t) =>
+      (!mesSel || mesKey(t.created_at) === mesSel) &&
+      (!estadoSel || t.estado === estadoSel) &&
+      (!supervisorSel || t.supervisor_id === supervisorSel),
+  );
+
+  // ---- Paginación (§2.6): 15 por página ----
+  const totalPaginas = Math.max(
+    1,
+    Math.ceil(listaFiltrada.length / POR_PAGINA),
+  );
+  const pageActual = Math.min(
+    Math.max(1, Number(page) || 1),
+    totalPaginas,
+  );
+  const listaPagina = listaFiltrada.slice(
+    (pageActual - 1) * POR_PAGINA,
+    pageActual * POR_PAGINA,
+  );
+
+  const hayFiltro = !!(mesSel || estadoSel || supervisorSel);
 
   return (
     <div className="grid gap-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            {esAdmin ? "Dashboard" : "Mis inspecciones"}
+            {esAdmin ? "Inspecciones" : "Mis inspecciones"}
           </h1>
           <p className="text-sm text-muted-foreground">
             {esAdmin
@@ -173,7 +179,6 @@ export default async function DashboardPage({
               : "Tus inspecciones y alertas de vencimiento."}
           </p>
         </div>
-        {/* §2.6: solo el supervisor crea inspecciones. */}
         {esSupervisor && (
           <Link href="/tickets/new" className={buttonVariants({})}>
             Nueva inspección
@@ -182,7 +187,7 @@ export default async function DashboardPage({
       </div>
 
       {esAdmin && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <ResumenCard titulo="Inspecciones" valor={resumen.total} />
           <ResumenCard
             titulo="Por vencer (≤48h)"
@@ -195,12 +200,17 @@ export default async function DashboardPage({
             valor={resumen.enReparacion}
             tono="naranja"
           />
+          <ResumenCard
+            titulo="Finalizadas"
+            valor={resumen.finalizadas}
+            tono="verde"
+          />
         </div>
       )}
 
       <Card>
         <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <CardTitle>Inspecciones</CardTitle>
               <CardDescription>
@@ -208,13 +218,11 @@ export default async function DashboardPage({
                 corrección (ámbar ≤48h, naranja ≤24h, rojo vencido).
               </CardDescription>
             </div>
-            {/* §2.6: filtro por mes de creación — solo dashboard de admin. */}
-            {esAdmin && mesesDisponibles.length > 0 && (
-              <MesFilter
-                opciones={mesesDisponibles}
-                seleccionado={mesSeleccionado}
-              />
-            )}
+            <DashboardFilters
+              meses={esAdmin ? mesesDisponibles : null}
+              supervisores={esAdmin ? supervisoresDisponibles : null}
+              estados={ESTADOS_FILTRO}
+            />
           </div>
         </CardHeader>
         <CardContent>
@@ -222,55 +230,68 @@ export default async function DashboardPage({
             <Table>
               <TableHeader>
                 <TableRow>
-                  {/* §2.6: "Ver" es la primera columna en ambas pantallas. */}
-                  <TableHead>Ver</TableHead>
+                  {/* §2.6: col 1 "Ver" y col 2 "WhatsApp" sin título visible;
+                      la columna de WhatsApp queda reservada en ambas pantallas. */}
+                  <TableHead>
+                    <span className="sr-only">Ver</span>
+                  </TableHead>
+                  <TableHead>
+                    <span className="sr-only">Notificar por WhatsApp</span>
+                  </TableHead>
                   <TableHead>Nro de Inspección</TableHead>
-                  <TableHead>Nro de Revisión</TableHead>
                   <TableHead>Camión / Rampla</TableHead>
                   <TableHead>Transporte</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Vencimiento</TableHead>
                   <TableHead>Supervisor</TableHead>
-                  {/* §2.6: la única acción extra ("Notificar por WhatsApp") es
-                      solo del dashboard de administrador. */}
-                  {esAdmin && (
-                    <TableHead className="text-right">Acciones</TableHead>
-                  )}
+                  <TableHead>Nro de Revisión</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {listaVisible.length === 0 && (
+                {listaPagina.length === 0 && (
                   <TableRow>
-                    <TableCell
-                      colSpan={esAdmin ? 9 : 8}
-                      className="text-muted-foreground"
-                    >
-                      {mesSeleccionado
-                        ? "No hay inspecciones creadas en el mes seleccionado."
+                    <TableCell colSpan={9} className="text-muted-foreground">
+                      {hayFiltro
+                        ? "No hay inspecciones para los filtros seleccionados."
                         : "No hay inspecciones todavía."}
                     </TableCell>
                   </TableRow>
                 )}
-                {listaVisible.map((t) => {
+                {listaPagina.map((t) => {
                   const nivel = nivelAlerta(t.fecha_vencimiento, t.estado);
                   return (
                     <TableRow key={t.id} className={cn(clasesFilaAlerta(nivel))}>
                       <TableCell>
                         <Link
                           href={`/tickets/${t.id}`}
-                          className={buttonVariants({
-                            variant: "outline",
-                            size: "xs",
-                          })}
+                          className={cn(
+                            buttonVariants({ variant: "outline", size: "xs" }),
+                            "border-brand-600/40 text-brand-700 hover:bg-brand-50 hover:text-brand-800",
+                          )}
                         >
                           Ver
                         </Link>
                       </TableCell>
-                      <TableCell className="font-mono tabular-nums">
-                        {t.numero_inspeccion}
+                      <TableCell>
+                        {esAdmin && (
+                          <WhatsAppNotifyButton
+                            ticketId={t.id}
+                            numeroInspeccion={t.numero_inspeccion}
+                            numeroRevision={numeroRevision(t)}
+                            patenteCamion={t.patente_camion}
+                            patenteRampla={t.patente_rampla}
+                            transporte={t.transporte}
+                            conductor={t.conductor}
+                            supervisorTelefono={t.supervisor?.telefono}
+                            supervisorNombre={t.supervisor?.nombre}
+                            fallas={fallasPorTicket.get(t.id) ?? []}
+                            fechaVencimiento={t.fecha_vencimiento}
+                            estadoTicket={t.estado}
+                          />
+                        )}
                       </TableCell>
                       <TableCell className="font-mono tabular-nums">
-                        {numeroRevision(t)}
+                        {t.numero_inspeccion}
                       </TableCell>
                       <TableCell className="font-medium">
                         {t.patente_camion}
@@ -281,8 +302,6 @@ export default async function DashboardPage({
                       </TableCell>
                       <TableCell>{t.transporte}</TableCell>
                       <TableCell>
-                        {/* Solo el texto del estado — el nro de revisión ya está
-                            en su columna "Nro de Revisión". */}
                         <TicketStatusBadge estado={t.estado} />
                       </TableCell>
                       <TableCell>
@@ -292,33 +311,16 @@ export default async function DashboardPage({
                         />
                       </TableCell>
                       <TableCell>{t.supervisor?.nombre ?? "—"}</TableCell>
-                      {esAdmin && (
-                        <TableCell>
-                          <div className="flex flex-wrap items-center justify-end gap-2">
-                            <WhatsAppNotifyButton
-                              size="xs"
-                              ticketId={t.id}
-                              numeroInspeccion={t.numero_inspeccion}
-                              numeroRevision={numeroRevision(t)}
-                              patenteCamion={t.patente_camion}
-                              patenteRampla={t.patente_rampla}
-                              transporte={t.transporte}
-                              conductor={t.conductor}
-                              supervisorTelefono={t.supervisor?.telefono}
-                              supervisorNombre={t.supervisor?.nombre}
-                              fallas={fallasPorTicket.get(t.id) ?? []}
-                              fechaVencimiento={t.fecha_vencimiento}
-                              estadoTicket={t.estado}
-                            />
-                          </div>
-                        </TableCell>
-                      )}
+                      <TableCell className="font-mono tabular-nums">
+                        {numeroRevision(t)}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
               </TableBody>
             </Table>
           </div>
+          <Paginacion page={pageActual} totalPaginas={totalPaginas} />
         </CardContent>
       </Card>
     </div>
@@ -332,7 +334,7 @@ function ResumenCard({
 }: {
   titulo: string;
   valor: number;
-  tono?: "amarillo" | "naranja" | "rojo";
+  tono?: "amarillo" | "naranja" | "rojo" | "verde";
 }) {
   const clase =
     tono === "rojo"
@@ -341,7 +343,9 @@ function ResumenCard({
         ? "text-alert-700"
         : tono === "amarillo"
           ? "text-warning-700"
-          : "text-foreground";
+          : tono === "verde"
+            ? "text-success-700"
+            : "text-foreground";
   return (
     <Card>
       <CardHeader>

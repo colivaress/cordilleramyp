@@ -20,6 +20,7 @@ export default function RegistroPage() {
   const router = useRouter();
   const [nombre, setNombre] = useState("");
   const [apellido, setApellido] = useState("");
+  const [fechaNacimiento, setFechaNacimiento] = useState("");
   const [email, setEmail] = useState("");
   const [telefono, setTelefono] = useState("");
   const [rol, setRol] = useState<RolUsuario>("supervisor");
@@ -38,7 +39,7 @@ export default function RegistroPage() {
       email,
       password,
       options: {
-        data: { nombre, apellido, rol, telefono },
+        data: { nombre, apellido, rol, telefono, fecha_nacimiento: fechaNacimiento },
         emailRedirectTo:
           typeof window !== "undefined"
             ? `${window.location.origin}/auth/callback`
@@ -87,6 +88,16 @@ export default function RegistroPage() {
                 required
                 value={apellido}
                 onChange={(e) => setApellido(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="fecha-nacimiento">Fecha de nacimiento</Label>
+              <Input
+                id="fecha-nacimiento"
+                type="date"
+                required
+                value={fechaNacimiento}
+                onChange={(e) => setFechaNacimiento(e.target.value)}
               />
             </div>
             <div className="grid gap-2">

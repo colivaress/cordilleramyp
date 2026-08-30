@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { MessageCircleIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import { createClient } from "@/lib/supabase/client";
 import {
   construirMensajeVencimiento,
@@ -26,7 +26,6 @@ export function WhatsAppNotifyButton({
   fallas,
   fechaVencimiento,
   estadoTicket,
-  size = "sm",
 }: {
   ticketId: string;
   numeroInspeccion: number;
@@ -40,7 +39,6 @@ export function WhatsAppNotifyButton({
   fallas: FallaResumen[];
   fechaVencimiento: string | null;
   estadoTicket: TicketEstado;
-  size?: "xs" | "sm" | "default";
 }) {
   const [enviando, setEnviando] = useState(false);
 
@@ -83,19 +81,19 @@ export function WhatsAppNotifyButton({
   return (
     <Button
       type="button"
-      size={size}
+      size="icon-xs"
       variant="outline"
       disabled={deshabilitado || enviando}
       onClick={notificar}
+      aria-label="Notificar por WhatsApp"
       title={
         deshabilitado
           ? "El supervisor a cargo no tiene teléfono cargado"
-          : undefined
+          : "Notificar por WhatsApp"
       }
       className="border-alert-300 text-alert-700 hover:bg-alert-50"
     >
-      <MessageCircleIcon />
-      Notificar por WhatsApp
+      <WhatsAppIcon className="size-4" />
     </Button>
   );
 }

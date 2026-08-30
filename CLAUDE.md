@@ -119,7 +119,7 @@ En la pantalla de cierre de cada revisión (cada vez que el ticket pasa por `EN_
 
 **Esto es un ajuste sobre lo ya construido** (la primera versión mostraba el Dashboard completo a todos los roles) — corrige el acceso así:
 
-- **Administrador:** ve el nav "Dashboard" con las tarjetas de resumen (Tickets, Por vencer, Vencidos, En reparación) y la tabla completa con **todos** los tickets de todos los supervisores. Sin cambios respecto a lo ya construido.
+- **Administrador:** ve el nav "Dashboard" con las tarjetas de resumen (Inspecciones, Por vencer, Vencidos, En reparación, Finalizadas — ver la tarjeta nueva más abajo) y la tabla completa con **todos** los tickets de todos los supervisores. Sin cambios respecto a lo ya construido, salvo las correcciones que siguen.
 - **Supervisor:** **no debe ver el link "Dashboard" en el nav ni las tarjetas de resumen.** Su vista de inicio (puede ser la misma ruta `/dashboard` renderizada distinto según rol, o una ruta propia — a criterio de la implementación, pero la URL del dashboard de administrador no debe quedar accesible para un supervisor ni escribiéndola directo) muestra **solo la tabla de tickets**, con las mismas columnas que ya existen, **filtrada a únicamente los tickets donde ese supervisor es el `supervisor_id`** — nunca los de otros supervisores. Agrega las columnas "Nro de Inspección" y "Nro de Revisión" (ver más abajo) a esa tabla.
 - Esto es control de acceso real, no solo ocultar el link en el nav: la política RLS de `tickets`, `ticket_revisiones` y `ticket_checklist_respuestas` debe restringir el `select` para el rol supervisor a `supervisor_id = (select id from personal where user_id = auth.uid())`, y permitir `select` sin restricción cuando `personal.rol = 'administrador'`. Revisa y ajusta las políticas RLS que ya se crearon durante la primera construcción para que cumplan esto — probablemente hoy permiten leer todo a cualquier `authenticated`.
 - **El botón/link "Nueva inspección" (`/tickets/new`) no debe aparecer para el rol Administrador** — corrige esto si hoy aparece en el nav o en el Dashboard de administrador (como se ve hoy). Solo el Supervisor crea inspecciones (§2.1); el administrador únicamente visualiza y da seguimiento. Igual que con el Dashboard, esto también es control de acceso real: la ruta `/tickets/new` no debe quedar utilizable por un administrador aunque la escriba directo en la URL.
@@ -178,11 +178,22 @@ alter table tickets
 
 **Nueva funcionalidad — botón para volver al listado desde el detalle del ticket, en el perfil de supervisor:** hoy, dentro de `/tickets/[id]`, un supervisor no tiene ninguna forma de volver a "Mis inspecciones" salvo el botón "atrás" del navegador. Agrega un botón/enlace con el texto **"Inspecciones"** (por ejemplo junto al título o en la cabecera de la página) que lo devuelva a la tabla de "Mis inspecciones".
 
-**Corrección — reordenar y simplificar las columnas de la tabla de tickets, en las dos pantallas (dashboard de administrador y "Mis inspecciones" del supervisor):** es el mismo componente compartido de la tabla (§2.6, ya mencionado más arriba) — corrígelo una sola vez si es compartido, y verifica que el cambio se refleje en ambas pantallas.
+**Corrección — reordenar y simplificar las columnas de la tabla de tickets, en las dos pantallas (dashboard de administrador y "Mis inspecciones" del supervisor):** es el mismo componente compartido de la tabla (§2.6, ya mencionado más arriba) — corrígelo una sola vez si es compartido, y verifica que el cambio se refleje en ambas pantallas. Esto ya se aplicó en una corrección anterior (Ver como primera columna, sin botón "Informe") — esta corrección ajusta ese resultado:
 
-- **El botón "Ver" pasa a ser la primera columna de la tabla** (hoy está al final, dentro de "Acciones"), antes de "Nro de Inspección"/"Nro de Revisión" y el resto de las columnas.
-- **Elimina el botón "Informe" de esa columna de acciones, en ambas tablas** — ya no hace falta, porque la sección de enviar por correo se sacó del detalle del ticket (corrección de arriba) y el acceso al informe sigue disponible con un clic más, entrando primero con "Ver" al detalle del ticket y usando ahí el botón "Ver informe".
-- La columna "Acciones" (si queda alguna acción aparte de "Ver") solo debe mostrar, para el dashboard de administrador, el botón "Notificar por WhatsApp" cuando corresponda (corrección de arriba) — la tabla de "Mis inspecciones" del supervisor no debe tener ninguna acción aparte de "Ver" en esa columna.
+- **El botón "Ver" queda en la primera columna** (ya aplicado) — pero **quita el texto "Ver" del encabezado de esa columna** (el `<th>` va vacío o, por accesibilidad, con un texto oculto para lectores de pantalla tipo `sr-only`, pero visualmente sin título) — el botón individual de cada fila sí puede seguir diciendo "Ver".
+- **El color del botón "Ver" queda muy claro y cuesta distinguirlo** — súbele un tono al azul: si hoy usa `brand-400`/`brand-500` (o el equivalente en el variant `outline`/`ghost` de shadcn con texto claro), pásalo a `brand-600` o `brand-700` para que el texto/borde se note con buen contraste sobre el fondo blanco de la tarjeta.
+- **Segunda columna, reservada para el botón "Notificar por WhatsApp" (§3):** cámbialo de botón con texto a **botón de solo ícono** (el ícono de WhatsApp — usa el SVG de la marca, por ejemplo desde [Simple Icons](https://simpleicons.org/?q=whatsapp), ya que no es un ícono que traiga `lucide-react` por defecto; agrégalo como componente propio, por ejemplo `WhatsAppIcon.tsx`), con `aria-label="Notificar por WhatsApp"` para accesibilidad ya que no queda texto visible. Este botón solo se renderiza en la tabla del dashboard de administrador (§3), y solo para los tickets "por vencer"/"vencido" — en las filas donde no aplica, y en toda la tabla de "Mis inspecciones" del supervisor (donde este botón no existe, §2.6 arriba), esa columna queda vacía, pero se mantiene como columna reservada en las dos tablas para que el resto de las columnas no salte de posición entre una pantalla y otra.
+- **Elimina el botón "Informe" de la columna de acciones, en ambas tablas** (ya aplicado) — el acceso al informe sigue disponible entrando con "Ver" al detalle del ticket y usando ahí "Ver informe".
+- **Mueve la columna "Nro de Revisión" a la última posición de la tabla**, después de "Supervisor" — el resto de las columnas mantiene su orden actual (Nro de Inspección, Camión/Rampla, Transporte, Estado, Vencimiento, Supervisor).
+
+**Nueva funcionalidad — tarjeta "Finalizadas":** agrega una quinta tarjeta de resumen al dashboard de administrador, junto a las que ya existen (Inspecciones, Por vencer, Vencidos, En reparación), con el título **"Finalizadas"** y el conteo de tickets en estado `finalizada_sin_observaciones` — es decir, inspecciones que ya terminaron su proceso sin fallas pendientes, para diferenciarlas de las que siguen "En reparación" (`finalizada_con_observaciones`, corrección de abajo).
+
+**Nueva funcionalidad — paginación y filtros en las tablas de tickets (dashboard de administrador y "Mis inspecciones" del supervisor):**
+
+- **Paginación de 15 filas por página** en las dos tablas, con controles para pasar de página (anterior/siguiente y, si es sencillo de armar, números de página) debajo de la tabla.
+- **Filtro por estado:** agrega un selector junto al título de la tabla (por ejemplo junto a "Inspecciones", al lado del selector de mes que ya existe en el dashboard de administrador) con las opciones "Todos los estados" (por defecto) + una por cada valor de `estado` que tenga sentido mostrar al usuario (En revisión, Finalizada con observaciones, Finalizada sin observaciones — usa los mismos textos de los badges de estado, §6). Aplica en las dos tablas.
+- **Filtro por supervisor, solo en el dashboard de administrador:** agrega otro selector junto al de estado, con las opciones "Todos los supervisores" (por defecto) + un ítem por cada supervisor que tenga al menos un ticket (nombre completo, `nombre` + `apellido`). Al elegir uno, filtra la tabla a los tickets de ese `supervisor_id`. No aplica a "Mis inspecciones" del supervisor, porque esa tabla ya está filtrada a un solo supervisor (el que inició sesión).
+- Estos filtros (mes, estado, supervisor) se combinan entre sí (AND, no OR) y con la paginación — al cambiar cualquier filtro, vuelve a la página 1 de los resultados filtrados.
 
 **Corrección — la tarjeta "En reparación" del dashboard de administrador siempre muestra 0, hay que corregir qué cuenta:** desde que se eliminó el paso manual "Iniciar reparación" (§2.3), ningún ticket nuevo llega a tener el estado `en_reparacion_de_observaciones` — por eso la tarjeta "En reparación", si sigue contando exactamente ese valor de `estado`, se queda en 0 para siempre aunque haya tickets con fallas pendientes. Corrige la tarjeta para que cuente los tickets en estado **`finalizada_con_observaciones`** (que es, en la práctica, el estado "con fallas pendientes de corregir" desde que se simplificó el flujo) — súmale también los que por datos antiguos sigan en el legado `en_reparacion_de_observaciones`, para no perder esos del conteo. En SQL: `estado in ('finalizada_con_observaciones', 'en_reparacion_de_observaciones')`.
 
@@ -261,8 +272,8 @@ Si `ticket_checklist_respuestas` no tenía la columna `fecha_vencimiento_item` (
 **Nueva funcionalidad, exclusiva del rol Administrador:** agrega un link "Usuarios" al nav, visible solo para `administrador` (mismo patrón de control de acceso real de §2.6 — ruta y RLS, no solo ocultar el link), con una pantalla para ver y agregar supervisores y administradores.
 
 - **Corrección de seguridad relacionada, hay que resolverla junto con esto:** hoy el registro público (correo/contraseña) deja **elegir el rol libremente** en un selector — eso significa que cualquier persona que llegue a la pantalla de registro podría crearse una cuenta como "administrador" sin que nadie se lo autorice. **Elimina ese selector de rol del registro público.** De ahora en adelante, la única forma de obtener una cuenta nueva en el sistema es que un administrador la cree desde este panel — nadie se auto-asigna un rol.
-- **Tabla "Usuarios":** lista todo `personal` — Nombre, Correo, Rol (badge Supervisor/Administrador), Teléfono, Estado (Activo / Inactivo / "Invitación pendiente" si aún no ha iniciado sesión nunca), y Acciones (editar rol o teléfono, activar/desactivar, reenviar invitación si sigue pendiente).
-- **Botón "Agregar usuario"** abre un formulario: Nombre, Correo, Rol (Supervisor / Administrador), Teléfono (opcional). Al guardar:
+- **Tabla "Usuarios":** lista todo `personal` — Nombre, Apellido, Correo, Teléfono, Fecha de nacimiento, Rol (badge Supervisor/Administrador), Estado (Activo / Inactivo / "Invitación pendiente" si aún no ha iniciado sesión nunca), y Acciones (editar, activar/desactivar, reenviar invitación si sigue pendiente). "Editar" abre el mismo formulario que "Agregar usuario" (ver abajo) precargado con los datos actuales, para poder corregir cualquier campo — incluido completar el Apellido o la Fecha de nacimiento de usuarios ya creados que todavía no los tengan.
+- **Botón "Agregar usuario"** abre un formulario con estos campos, para los dos roles que puede crear un administrador (Supervisor y Administrador): **Nombre** (obligatorio), **Apellido** (obligatorio — ver §4.1, se usa en la firma del correo/informe), **Correo** (obligatorio), **Teléfono** (obligatorio cuando el Rol elegido es Supervisor — lo usa el WhatsApp automático de §3.1 y el botón manual de §3, no puede quedar vacío para un supervisor; opcional para Administrador), **Fecha de nacimiento** (obligatorio, selector de fecha) y **Rol** (Supervisor / Administrador). Al guardar:
   1. Crea la fila en `personal` con esos datos, `activo = true` y **`user_id` en `null`** (queda "pendiente" hasta que esa persona inicie sesión por primera vez).
   2. Desde una Server Action (nunca desde el cliente), usando el cliente de Supabase con `SUPABASE_SERVICE_ROLE_KEY` (server-only, mismo tratamiento de secreto que el resto — §9), llama a `supabaseAdmin.auth.admin.inviteUserByEmail(correo, { data: { nombre, rol } })`. Supabase le manda un correo de invitación a esa persona; al hacer clic define su propia contraseña y ya puede entrar. Como alternativa, esa misma persona también puede entrar directo con "Iniciar sesión con Google" usando ese mismo correo, sin depender del correo de invitación — cualquiera de las dos vías debe funcionar.
 - **Ajusta el trigger `handle_new_user`** (ya existente, ver §8) para que, en vez de crear siempre una fila nueva en `personal` con un rol elegido por quien se registra: busque primero una fila en `personal` con ese mismo correo y `user_id` nulo (una invitación pendiente creada desde este panel) — si la encuentra, vincula ahí el `user_id` recién creado (adopta el rol y nombre que el administrador ya definió, no crea una fila duplicada). **Si no encuentra ninguna fila pendiente con ese correo, rechaza el acceso** — no crees una fila nueva con un rol por defecto; muestra un mensaje claro como "Tu cuenta no está autorizada. Contacta a un administrador de Cordillera M&P." Esto aplica tanto al flujo de invitación por correo como al de "Iniciar sesión con Google".
@@ -276,7 +287,34 @@ alter table personal
   add column if not exists user_id uuid unique references auth.users(id);
 ```
 
-(Súmalo también al DDL base de `personal` en §7 si no está — misma nota de reconciliación de §7.)
+**Nuevo campo — Fecha de nacimiento:**
+
+```sql
+alter table personal
+  add column if not exists fecha_nacimiento date;
+```
+
+No la agregues `not null` a nivel de base (hay usuarios existentes sin este dato) — igual que `apellido` (§4.1), es obligatoria a nivel de formulario en "Agregar usuario"/"Editar" de este panel, no a nivel de columna.
+
+(Súmalo, junto con `fecha_nacimiento`, también al DDL base de `personal` en §7 si no está — misma nota de reconciliación de §7.)
+
+### 2.11 Página "Dashboard" de analítica (gráficos y estadísticas), separada del listado de inspecciones
+
+**Nueva funcionalidad — reestructura la navegación de administrador en dos páginas distintas, no una sola:** hoy el link "Dashboard" del nav lleva a la única pantalla de administrador que existe (tarjetas de resumen + tabla de inspecciones, la que este documento ya describió en §2.6). Divide eso en dos:
+
+- **La pantalla que ya existe** (tarjetas de resumen + tabla "Inspecciones" con sus filtros y paginación, §2.6) pasa a ser la página de inicio del administrador — puedes dejarla en la misma ruta `/dashboard` que ya tiene, sin romper nada de lo ya construido.
+- **"Dashboard" en el nav pasa a apuntar a una página nueva**, dedicada a analítica y gráficos — por ejemplo `/dashboard/analitica` o `/analytics` (a criterio de la implementación). Agrega un segundo link al nav para no perder el acceso a la pantalla de arriba, por ejemplo "Inspecciones", que sigue llevando a `/dashboard`.
+
+**Contenido de la página nueva "Dashboard" (analítica):**
+
+- **Las mismas tarjetas de resumen que ya existen** (Inspecciones, Por vencer, Vencidos, En reparación, Finalizadas — §2.6), con los mismos totales.
+- **Desglose de totales por todos los estados posibles**, no solo los agrupamientos de las tarjetas de arriba: una tabla o fila de tarjetas chicas con el conteo exacto por cada valor de `tickets.estado` — `en_revision`, `finalizada_con_observaciones`, `finalizada_sin_observaciones`, y `en_reparacion_de_observaciones` si hay tickets legado en ese estado (§2.3). Es información más granular que las tarjetas de resumen, pensada para esta pantalla de analítica.
+- **Gráfico de barras — cantidad de inspecciones por mes:** eje X los últimos 12 meses (o todos los meses con datos, lo que sea más corto), eje Y la cantidad de tickets creados ese mes (`tickets.created_at`, mismo criterio que el filtro de mes de §2.6).
+- **Gráfico de dona — cantidad de inspecciones por supervisor:** un selector de mes propio de este gráfico (mismas opciones que el filtro de mes de §2.6: "Todos los meses" + cada mes con datos; por defecto puede ser el mes actual). Cada porción de la dona es un supervisor, su tamaño proporcional a la cantidad de inspecciones que ese supervisor creó (`supervisor_id` del ticket) durante el mes seleccionado (o en total, si el selector está en "Todos los meses").
+- **Gráfico — inspecciones con observaciones por mes:** de barras o de línea (a criterio de la implementación, lo que se vea más claro), eje X los mismos meses que el primer gráfico, eje Y la cantidad de tickets que en ese mes quedaron en estado `finalizada_con_observaciones` en algún momento de su historial (usa `ticket_revisiones` para saber en qué mes ocurrió esa revisión con fallas, no solo el estado actual del ticket, ya que un ticket puede haber pasado por "con observaciones" y ya estar "sin observaciones" ahora tras la reinspección).
+- **Tabla — estadísticas por supervisor:** una fila por cada supervisor con al menos un ticket, columnas: Supervisor (nombre + apellido), Total de inspecciones realizadas, e Inspecciones con observaciones (conteo de las que pasaron por `finalizada_con_observaciones` en algún momento, mismo criterio que el gráfico anterior). Ordena por total de inspecciones, de mayor a menor.
+- **Librería de gráficos:** usa [Recharts](https://recharts.org) (`npm install recharts`) — es la librería de gráficos más estándar para React/Next.js, se integra bien con Tailwind y con los tokens de color de §6 (usa `brand`, `success`, `warning`, `alert` para los gráficos, manteniendo la misma paleta del resto de la app en vez de los colores por defecto de la librería).
+- Esta página, como el resto del dashboard de administrador, queda con control de acceso real (ruta + RLS) exclusivo del rol `administrador` — mismo patrón de §2.6.
 
 ---
 
@@ -441,17 +479,21 @@ alter table personal
 
 ```
 /app
-  /dashboard/page.tsx              → listado de tickets + resaltado por vencimiento (admin)
+  /dashboard/page.tsx              → listado de tickets + resaltado por vencimiento (admin, §2.6)
+  /dashboard/analitica/page.tsx    → gráficos y estadísticas (admin, §2.11)
+  /usuarios/page.tsx               → panel de administración de usuarios (admin, §2.10)
   /tickets/new/page.tsx            → cabecera + checklist + firmas (supervisor)
   /tickets/[id]/page.tsx           → detalle, historial de revisiones
   /tickets/[id]/report/page.tsx    → informe imprimible + envío por correo
+  /api/cron/alertas-whatsapp/route.ts → job del aviso automático por WhatsApp (§3.1)
 /components
   ChecklistItemRow.tsx             → fila del checklist (selector + botón info)
   InfoPopover.tsx                  → popup con el texto de exigencia
   SignaturePad.tsx                 → captura de firma en canvas (reutilizado x2)
   TicketStatusBadge.tsx
   CountdownBadge.tsx               → resaltado por horas restantes
-  WhatsAppNotifyButton.tsx
+  WhatsAppNotifyButton.tsx         → botón de solo ícono, ver corrección en §2.6
+  WhatsAppIcon.tsx                 → SVG del ícono de WhatsApp (§2.6)
   EmailRecipientsSelect.tsx
 /lib
   supabase/client.ts
@@ -588,8 +630,9 @@ create table personal (
   user_id uuid unique references auth.users(id), -- nulo mientras la invitación está pendiente, ver §2.10
   nombre text not null,
   apellido text, -- obligatorio a nivel de formulario (§2.10), no a nivel de columna — ver §4.1
+  fecha_nacimiento date, -- obligatorio a nivel de formulario (§2.10), no a nivel de columna
   rol rol_usuario not null,
-  telefono text,
+  telefono text, -- obligatorio a nivel de formulario (§2.10) cuando rol = 'supervisor'
   email text,
   activo boolean not null default true,
   created_at timestamptz not null default now()

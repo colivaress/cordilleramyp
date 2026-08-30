@@ -100,6 +100,7 @@ export type Database = {
           apellido: string | null
           created_at: string
           email: string | null
+          fecha_nacimiento: string | null
           id: string
           nombre: string
           rol: Database["public"]["Enums"]["rol_usuario"]
@@ -111,6 +112,7 @@ export type Database = {
           apellido?: string | null
           created_at?: string
           email?: string | null
+          fecha_nacimiento?: string | null
           id?: string
           nombre: string
           rol: Database["public"]["Enums"]["rol_usuario"]
@@ -122,6 +124,7 @@ export type Database = {
           apellido?: string | null
           created_at?: string
           email?: string | null
+          fecha_nacimiento?: string | null
           id?: string
           nombre?: string
           rol?: Database["public"]["Enums"]["rol_usuario"]
