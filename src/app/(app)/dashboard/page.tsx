@@ -22,6 +22,7 @@ import { CountdownBadge } from "@/components/CountdownBadge";
 import { WhatsAppNotifyButton } from "@/components/WhatsAppNotifyButton";
 import { DashboardFilters } from "@/components/DashboardFilters";
 import { Paginacion } from "@/components/Paginacion";
+import { ResumenCards } from "@/components/ResumenCards";
 import { cn } from "@/lib/utils";
 import { clasesFilaAlerta, nivelAlerta } from "@/lib/vencimiento";
 import {
@@ -186,27 +187,7 @@ export default async function DashboardPage({
         )}
       </div>
 
-      {esAdmin && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <ResumenCard titulo="Inspecciones" valor={resumen.total} />
-          <ResumenCard
-            titulo="Por vencer (≤48h)"
-            valor={resumen.porVencer}
-            tono="amarillo"
-          />
-          <ResumenCard titulo="Vencidos" valor={resumen.vencidos} tono="rojo" />
-          <ResumenCard
-            titulo="En reparación"
-            valor={resumen.enReparacion}
-            tono="naranja"
-          />
-          <ResumenCard
-            titulo="Finalizadas"
-            valor={resumen.finalizadas}
-            tono="verde"
-          />
-        </div>
-      )}
+      {esAdmin && <ResumenCards resumen={resumen} />}
 
       <Card>
         <CardHeader>
@@ -324,34 +305,5 @@ export default async function DashboardPage({
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-function ResumenCard({
-  titulo,
-  valor,
-  tono,
-}: {
-  titulo: string;
-  valor: number;
-  tono?: "amarillo" | "naranja" | "rojo" | "verde";
-}) {
-  const clase =
-    tono === "rojo"
-      ? "text-danger-700"
-      : tono === "naranja"
-        ? "text-alert-700"
-        : tono === "amarillo"
-          ? "text-warning-700"
-          : tono === "verde"
-            ? "text-success-700"
-            : "text-foreground";
-  return (
-    <Card>
-      <CardHeader>
-        <CardDescription>{titulo}</CardDescription>
-        <CardTitle className={cn("text-3xl", clase)}>{valor}</CardTitle>
-      </CardHeader>
-    </Card>
   );
 }

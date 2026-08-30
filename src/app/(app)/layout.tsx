@@ -20,14 +20,23 @@ export default async function AppLayout({
             Cordillera <span className="text-primary">M&amp;P</span>
           </Link>
           <nav className="flex items-center gap-1 text-sm">
-            {/* §2.6: el supervisor no ve el link "Dashboard" en el nav. */}
+            {/* §2.11: "Dashboard" = analítica; "Inspecciones" = el listado.
+                §2.6: el supervisor no ve ninguno de los dos. */}
             {esAdmin && (
-              <Link
-                href="/dashboard"
-                className={buttonVariants({ variant: "ghost", size: "sm" })}
-              >
-                Dashboard
-              </Link>
+              <>
+                <Link
+                  href="/dashboard/analitica"
+                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                >
+                  Dashboard
+                </Link>
+                <Link
+                  href="/dashboard"
+                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                >
+                  Inspecciones
+                </Link>
+              </>
             )}
             {/* §2.6: solo el supervisor crea inspecciones; el admin no ve el link. */}
             {esSupervisor && (
