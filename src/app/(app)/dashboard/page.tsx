@@ -243,8 +243,10 @@ export default async function DashboardPage({
                   return (
                     <TableRow key={t.id} className={cn(clasesFilaAlerta(nivel))}>
                       <TableCell>
+                        {/* §2.6: "Ver" lleva directo al informe. El detalle con
+                            todas las revisiones sigue en /tickets/[id]. */}
                         <Link
-                          href={`/tickets/${t.id}`}
+                          href={`/tickets/${t.id}/report`}
                           className={cn(
                             buttonVariants({ variant: "outline", size: "xs" }),
                             "border-brand-600/40 text-brand-700 hover:bg-brand-50 hover:text-brand-800",

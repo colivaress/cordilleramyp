@@ -1,10 +1,14 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import Image from "next/image";
 import { getSesion } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { firmarRutas } from "@/lib/storage";
+import { buttonVariants } from "@/components/ui/button";
 import { PrintButton } from "@/components/PrintButton";
 import { EmailRecipientsSelect } from "@/components/EmailRecipientsSelect";
+import { WhatsAppShareButton } from "@/components/WhatsAppShareButton";
+import { puedeReinspeccionar } from "@/lib/ticket-state-machine";
 import { ETIQUETA_ESTADO, ETIQUETA_ITEM } from "@/lib/tipos";
 
 export const dynamic = "force-dynamic";
@@ -18,9 +22,9 @@ export default async function InformePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  // Solo exige sesión válida (app-shell). La vista del informe es la misma para
-  // supervisor y administrador — §2.6.
-  await getSesion();
+  // La vista del informe es la misma para supervisor y administrador — §2.6.
+  const { perfil } = await getSesion();
+  const esSupervisor = perfil.rol === "supervisor";
   const supabase = await createClient();
 
   const { data: ticket } = await supabase
@@ -62,7 +66,33 @@ export default async function InformePage({
     <div className="grid gap-6">
       <div className="no-print flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">Informe de Inspección de Flota</h1>
-        <PrintButton />
+        {/* §2.6: "Ver" de la tabla entra acá; se traen las acciones que antes
+            solo estaban en el detalle del ticket. */}
+        <div className="flex flex-wrap items-center gap-2">
+          {esSupervisor && (
+            <Link
+              href="/dashboard"
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              Inspecciones
+            </Link>
+          )}
+          {esSupervisor && puedeReinspeccionar(ticket.estado) && (
+            <Link
+              href={`/tickets/${id}/reinspeccion`}
+              className={buttonVariants({ size: "sm" })}
+            >
+              Registrar re-inspección
+            </Link>
+          )}
+          <Link
+            href={`/tickets/${id}`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            Ver historial completo
+          </Link>
+          <PrintButton />
+        </div>
       </div>
 
       <article className="print-full mx-auto w-full max-w-3xl rounded-xl bg-card p-8 text-sm ring-1 ring-foreground/10">
@@ -165,24 +195,32 @@ export default async function InformePage({
       </article>
 
       <div className="no-print mx-auto w-full max-w-3xl rounded-xl border p-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <p className="text-sm font-medium">
-            Generar informe y enviar por correo
-          </p>
-          <a
-            href={`/api/informe/${ticket.id}/enviar`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-primary underline"
-          >
-            Ver / descargar PDF
-          </a>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm font-medium">Enviar el informe</p>
+          <div className="flex flex-wrap items-center gap-3">
+            {/* §4.2: compartir el PDF por WhatsApp con el "Compartir" nativo. */}
+            <WhatsAppShareButton
+              ticketId={ticket.id}
+              transporte={ticket.transporte}
+              patenteCamion={ticket.patente_camion}
+              nombreArchivo={`informe-inspeccion-${ticket.numero_inspeccion}-rev-${ticket.revision_actual}.pdf`}
+            />
+            <a
+              href={`/api/informe/${ticket.id}/enviar`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-primary underline"
+            >
+              Ver / descargar PDF
+            </a>
+          </div>
         </div>
         <EmailRecipientsSelect ticketId={ticket.id} />
         <p className="mt-2 text-xs text-muted-foreground">
-          El informe se genera como PDF en el servidor y se envía adjunto a todos
-          los destinatarios en un solo correo (cuerpo HTML con el resumen de
-          observaciones; las fotos van solo en el PDF).
+          Por correo: el PDF se genera en el servidor y va adjunto en un solo
+          envío (cuerpo HTML con el resumen de observaciones; las fotos van en el
+          PDF). Por WhatsApp: abre el panel de “Compartir” del dispositivo con el
+          PDF adjunto — funciona desde el celular.
         </p>
       </div>
     </div>
