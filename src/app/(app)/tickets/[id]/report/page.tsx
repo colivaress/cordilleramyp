@@ -18,7 +18,9 @@ export default async function InformePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { perfil } = await getSesion();
+  // Solo exige sesión válida (app-shell). La vista del informe es la misma para
+  // supervisor y administrador — §2.6.
+  await getSesion();
   const supabase = await createClient();
 
   const { data: ticket } = await supabase
@@ -55,15 +57,6 @@ export default async function InformePage({
     revision?.firma_fiscalizador_url,
   ]);
 
-  // §2.6: el envío del informe por correo lo acciona un supervisor (no el
-  // administrador) — el dueño del ticket, o cualquier supervisor si el ticket
-  // está "con observaciones" (o el legado "en reparación").
-  const conObservaciones =
-    ticket.estado === "finalizada_con_observaciones" ||
-    ticket.estado === "en_reparacion_de_observaciones";
-  const puedeEnviarCorreo =
-    perfil.rol === "supervisor" &&
-    (ticket.supervisor_id === perfil.id || conObservaciones);
 
   return (
     <div className="grid gap-6">
@@ -171,29 +164,27 @@ export default async function InformePage({
         </section>
       </article>
 
-      {puedeEnviarCorreo && (
-        <div className="no-print mx-auto w-full max-w-3xl rounded-xl border p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <p className="text-sm font-medium">
-              Generar informe y enviar por correo
-            </p>
-            <a
-              href={`/api/informe/${ticket.id}/enviar`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-primary underline"
-            >
-              Ver / descargar PDF
-            </a>
-          </div>
-          <EmailRecipientsSelect ticketId={ticket.id} />
-          <p className="mt-2 text-xs text-muted-foreground">
-            El informe se genera como PDF en el servidor y se envía adjunto a
-            todos los destinatarios en un solo correo. El cuerpo lleva el resumen
-            de observaciones en texto; las fotos van solo en el PDF.
+      <div className="no-print mx-auto w-full max-w-3xl rounded-xl border p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <p className="text-sm font-medium">
+            Generar informe y enviar por correo
           </p>
+          <a
+            href={`/api/informe/${ticket.id}/enviar`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-primary underline"
+          >
+            Ver / descargar PDF
+          </a>
         </div>
-      )}
+        <EmailRecipientsSelect ticketId={ticket.id} />
+        <p className="mt-2 text-xs text-muted-foreground">
+          El informe se genera como PDF en el servidor y se envía adjunto a todos
+          los destinatarios en un solo correo (cuerpo HTML con el resumen de
+          observaciones; las fotos van solo en el PDF).
+        </p>
+      </div>
     </div>
   );
 }

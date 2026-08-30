@@ -20,6 +20,7 @@ import {
 import { TicketStatusBadge } from "@/components/TicketStatusBadge";
 import { CountdownBadge } from "@/components/CountdownBadge";
 import { WhatsAppNotifyButton } from "@/components/WhatsAppNotifyButton";
+import { MesFilter } from "@/components/MesFilter";
 import { cn } from "@/lib/utils";
 import {
   clasesFilaAlerta,
@@ -30,7 +31,42 @@ import type { FallaResumen } from "@/lib/mensajes";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+const MESES_ES = [
+  "Enero",
+  "Febrero",
+  "Marzo",
+  "Abril",
+  "Mayo",
+  "Junio",
+  "Julio",
+  "Agosto",
+  "Septiembre",
+  "Octubre",
+  "Noviembre",
+  "Diciembre",
+];
+
+/** "YYYY-MM" del `created_at` en horario de Chile — §2.6 filtro por mes. */
+function mesKey(iso: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+  }).format(new Date(iso));
+}
+
+/** "Agosto 2026" a partir de "2026-08". */
+function mesEtiqueta(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  return `${MESES_ES[m - 1]} ${y}`;
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ mes?: string }>;
+}) {
+  const { mes } = await searchParams;
   // §2.6: el administrador ve todo; el supervisor ve solo sus tickets, sin
   // tarjetas de resumen. La RLS ya filtra a nivel de BD; acá además se refleja
   // en la UI y en el query.
@@ -55,6 +91,19 @@ export default async function DashboardPage() {
   // (numero_inspeccion). La tabla itera sobre `tickets`, no sobre `ticket_revisiones`.
   const { data: tickets } = await ticketsQuery;
   const lista = tickets ?? [];
+
+  // §2.6: filtro por mes (por `created_at`), SOLO en el dashboard de admin.
+  const mesesDisponibles = esAdmin
+    ? [...new Set(lista.map((t) => mesKey(t.created_at)))]
+        .sort()
+        .reverse()
+        .map((k) => ({ valor: k, etiqueta: mesEtiqueta(k) }))
+    : [];
+  const mesSeleccionado =
+    esAdmin && mes && mesesDisponibles.some((o) => o.valor === mes) ? mes : "";
+  const listaVisible = mesSeleccionado
+    ? lista.filter((t) => mesKey(t.created_at) === mesSeleccionado)
+    : lista;
 
   // Por cada ticket, el `numero_revision` de su revisión MÁS RECIENTE (contador
   // que reinicia en 1 por ticket — §2.6, ya NO se usa nro_revision_global en UI).
@@ -93,14 +142,14 @@ export default async function DashboardPage() {
   }
 
   const resumen = {
-    total: lista.length,
-    porVencer: lista.filter(
+    total: listaVisible.length,
+    porVencer: listaVisible.filter(
       (t) => estadoVencimiento(t.fecha_vencimiento, t.estado) === "por_vencer",
     ).length,
-    vencidos: lista.filter(
+    vencidos: listaVisible.filter(
       (t) => estadoVencimiento(t.fecha_vencimiento, t.estado) === "vencido",
     ).length,
-    enReparacion: lista.filter(
+    enReparacion: listaVisible.filter(
       (t) => t.estado === "en_reparacion_de_observaciones",
     ).length,
   };
@@ -114,8 +163,8 @@ export default async function DashboardPage() {
           </h1>
           <p className="text-sm text-muted-foreground">
             {esAdmin
-              ? "Todos los tickets de inspección y alertas de vencimiento."
-              : "Tus tickets de inspección y alertas de vencimiento."}
+              ? "Todas las inspecciones y alertas de vencimiento."
+              : "Tus inspecciones y alertas de vencimiento."}
           </p>
         </div>
         {/* §2.6: solo el supervisor crea inspecciones. */}
@@ -128,7 +177,7 @@ export default async function DashboardPage() {
 
       {esAdmin && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <ResumenCard titulo="Tickets" valor={resumen.total} />
+          <ResumenCard titulo="Inspecciones" valor={resumen.total} />
           <ResumenCard
             titulo="Por vencer (≤48h)"
             valor={resumen.porVencer}
@@ -145,11 +194,22 @@ export default async function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Tickets</CardTitle>
-          <CardDescription>
-            Las filas se resaltan según el tiempo hasta la fecha límite de
-            corrección (ámbar ≤48h, naranja ≤24h, rojo vencido).
-          </CardDescription>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle>Inspecciones</CardTitle>
+              <CardDescription>
+                Las filas se resaltan según el tiempo hasta la fecha límite de
+                corrección (ámbar ≤48h, naranja ≤24h, rojo vencido).
+              </CardDescription>
+            </div>
+            {/* §2.6: filtro por mes de creación — solo dashboard de admin. */}
+            {esAdmin && mesesDisponibles.length > 0 && (
+              <MesFilter
+                opciones={mesesDisponibles}
+                seleccionado={mesSeleccionado}
+              />
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -167,14 +227,16 @@ export default async function DashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {lista.length === 0 && (
+                {listaVisible.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={8} className="text-muted-foreground">
-                      No hay tickets todavía.
+                      {mesSeleccionado
+                        ? "No hay inspecciones creadas en el mes seleccionado."
+                        : "No hay inspecciones todavía."}
                     </TableCell>
                   </TableRow>
                 )}
-                {lista.map((t) => {
+                {listaVisible.map((t) => {
                   const nivel = nivelAlerta(t.fecha_vencimiento, t.estado);
                   return (
                     <TableRow key={t.id} className={cn(clasesFilaAlerta(nivel))}>

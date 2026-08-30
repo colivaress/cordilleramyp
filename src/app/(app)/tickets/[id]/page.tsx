@@ -91,10 +91,11 @@ export default async function TicketDetallePage({
     (ticket.supervisor_id === perfil.id ||
       revActual?.supervisor_id === perfil.id);
 
-  // §2.6: el envío del informe por correo lo acciona un supervisor — el dueño del
-  // ticket, o cualquiera si el ticket está "con observaciones".
+  // §2.6: el envío del informe por correo lo pueden accionar el administrador
+  // (cualquier ticket) y el supervisor (el suyo, o cualquiera "con observaciones").
   const puedeEnviarCorreo =
-    esSupervisor && (ticket.supervisor_id === perfil.id || conObservaciones);
+    perfil.rol === "administrador" ||
+    (esSupervisor && (ticket.supervisor_id === perfil.id || conObservaciones));
 
   const fallasAbiertas: FallaResumen[] = resp
     .filter(

@@ -244,6 +244,7 @@ export type Database = {
       }
       tickets: {
         Row: {
+          alerta_naranja_enviada: boolean
           conductor: string
           created_at: string
           estado: Database["public"]["Enums"]["ticket_estado"]
@@ -261,6 +262,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          alerta_naranja_enviada?: boolean
           conductor: string
           created_at?: string
           estado?: Database["public"]["Enums"]["ticket_estado"]
@@ -278,6 +280,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          alerta_naranja_enviada?: boolean
           conductor?: string
           created_at?: string
           estado?: Database["public"]["Enums"]["ticket_estado"]

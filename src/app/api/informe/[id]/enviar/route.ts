@@ -29,11 +29,11 @@ async function preparar(id: string) {
     .eq("user_id", user.id)
     .maybeSingle();
 
-  // §2.6: el informe lo maneja el supervisor dueño, no el administrador.
-  if (!perfil || perfil.rol !== "supervisor") {
+  // §2.6: el informe lo pueden manejar tanto el supervisor como el administrador.
+  if (!perfil || (perfil.rol !== "supervisor" && perfil.rol !== "administrador")) {
     return {
       error: NextResponse.json(
-        { error: "Solo el supervisor a cargo puede acceder al informe." },
+        { error: "Solo un supervisor o administrador puede acceder al informe." },
         { status: 403 },
       ),
     };
@@ -49,8 +49,8 @@ async function preparar(id: string) {
     };
   }
 
-  // §2.6: puede enviar/ver el informe el supervisor dueño del ticket, o
-  // cualquier supervisor si el ticket está "con observaciones" (o el legado
+  // §2.6: el administrador ve/envía el informe de CUALQUIER ticket. Un supervisor
+  // puede el de los suyos, más los que estén "con observaciones" (o el legado
   // "en reparación") — la segunda inspección la puede tomar otro supervisor.
   const { data: estadoTicket } = await supabase
     .from("tickets")
@@ -60,7 +60,11 @@ async function preparar(id: string) {
   const conObservaciones =
     estadoTicket?.estado === "finalizada_con_observaciones" ||
     estadoTicket?.estado === "en_reparacion_de_observaciones";
-  if (informe.meta.supervisorId !== perfil.id && !conObservaciones) {
+  if (
+    perfil.rol !== "administrador" &&
+    informe.meta.supervisorId !== perfil.id &&
+    !conObservaciones
+  ) {
     return {
       error: NextResponse.json(
         { error: "Solo se puede acceder a informes de tickets propios." },

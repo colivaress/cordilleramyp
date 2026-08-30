@@ -209,6 +209,8 @@ export async function iniciarInspeccion(
         revision_actual: 1,
         supervisor_id: perfil.id,
         fecha_vencimiento: input.fechaVencimientoISO,
+        // §3.1: ciclo de vencimiento nuevo → aún no se avisó por WhatsApp.
+        alerta_naranja_enviada: false,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "id" },
@@ -464,6 +466,8 @@ export async function iniciarReinspeccion(input: {
       .update({
         estado: "en_revision",
         revision_actual: numeroRevision,
+        // §3.1: nuevo ciclo de vencimiento → se rehabilita el aviso automático.
+        alerta_naranja_enviada: false,
         updated_at: new Date().toISOString(),
       })
       .eq("id", input.ticketId);
