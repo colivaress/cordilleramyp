@@ -149,8 +149,14 @@ export default async function DashboardPage({
     vencidos: listaVisible.filter(
       (t) => estadoVencimiento(t.fecha_vencimiento, t.estado) === "vencido",
     ).length,
+    // §2.6: "con fallas pendientes de corregir". Desde que se quitó el paso
+    // manual "Iniciar reparación" (§2.3) ningún ticket nuevo llega a
+    // `en_reparacion_de_observaciones`; se cuentan los `finalizada_con_observaciones`
+    // (+ el legado para no perder datos antiguos).
     enReparacion: listaVisible.filter(
-      (t) => t.estado === "en_reparacion_de_observaciones",
+      (t) =>
+        t.estado === "finalizada_con_observaciones" ||
+        t.estado === "en_reparacion_de_observaciones",
     ).length,
   };
 
@@ -216,6 +222,8 @@ export default async function DashboardPage({
             <Table>
               <TableHeader>
                 <TableRow>
+                  {/* §2.6: "Ver" es la primera columna en ambas pantallas. */}
+                  <TableHead>Ver</TableHead>
                   <TableHead>Nro de Inspección</TableHead>
                   <TableHead>Nro de Revisión</TableHead>
                   <TableHead>Camión / Rampla</TableHead>
@@ -223,13 +231,20 @@ export default async function DashboardPage({
                   <TableHead>Estado</TableHead>
                   <TableHead>Vencimiento</TableHead>
                   <TableHead>Supervisor</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
+                  {/* §2.6: la única acción extra ("Notificar por WhatsApp") es
+                      solo del dashboard de administrador. */}
+                  {esAdmin && (
+                    <TableHead className="text-right">Acciones</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {listaVisible.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-muted-foreground">
+                    <TableCell
+                      colSpan={esAdmin ? 9 : 8}
+                      className="text-muted-foreground"
+                    >
                       {mesSeleccionado
                         ? "No hay inspecciones creadas en el mes seleccionado."
                         : "No hay inspecciones todavía."}
@@ -240,6 +255,17 @@ export default async function DashboardPage({
                   const nivel = nivelAlerta(t.fecha_vencimiento, t.estado);
                   return (
                     <TableRow key={t.id} className={cn(clasesFilaAlerta(nivel))}>
+                      <TableCell>
+                        <Link
+                          href={`/tickets/${t.id}`}
+                          className={buttonVariants({
+                            variant: "outline",
+                            size: "xs",
+                          })}
+                        >
+                          Ver
+                        </Link>
+                      </TableCell>
                       <TableCell className="font-mono tabular-nums">
                         {t.numero_inspeccion}
                       </TableCell>
@@ -266,43 +292,27 @@ export default async function DashboardPage({
                         />
                       </TableCell>
                       <TableCell>{t.supervisor?.nombre ?? "—"}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                          <WhatsAppNotifyButton
-                            size="xs"
-                            ticketId={t.id}
-                            numeroInspeccion={t.numero_inspeccion}
-                            numeroRevision={numeroRevision(t)}
-                            patenteCamion={t.patente_camion}
-                            patenteRampla={t.patente_rampla}
-                            transporte={t.transporte}
-                            conductor={t.conductor}
-                            supervisorTelefono={t.supervisor?.telefono}
-                            supervisorNombre={t.supervisor?.nombre}
-                            fallas={fallasPorTicket.get(t.id) ?? []}
-                            fechaVencimiento={t.fecha_vencimiento}
-                            estadoTicket={t.estado}
-                          />
-                          <Link
-                            href={`/tickets/${t.id}`}
-                            className={buttonVariants({
-                              variant: "outline",
-                              size: "xs",
-                            })}
-                          >
-                            Ver
-                          </Link>
-                          <Link
-                            href={`/tickets/${t.id}/report`}
-                            className={buttonVariants({
-                              variant: "outline",
-                              size: "xs",
-                            })}
-                          >
-                            Informe
-                          </Link>
-                        </div>
-                      </TableCell>
+                      {esAdmin && (
+                        <TableCell>
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <WhatsAppNotifyButton
+                              size="xs"
+                              ticketId={t.id}
+                              numeroInspeccion={t.numero_inspeccion}
+                              numeroRevision={numeroRevision(t)}
+                              patenteCamion={t.patente_camion}
+                              patenteRampla={t.patente_rampla}
+                              transporte={t.transporte}
+                              conductor={t.conductor}
+                              supervisorTelefono={t.supervisor?.telefono}
+                              supervisorNombre={t.supervisor?.nombre}
+                              fallas={fallasPorTicket.get(t.id) ?? []}
+                              fechaVencimiento={t.fecha_vencimiento}
+                              estadoTicket={t.estado}
+                            />
+                          </div>
+                        </TableCell>
+                      )}
                     </TableRow>
                   );
                 })}

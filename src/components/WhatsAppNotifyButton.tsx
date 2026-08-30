@@ -95,7 +95,7 @@ export function WhatsAppNotifyButton({
       className="border-alert-300 text-alert-700 hover:bg-alert-50"
     >
       <MessageCircleIcon />
-      Notificar Vencimiento por WhatsApp
+      Notificar por WhatsApp
     </Button>
   );
 }

@@ -16,11 +16,8 @@ import { TicketStatusBadge } from "@/components/TicketStatusBadge";
 import { ItemEstadoBadge } from "@/components/ItemEstadoBadge";
 import { FotoFalla } from "@/components/FotoFalla";
 import { CountdownBadge } from "@/components/CountdownBadge";
-import { WhatsAppNotifyButton } from "@/components/WhatsAppNotifyButton";
 import { BotonFinalizarPendiente } from "@/components/BotonFinalizarPendiente";
-import { EmailRecipientsSelect } from "@/components/EmailRecipientsSelect";
 import { puedeReinspeccionar } from "@/lib/ticket-state-machine";
-import type { FallaResumen } from "@/lib/mensajes";
 
 export const dynamic = "force-dynamic";
 
@@ -78,9 +75,6 @@ export default async function TicketDetallePage({
   ]);
 
   const revActual = revs.find((r) => r.numero_revision === numeroRevisionActual);
-  const conObservaciones =
-    ticket.estado === "finalizada_con_observaciones" ||
-    ticket.estado === "en_reparacion_de_observaciones";
 
   // §2.8: inspección que quedó a medio finalizar (el checklist y las firmas ya
   // están guardados, pero "Finalizar revisión" no llegó a cerrarla). La puede
@@ -90,23 +84,6 @@ export default async function TicketDetallePage({
     ticket.estado === "en_revision" &&
     (ticket.supervisor_id === perfil.id ||
       revActual?.supervisor_id === perfil.id);
-
-  // §2.6: el envío del informe por correo lo pueden accionar el administrador
-  // (cualquier ticket) y el supervisor (el suyo, o cualquiera "con observaciones").
-  const puedeEnviarCorreo =
-    perfil.rol === "administrador" ||
-    (esSupervisor && (ticket.supervisor_id === perfil.id || conObservaciones));
-
-  const fallasAbiertas: FallaResumen[] = resp
-    .filter(
-      (r) =>
-        r.revision_numero === ticket.revision_actual &&
-        r.estado === "no_conforme",
-    )
-    .map((r) => ({
-      nombre: r.item?.nombre ?? r.item_key,
-      observacion: r.observacion,
-    }));
 
   return (
     <div className="grid gap-6">
@@ -161,6 +138,15 @@ export default async function TicketDetallePage({
       )}
 
       <div className="flex flex-wrap gap-2">
+        {/* §2.6: volver al listado desde el detalle (perfil supervisor). */}
+        {esSupervisor && (
+          <Link
+            href="/dashboard"
+            className={buttonVariants({ variant: "outline" })}
+          >
+            Inspecciones
+          </Link>
+        )}
         <Link
           href={`/tickets/${id}/report`}
           className={buttonVariants({ variant: "outline" })}
@@ -178,46 +164,7 @@ export default async function TicketDetallePage({
             Registrar re-inspección
           </Link>
         )}
-        <WhatsAppNotifyButton
-          ticketId={ticket.id}
-          numeroInspeccion={ticket.numero_inspeccion}
-          numeroRevision={numeroRevisionActual}
-          patenteCamion={ticket.patente_camion}
-          patenteRampla={ticket.patente_rampla}
-          transporte={ticket.transporte}
-          conductor={ticket.conductor}
-          supervisorTelefono={ticket.supervisor?.telefono}
-          supervisorNombre={ticket.supervisor?.nombre}
-          fallas={fallasAbiertas}
-          fechaVencimiento={ticket.fecha_vencimiento}
-          estadoTicket={ticket.estado}
-        />
       </div>
-
-      {/* §2.6: enviar el informe por correo sin tener que entrar antes a
-          "Ver informe" — mismo selector de destinatarios de §4.1. */}
-      {puedeEnviarCorreo && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Enviar informe por correo</CardTitle>
-            <CardDescription>
-              Genera el PDF del informe en el servidor y lo envía adjunto a los
-              destinatarios seleccionados en un solo correo.{" "}
-              <Link
-                href={`/api/informe/${id}/enviar`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline"
-              >
-                Ver / descargar PDF
-              </Link>
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <EmailRecipientsSelect ticketId={id} />
-          </CardContent>
-        </Card>
-      )}
 
       <Card>
         <CardHeader>
