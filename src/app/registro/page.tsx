@@ -14,7 +14,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { RolUsuario } from "@/lib/tipos";
 
 export default function RegistroPage() {
   const router = useRouter();
@@ -23,7 +22,6 @@ export default function RegistroPage() {
   const [fechaNacimiento, setFechaNacimiento] = useState("");
   const [email, setEmail] = useState("");
   const [telefono, setTelefono] = useState("");
-  const [rol, setRol] = useState<RolUsuario>("supervisor");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -39,7 +37,8 @@ export default function RegistroPage() {
       email,
       password,
       options: {
-        data: { nombre, apellido, rol, telefono, fecha_nacimiento: fechaNacimiento },
+        // §2.10: el rol NO se elige acá — lo definió el administrador al invitar.
+        data: { nombre, apellido, telefono, fecha_nacimiento: fechaNacimiento },
         emailRedirectTo:
           typeof window !== "undefined"
             ? `${window.location.origin}/auth/callback`
@@ -48,7 +47,17 @@ export default function RegistroPage() {
     });
     setCargando(false);
     if (error) {
-      setError(error.message);
+      // §2.10: si el correo no tiene una invitación pendiente, el trigger
+      // handle_new_user rechaza el alta (Supabase lo devuelve como error
+      // genérico de base de datos).
+      const noAutorizada = /database error saving new user|not authorized|no está autorizada/i.test(
+        error.message,
+      );
+      setError(
+        noAutorizada
+          ? "Este correo no está autorizado. Pídele a un administrador de Cordillera M&P que cree tu cuenta."
+          : error.message,
+      );
       return;
     }
     if (data.session) {
@@ -56,18 +65,17 @@ export default function RegistroPage() {
       router.refresh();
       return;
     }
-    setOk(
-      "Cuenta creada. Revisar el correo para confirmar la dirección y luego iniciar sesión.",
-    );
+    setOk("Cuenta activada. Ya puedes iniciar sesión.");
   }
 
   return (
     <main className="flex flex-1 items-center justify-center p-6">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-xl">Crear cuenta</CardTitle>
+          <CardTitle className="text-xl">Activar cuenta</CardTitle>
           <CardDescription>
-            Cordillera M&amp;P — acceso de Supervisor o Administrador
+            Cordillera M&amp;P — solo para correos que un administrador ya
+            autorizó. El rol lo define el administrador.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -99,18 +107,6 @@ export default function RegistroPage() {
                 value={fechaNacimiento}
                 onChange={(e) => setFechaNacimiento(e.target.value)}
               />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="rol">Rol</Label>
-              <select
-                id="rol"
-                value={rol}
-                onChange={(e) => setRol(e.target.value as RolUsuario)}
-                className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              >
-                <option value="supervisor">Supervisor</option>
-                <option value="administrador">Administrador</option>
-              </select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="telefono">

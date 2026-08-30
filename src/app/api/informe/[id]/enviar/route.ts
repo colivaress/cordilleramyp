@@ -25,9 +25,16 @@ async function preparar(id: string) {
 
   const { data: perfil } = await supabase
     .from("personal")
-    .select("id, rol, nombre, apellido")
+    .select("id, rol, nombre, apellido, activo")
     .eq("user_id", user.id)
     .maybeSingle();
+
+  // §2.10: cuenta desactivada = sin acceso.
+  if (perfil && !perfil.activo) {
+    return {
+      error: NextResponse.json({ error: "Cuenta desactivada." }, { status: 403 }),
+    };
+  }
 
   // §2.6: el informe lo pueden manejar tanto el supervisor como el administrador.
   if (!perfil || (perfil.rol !== "supervisor" && perfil.rol !== "administrador")) {

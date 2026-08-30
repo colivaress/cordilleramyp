@@ -36,6 +36,12 @@ export default async function AppLayout({
                 >
                   Inspecciones
                 </Link>
+                <Link
+                  href="/usuarios"
+                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                >
+                  Usuarios
+                </Link>
               </>
             )}
             {/* §2.6: solo el supervisor crea inspecciones; el admin no ve el link. */}

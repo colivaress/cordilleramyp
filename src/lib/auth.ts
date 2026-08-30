@@ -21,8 +21,14 @@ export async function getSesion(): Promise<{ userId: string; perfil: Personal }>
     .maybeSingle();
 
   if (!perfil) {
-    // El trigger handle_new_user no alcanzó a crear la fila, o fue borrada.
+    // El trigger handle_new_user no alcanzó a vincular la fila, o fue borrada.
     redirect("/login?error=perfil_no_encontrado");
+  }
+
+  // §2.10: una cuenta desactivada no puede usar la app aunque su sesión de
+  // Supabase Auth siga vigente.
+  if (!perfil.activo) {
+    redirect("/login?error=cuenta_desactivada");
   }
 
   return { userId: user.id, perfil };
