@@ -219,7 +219,9 @@ export default async function DashboardPage({
                   <TableHead>
                     <span className="sr-only">Notificar por WhatsApp</span>
                   </TableHead>
-                  <TableHead>Nro de Inspección</TableHead>
+                  {/* §2.6: solo en esta tabla el encabezado se acorta a "Nro"
+                      (el resto de la app mantiene "Nro de Inspección"). */}
+                  <TableHead>Nro</TableHead>
                   <TableHead>Camión / Rampla</TableHead>
                   <TableHead>Transporte</TableHead>
                   <TableHead>Estado</TableHead>

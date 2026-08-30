@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Herramientas de una sola corrida, fuera de la app (§11).
+    "scripts/**",
   ]),
 ]);
 

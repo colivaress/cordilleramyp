@@ -54,8 +54,10 @@ export default async function AppLayout({
               </Link>
             )}
           </nav>
-          <div className="ml-auto flex items-center gap-3 text-sm">
-            <span className="hidden text-muted-foreground sm:inline">
+          <div className="ml-auto flex min-w-0 items-center gap-2 text-sm sm:gap-3">
+            {/* §2.6: el nombre debe verse en todos los tamaños (antes tenía
+                `hidden sm:inline` y desaparecía en celular). */}
+            <span className="max-w-[8rem] truncate text-muted-foreground sm:max-w-[14rem]">
               {perfil.nombre}
             </span>
             <Badge variant={esAdmin ? "default" : "secondary"}>
