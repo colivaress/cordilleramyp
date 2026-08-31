@@ -217,21 +217,21 @@ export default async function DashboardPage({
                   <TableHead>
                     <span className="sr-only">Notificar por WhatsApp</span>
                   </TableHead>
-                  {/* §2.6: solo en esta tabla el encabezado se acorta a "Nro"
-                      (el resto de la app mantiene "Nro de Inspección"). */}
+                  {/* §2.6/§2.7: encabezado corto "Nro" (el resto de la app usa
+                      "Nro de Inspección"). El nro de revisión va pegado acá
+                      mismo como "#N", ya no en una columna aparte. */}
                   <TableHead>Nro</TableHead>
                   <TableHead>Camión / Rampla</TableHead>
                   <TableHead>Transporte</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Vencimiento</TableHead>
                   <TableHead>Supervisor</TableHead>
-                  <TableHead>Nro de Revisión</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {listaPagina.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-muted-foreground">
+                    <TableCell colSpan={8} className="text-muted-foreground">
                       {hayFiltro
                         ? "No hay inspecciones para los filtros seleccionados."
                         : "No hay inspecciones todavía."}
@@ -273,8 +273,11 @@ export default async function DashboardPage({
                           />
                         )}
                       </TableCell>
-                      <TableCell className="font-mono tabular-nums">
+                      <TableCell className="font-mono tabular-nums whitespace-nowrap">
                         {t.numero_inspeccion}
+                        <span className="ml-1 text-xs text-muted-foreground">
+                          #{numeroRevision(t)}
+                        </span>
                       </TableCell>
                       <TableCell className="font-medium">
                         {t.patente_camion}
@@ -294,9 +297,6 @@ export default async function DashboardPage({
                         />
                       </TableCell>
                       <TableCell>{t.supervisor?.nombre ?? "—"}</TableCell>
-                      <TableCell className="font-mono tabular-nums">
-                        {numeroRevision(t)}
-                      </TableCell>
                     </TableRow>
                   );
                 })}
