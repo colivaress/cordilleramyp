@@ -155,18 +155,16 @@ export function construirCuerpoInforme(d: DatosInforme): string {
 
   const seccionObservaciones =
     obs.length > 0
-      ? `<p style="margin: 0 0 8px;">Dentro de las observaciones se detecta lo siguiente:</p>
+      ? `<p style="margin: 0 0 8px;">Tras la revisión, se detectó el siguiente hallazgo en las observaciones:</p>
     <ol style="margin: 0 0 20px; padding-left: 20px;">
       ${obs.map((t) => `<li>${esc(t)}</li>`).join("\n      ")}
     </ol>`
-      : `<p style="margin: 0 0 20px;">No se detectan observaciones. El camión cumple con todas las exigencias del Check List.</p>`;
+      : `<p style="margin: 0 0 20px;">Tras la revisión, no se detectaron observaciones. El camión cumple con todas las exigencias del Check List.</p>`;
 
   return `<div style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
     <p style="margin: 0 0 16px;">Estimados,</p>
 
-    <p style="margin: 0 0 16px;">Se realiza Check List a camión de transportes <strong>${esc(
-      d.transporte,
-    )}</strong>.</p>
+    <p style="margin: 0 0 16px;">Junto con saludar, informo que se ha ejecutado la inspección técnica y operativa al camión de transportes cuyos datos se detallan a continuación:</p>
 
     <table style="border-collapse: collapse; width: 100%; margin: 0 0 20px;">
       ${fila("Empresa", d.transporte)}
@@ -177,8 +175,8 @@ export function construirCuerpoInforme(d: DatosInforme): string {
 
     ${seccionObservaciones}
 
-    <p style="margin: 0 0 20px;">Se adjunta Check List y fotografías para ilustrar la condición.</p>
+    <p style="margin: 0 0 20px;">Para mayor respaldo, se adjunta la lista de chequeo y el registro fotográfico que ilustra la condición actual del vehículo.</p>
 
-    <p style="margin: 0;">${esc(d.firmanteNombre)}<br>${CARGO_SUPERVISOR}</p>
+    <p style="margin: 0;">Atentamente,<br>${esc(d.firmanteNombre)}<br>${CARGO_SUPERVISOR}</p>
   </div>`;
 }

@@ -475,7 +475,7 @@ Lo acciona el **supervisor** dueño de ese ticket (ver §2.6), no el administrad
   <div style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
     <p style="margin: 0 0 16px;">Estimados,</p>
 
-    <p style="margin: 0 0 16px;">Se realiza Check List a camión de transportes <strong>{transporte}</strong>.</p>
+    <p style="margin: 0 0 16px;">Junto con saludar, informo que se ha ejecutado la inspección técnica y operativa al camión de transportes cuyos datos se detallan a continuación:</p>
 
     <table style="border-collapse: collapse; width: 100%; margin: 0 0 20px;">
       <tr>
@@ -496,15 +496,15 @@ Lo acciona el **supervisor** dueño de ese ticket (ver §2.6), no el administrad
       </tr>
     </table>
 
-    <p style="margin: 0 0 8px;">Dentro de las observaciones se detecta lo siguiente:</p>
+    <p style="margin: 0 0 8px;">Tras la revisión, se detectó el siguiente hallazgo en las observaciones:</p>
     <ol style="margin: 0 0 20px; padding-left: 20px;">
       <li>{observación del primer ítem no_conforme}</li>
       <li>{observación del segundo ítem no_conforme}</li>
     </ol>
 
-    <p style="margin: 0 0 20px;">Se adjunta Check List y fotografías para ilustrar la condición.</p>
+    <p style="margin: 0 0 20px;">Para mayor respaldo, se adjunta la lista de chequeo y el registro fotográfico que ilustra la condición actual del vehículo.</p>
 
-    <p style="margin: 0;">{nombre} {apellido}<br>Supervisor de Encarpe</p>
+    <p style="margin: 0;">Atentamente,<br>{nombre} {apellido}<br>Supervisor de Encarpe</p>
   </div>
   ```
 
@@ -512,7 +512,8 @@ Lo acciona el **supervisor** dueño de ese ticket (ver §2.6), no el administrad
 
   - Los datos de camión (`{transporte}`, matrícula, rampla, `{conductor}`) son los de la revisión que se está informando — el mismo conductor por revisión de §2.6, no necesariamente el de la cabecera original del ticket. **Las patentes (matrícula y rampla) van en mayúscula** — conviértelas al mostrarlas (`.toUpperCase()`), no hace falta cambiar cómo se guardan en la base de datos.
   - "Empresa" en la tabla repite el mismo valor de `transporte` que ya aparece en la frase de arriba — es intencional, va en ambos lugares.
-  - La lista numerada son **las observaciones de los ítems `no_conforme` de esa revisión, en el mismo orden del checklist** — solo el texto de la observación, sin repetir el nombre del ítem ni la foto; las fotos van únicamente en el PDF adjunto. Si la revisión no tiene ítems `no_conforme` (ticket `FINALIZADA_SIN_OBSERVACIONES`), reemplaza esa sección por una línea equivalente, por ejemplo: "No se detectan observaciones. El camión cumple con todas las exigencias del Check List." — no dejes la plantilla con un listado vacío.
+  - La lista numerada son **las observaciones de los ítems `no_conforme` de esa revisión, en el mismo orden del checklist** — solo el texto de la observación, sin repetir el nombre del ítem ni la foto; las fotos van únicamente en el PDF adjunto. Si hay una sola observación, la lista queda con un solo ítem (no fuerces un "2." vacío). Si la revisión no tiene ítems `no_conforme` (ticket `FINALIZADA_SIN_OBSERVACIONES`), reemplaza tanto la frase introductoria como la lista por una línea equivalente, por ejemplo: "Tras la revisión, no se detectaron observaciones. El camión cumple con todas las exigencias del Check List." — no dejes la plantilla con un listado vacío ni con un "1." sin contenido.
+  - **La firma cierra con "Atentamente," en su propia línea, antes del nombre** — no lo saques, es parte del texto nuevo.
   - `{nombre} {apellido}` son los del supervisor que **envía el correo en ese momento** (el usuario autenticado) — no necesariamente el `supervisor_id` original del ticket, ya que desde §2.6 cualquier supervisor puede reinspeccionar y enviar el informe de un ticket "con observaciones". `apellido` es un campo nuevo en `personal` — ver más abajo. "Supervisor de Encarpe" sigue siendo un texto fijo, igual para todos, no varía por persona.
   - Elimina cualquier línea tipo "Ver informe:" que quede vacía o rota, y no agregues datos que no estén en esta plantilla (no repitas Nro de Inspección, Nro de Revisión, estado, ni los demás campos de cabecera dentro del cuerpo — esa información ya vive en el PDF adjunto).
   - **Asunto del correo:** usa también "Check List camión de transportes {transporte}" (o algo igual de consistente con el cuerpo) — revisa si en algún lugar del código quedó un asunto o texto genérico tipo "Se realizó la inspección técnica del camión. Se adjunta checklist" y reemplázalo, para que no queden dos redacciones distintas convivendo en el mismo correo.
