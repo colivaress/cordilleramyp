@@ -454,6 +454,15 @@ Genera una vista imprimible/exportable "Informe de Inspección - Cordillera M&P"
 - Las dos firmas digitales (imagen + nombre + timestamp) de la revisión correspondiente.
 - Sin códigos documentales ni números de versión (ver restricción global al inicio del documento).
 
+**Nueva funcionalidad — selector de revisión cuando el ticket tiene 2 o más revisiones:** hoy el informe siempre muestra una sola revisión (la más reciente) sin dar opción de elegir otra, aunque el ticket ya haya tenido una re-inspección (§2.14). Corrige así:
+
+- **Si el ticket tiene una sola revisión:** el informe se comporta como hoy, sin ningún selector — no agregues el control de abajo si no hace falta.
+- **Si el ticket tiene 2 o más revisiones** (`ticket_revisiones` con más de una fila para ese `ticket_id`): agrega un control (selector/dropdown, o un botón que abre las opciones — a criterio de la implementación, mientras sea claro) en la parte superior del informe, con las opciones:
+  - **Cada revisión individual**, identificada como "Revisión 1", "Revisión 2", etc. (con su fecha al lado para distinguirlas, por ejemplo "Revisión 1 — 07-08-2026") — al elegir una, el informe muestra **solo** los datos de esa revisión puntual (su checklist, sus firmas, su resultado), igual que se arma hoy para la más reciente.
+  - **"Todas las revisiones"** (o "Historial completo"): genera el informe con **todas** las revisiones del ticket una tras otra, en orden (Revisión 1, Revisión 2, ...), cada una con su propio checklist, firmas, fecha y resultado — como un solo documento/PDF más largo que las incluye todas, no un resumen.
+- **Valor por defecto al entrar** (por ejemplo desde el botón "Ver" de la tabla, §2.6): la **revisión más reciente**, igual que el comportamiento actual — el selector es para cambiar esa vista, no reemplaza el default.
+- Esto aplica tanto a la vista en pantalla como al PDF generado para "Enviar por correo" y "Enviar por WhatsApp" (§4.1, §4.2): el PDF que se adjunta/comparte corresponde a lo que esté seleccionado en ese momento (una revisión puntual, o todas) — si el supervisor eligió "Todas las revisiones" antes de enviar, el PDF adjunto debe incluir todas, no solo la última.
+
 ### 4.1 Envío por correo (corrige lo ya construido: hoy el correo sale sin adjunto)
 
 Lo acciona el **supervisor** dueño de ese ticket (ver §2.6), no el administrador. Abre un selector **multi-destinatario** poblado desde la tabla `destinatarios_correo` (checkboxes, no un solo `<select>`), permite tildar varios antes de confirmar el envío. Al enviar:

@@ -8,34 +8,50 @@ import {
   StyleSheet,
 } from "@react-pdf/renderer";
 
+export type ItemPDF = {
+  n: number;
+  nombre: string;
+  estado: string;
+  esNoConforme: boolean;
+  observacion: string | null;
+  fotoDataUri: string | null;
+};
+
+export type FirmasPDF = {
+  conductor: { nombre: string; fecha: string; dataUri: string | null };
+  fiscalizador: { nombre: string; fecha: string; dataUri: string | null };
+};
+
+/** Una revisión del ticket para el informe (§4). */
+export type RevisionPDF = {
+  numeroRevision: number;
+  fechaRevision: string;
+  estadoResultante: string;
+  conductor: string;
+  vencimiento: string;
+  items: ItemPDF[];
+  firmas: FirmasPDF;
+};
+
 export type InformePDFDatos = {
   numeroInspeccion: number;
-  numeroRevision: number;
+  /** Estado a mostrar en la cabecera: la revisión seleccionada ("una") o el
+   *  estado actual del ticket ("todas"). */
   estado: string;
   emitidoEl: string;
+  /** §4: "una" = una revisión puntual; "todas" = historial completo. */
+  modo: "una" | "todas";
   cabecera: {
     transporte: string;
-    conductor: string;
     fecha: string;
     procedencia: string;
     tipoCamion: string;
     patenteCamion: string;
     patenteRampla: string;
     supervisor: string;
-    vencimiento: string;
   };
-  items: {
-    n: number;
-    nombre: string;
-    estado: string;
-    esNoConforme: boolean;
-    observacion: string | null;
-    fotoDataUri: string | null;
-  }[];
-  firmas: {
-    conductor: { nombre: string; fecha: string; dataUri: string | null };
-    fiscalizador: { nombre: string; fecha: string; dataUri: string | null };
-  };
+  /** modo "una" -> exactamente 1 revisión; modo "todas" -> todas, en orden. */
+  revisiones: RevisionPDF[];
 };
 
 // §6 en clave documento imprimible: fondo blanco, azul de marca sobrio, slate para texto.
@@ -78,6 +94,16 @@ const s = StyleSheet.create({
   },
   valor: { fontSize: 9.5, fontFamily: "Helvetica-Bold" },
   seccion: { fontSize: 10.5, fontFamily: "Helvetica-Bold", marginBottom: 6 },
+  revTitulo: {
+    fontSize: 11,
+    fontFamily: "Helvetica-Bold",
+    color: C.marca,
+    marginBottom: 2,
+    borderBottomWidth: 1,
+    borderBottomColor: C.linea,
+    paddingBottom: 4,
+  },
+  revMeta: { fontSize: 8.5, color: C.suave, marginBottom: 10 },
   filaHead: {
     flexDirection: "row",
     borderBottomWidth: 1,
@@ -154,11 +180,101 @@ function Dato({ k, v }: { k: string; v: string }) {
   );
 }
 
+/** Checklist + firmas de UNA revisión (mismo layout que el informe de siempre). */
+function BloqueRevision({
+  r,
+  conSubtitulo,
+  quiebre,
+}: {
+  r: RevisionPDF;
+  conSubtitulo: boolean;
+  quiebre: boolean;
+}) {
+  return (
+    <View break={quiebre}>
+      {conSubtitulo && (
+        <>
+          <Text style={s.revTitulo}>
+            Revisión {r.numeroRevision} — {r.fechaRevision} — {r.estadoResultante}
+          </Text>
+          <Text style={s.revMeta}>
+            Conductor: {r.conductor || "—"}   ·   Vencimiento corrección:{" "}
+            {r.vencimiento || "—"}
+          </Text>
+        </>
+      )}
+
+      <Text style={s.seccion}>Elementos a Fiscalizar</Text>
+      <View style={s.filaHead}>
+        <Text style={[s.cN, s.headTxt]}>#</Text>
+        <Text style={[s.cElemento, s.headTxt]}>Elemento</Text>
+        <Text style={[s.cResultado, s.headTxt]}>Resultado</Text>
+        <Text style={[s.cObs, s.headTxt]}>Observación</Text>
+      </View>
+
+      {r.items.map((it) => (
+        <View key={it.n} style={s.fila} wrap={false}>
+          <Text style={s.cN}>{it.n}</Text>
+          <Text style={s.cElemento}>{it.nombre}</Text>
+          <Text style={[s.cResultado, it.esNoConforme ? s.noConformeTxt : {}]}>
+            {it.estado}
+          </Text>
+          <View style={s.cObs}>
+            {it.esNoConforme ? (
+              <>
+                <Text>{it.observacion || "—"}</Text>
+                {it.fotoDataUri ? (
+                  <View style={s.fotoWrap}>
+                    <Image style={s.foto} src={it.fotoDataUri} />
+                    <Text style={s.fotoCaption}>Foto de la falla</Text>
+                  </View>
+                ) : null}
+              </>
+            ) : (
+              <Text>—</Text>
+            )}
+          </View>
+        </View>
+      ))}
+
+      <View style={s.firmasRow} wrap={false}>
+        <View style={s.firmaBox}>
+          <Text style={s.etiqueta}>Firma Conductor</Text>
+          {r.firmas.conductor.dataUri ? (
+            <Image style={s.firmaImg} src={r.firmas.conductor.dataUri} />
+          ) : (
+            <View style={s.firmaPlaceholder} />
+          )}
+          <Text style={s.firmaNombre}>{r.firmas.conductor.nombre}</Text>
+          <Text style={s.firmaFecha}>{r.firmas.conductor.fecha}</Text>
+        </View>
+        <View style={s.firmaBox}>
+          <Text style={s.etiqueta}>Firma Fiscalizador/Supervisor</Text>
+          {r.firmas.fiscalizador.dataUri ? (
+            <Image style={s.firmaImg} src={r.firmas.fiscalizador.dataUri} />
+          ) : (
+            <View style={s.firmaPlaceholder} />
+          )}
+          <Text style={s.firmaNombre}>{r.firmas.fiscalizador.nombre}</Text>
+          <Text style={s.firmaFecha}>{r.firmas.fiscalizador.fecha}</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export function InformePDF({ datos }: { datos: InformePDFDatos }) {
-  const { cabecera: c, firmas } = datos;
+  const { cabecera: c } = datos;
+  const esTodas = datos.modo === "todas";
+  const rev0 = datos.revisiones[0];
+
   return (
     <Document
-      title={`Informe de Inspección - Nro Inspección ${datos.numeroInspeccion} Rev ${datos.numeroRevision}`}
+      title={
+        esTodas
+          ? `Informe de Inspección - Nro Inspección ${datos.numeroInspeccion} - Todas las revisiones`
+          : `Informe de Inspección - Nro Inspección ${datos.numeroInspeccion} Rev ${rev0.numeroRevision}`
+      }
       author="Cordillera M&P"
     >
       <Page size="A4" style={s.page}>
@@ -166,78 +282,34 @@ export function InformePDF({ datos }: { datos: InformePDFDatos }) {
           <Text style={s.empresa}>Cordillera M&amp;P</Text>
           <Text style={s.titulo}>Informe de Inspección</Text>
           <Text style={s.sub}>
-            Nro de Inspección {datos.numeroInspeccion} · Nro de Revisión{" "}
-            {datos.numeroRevision} · {datos.estado}
+            Nro de Inspección {datos.numeroInspeccion} ·{" "}
+            {esTodas
+              ? `Todas las revisiones (${datos.revisiones.length})`
+              : `Nro de Revisión ${rev0.numeroRevision}`}{" "}
+            · {datos.estado}
           </Text>
         </View>
 
         <View style={s.grid}>
           <Dato k="Transporte" v={c.transporte} />
-          <Dato k="Conductor" v={c.conductor} />
+          {!esTodas && <Dato k="Conductor" v={rev0.conductor} />}
           <Dato k="Fecha" v={c.fecha} />
           <Dato k="Procedencia" v={c.procedencia} />
           <Dato k="Tipo de camión" v={c.tipoCamion} />
           <Dato k="Patente camión" v={c.patenteCamion} />
           <Dato k="Patente rampla" v={c.patenteRampla} />
           <Dato k="Supervisor" v={c.supervisor} />
-          <Dato k="Vencimiento corrección" v={c.vencimiento} />
+          {!esTodas && <Dato k="Vencimiento corrección" v={rev0.vencimiento} />}
         </View>
 
-        <Text style={s.seccion}>Elementos a Fiscalizar</Text>
-        <View style={s.filaHead}>
-          <Text style={[s.cN, s.headTxt]}>#</Text>
-          <Text style={[s.cElemento, s.headTxt]}>Elemento</Text>
-          <Text style={[s.cResultado, s.headTxt]}>Resultado</Text>
-          <Text style={[s.cObs, s.headTxt]}>Observación</Text>
-        </View>
-
-        {datos.items.map((it) => (
-          <View key={it.n} style={s.fila} wrap={false}>
-            <Text style={s.cN}>{it.n}</Text>
-            <Text style={s.cElemento}>{it.nombre}</Text>
-            <Text style={[s.cResultado, it.esNoConforme ? s.noConformeTxt : {}]}>
-              {it.estado}
-            </Text>
-            <View style={s.cObs}>
-              {it.esNoConforme ? (
-                <>
-                  <Text>{it.observacion || "—"}</Text>
-                  {it.fotoDataUri ? (
-                    <View style={s.fotoWrap}>
-                      <Image style={s.foto} src={it.fotoDataUri} />
-                      <Text style={s.fotoCaption}>Foto de la falla</Text>
-                    </View>
-                  ) : null}
-                </>
-              ) : (
-                <Text>—</Text>
-              )}
-            </View>
-          </View>
+        {datos.revisiones.map((r, i) => (
+          <BloqueRevision
+            key={r.numeroRevision}
+            r={r}
+            conSubtitulo={esTodas}
+            quiebre={esTodas && i > 0}
+          />
         ))}
-
-        <View style={s.firmasRow} wrap={false}>
-          <View style={s.firmaBox}>
-            <Text style={s.etiqueta}>Firma Conductor</Text>
-            {firmas.conductor.dataUri ? (
-              <Image style={s.firmaImg} src={firmas.conductor.dataUri} />
-            ) : (
-              <View style={s.firmaPlaceholder} />
-            )}
-            <Text style={s.firmaNombre}>{firmas.conductor.nombre}</Text>
-            <Text style={s.firmaFecha}>{firmas.conductor.fecha}</Text>
-          </View>
-          <View style={s.firmaBox}>
-            <Text style={s.etiqueta}>Firma Fiscalizador/Supervisor</Text>
-            {firmas.fiscalizador.dataUri ? (
-              <Image style={s.firmaImg} src={firmas.fiscalizador.dataUri} />
-            ) : (
-              <View style={s.firmaPlaceholder} />
-            )}
-            <Text style={s.firmaNombre}>{firmas.fiscalizador.nombre}</Text>
-            <Text style={s.firmaFecha}>{firmas.fiscalizador.fecha}</Text>
-          </View>
-        </View>
 
         <Text
           style={s.footer}

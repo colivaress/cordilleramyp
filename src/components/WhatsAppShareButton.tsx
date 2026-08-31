@@ -32,11 +32,14 @@ const suscribir = () => () => {};
  */
 export function WhatsAppShareButton({
   ticketId,
+  rev = "",
   transporte,
   patenteCamion,
   nombreArchivo,
 }: {
   ticketId: string;
+  /** §4: revisión seleccionada en el informe ("todas" o el número). */
+  rev?: string;
   transporte: string;
   patenteCamion: string;
   nombreArchivo: string;
@@ -52,7 +55,8 @@ export function WhatsAppShareButton({
   async function compartir() {
     setOcupado(true);
     try {
-      const res = await fetch(`/api/informe/${ticketId}/enviar`);
+      const qs = rev ? `?rev=${encodeURIComponent(rev)}` : "";
+      const res = await fetch(`/api/informe/${ticketId}/enviar${qs}`);
       if (!res.ok) throw new Error(`No se pudo generar el PDF (${res.status}).`);
       const blob = await res.blob();
       const archivo = new File([blob], nombreArchivo, {

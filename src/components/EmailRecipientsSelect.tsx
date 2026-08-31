@@ -15,7 +15,15 @@ import type { DestinatarioCorreo } from "@/lib/tipos";
  * "Enviar por correo" hace POST al endpoint que genera el PDF del informe en el
  * servidor y lo manda adjunto en un solo envío.
  */
-export function EmailRecipientsSelect({ ticketId }: { ticketId: string }) {
+export function EmailRecipientsSelect({
+  ticketId,
+  // §4: revisión seleccionada en el informe ("todas" o el número). El PDF que se
+  // envía corresponde a eso.
+  rev = "",
+}: {
+  ticketId: string;
+  rev?: string;
+}) {
   const [lista, setLista] = useState<DestinatarioCorreo[]>([]);
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
   const [extra, setExtra] = useState("");
@@ -58,7 +66,8 @@ export function EmailRecipientsSelect({ ticketId }: { ticketId: string }) {
     }
     setEnviando(true);
     try {
-      const res = await fetch(`/api/informe/${ticketId}/enviar`, {
+      const qs = rev ? `?rev=${encodeURIComponent(rev)}` : "";
+      const res = await fetch(`/api/informe/${ticketId}/enviar${qs}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ destinatarios }),

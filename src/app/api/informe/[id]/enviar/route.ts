@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { generarInformePdf } from "@/lib/pdf/generarInformePdf";
+import {
+  generarInformePdf,
+  type OpcionesInforme,
+} from "@/lib/pdf/generarInformePdf";
 import { enviarInformePorCorreo } from "@/lib/email";
 import {
   construirAsuntoInforme,
@@ -13,8 +16,17 @@ export const maxDuration = 60;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** §4: `?rev=todas` o `?rev=<n>`; sin param -> la revisión más reciente. */
+function leerOpciones(req: NextRequest): OpcionesInforme {
+  const rev = req.nextUrl.searchParams.get("rev");
+  if (!rev) return {};
+  if (rev === "todas") return { revision: "todas" };
+  const n = Number(rev);
+  return Number.isInteger(n) && n > 0 ? { revision: n } : {};
+}
+
 /** Autoriza y genera el PDF, o devuelve una respuesta de error. */
-async function preparar(id: string) {
+async function preparar(id: string, opciones: OpcionesInforme) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -46,7 +58,7 @@ async function preparar(id: string) {
     };
   }
 
-  const informe = await generarInformePdf(supabase, id);
+  const informe = await generarInformePdf(supabase, id, opciones);
   if (!informe) {
     return {
       error: NextResponse.json(
@@ -83,16 +95,27 @@ async function preparar(id: string) {
   return { supabase, informe, perfil };
 }
 
+/** Nombre de archivo del PDF según lo seleccionado en pantalla (§4). */
+function nombreArchivoInforme(meta: {
+  numeroInspeccion: number;
+  numeroRevision: number;
+  modo: "una" | "todas";
+}): string {
+  return meta.modo === "todas"
+    ? `informe-inspeccion-${meta.numeroInspeccion}-todas-las-revisiones.pdf`
+    : `informe-inspeccion-${meta.numeroInspeccion}-rev-${meta.numeroRevision}.pdf`;
+}
+
 // Descarga / vista previa del PDF del informe (el supervisor dueño).
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const prep = await preparar(id);
+  const prep = await preparar(id, leerOpciones(req));
   if (prep.error) return prep.error;
 
-  const nombre = `informe-inspeccion-${prep.informe.meta.numeroInspeccion}-rev-${prep.informe.meta.numeroRevision}.pdf`;
+  const nombre = nombreArchivoInforme(prep.informe.meta);
   return new NextResponse(new Uint8Array(prep.informe.pdf), {
     status: 200,
     headers: {
@@ -133,13 +156,15 @@ export async function POST(
     );
   }
 
-  const prep = await preparar(id);
+  const prep = await preparar(id, leerOpciones(req));
   if (prep.error) return prep.error;
   const { supabase, informe, perfil } = prep;
 
   const datosCorreo = {
     numeroInspeccion: informe.meta.numeroInspeccion,
     numeroRevision: informe.meta.numeroRevision,
+    // §4: el asunto refleja si el PDF adjunto es una revisión o todo el historial.
+    todasLasRevisiones: informe.meta.modo === "todas",
     transporte: informe.meta.transporte,
     patenteCamion: informe.meta.patenteCamion,
     patenteRampla: informe.meta.patenteRampla,
@@ -156,7 +181,7 @@ export async function POST(
       asunto: construirAsuntoInforme(datosCorreo),
       cuerpoHtml: construirCuerpoInforme(datosCorreo),
       pdf: informe.pdf,
-      nombreArchivo: `informe-inspeccion-${informe.meta.numeroInspeccion}-rev-${informe.meta.numeroRevision}.pdf`,
+      nombreArchivo: nombreArchivoInforme(informe.meta),
     });
   } catch (e) {
     // §4.1: si el envío falla, error real — nunca un falso "enviado con éxito".

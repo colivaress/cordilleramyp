@@ -82,6 +82,8 @@ export type DatosInforme = {
   /** Solo para el asunto del correo; no se repite en el cuerpo (va en el PDF). */
   numeroInspeccion: number;
   numeroRevision: number;
+  /** §4: el PDF adjunto trae todo el historial de revisiones, no una sola. */
+  todasLasRevisiones?: boolean;
   transporte: string;
   patenteCamion: string;
   patenteRampla: string;
@@ -125,8 +127,11 @@ function esc(v: string): string {
 export function construirAsuntoInforme(d: DatosInforme): string {
   // §4.1: misma redacción que el cuerpo ("Check List camión de transportes …"),
   // con el par (N° Inspección, N° Revisión) para diferenciar el correo en la
-  // bandeja del destinatario.
-  return `Check List camión de transportes ${d.transporte} — ${d.patenteCamion.toUpperCase()} / ${d.patenteRampla.toUpperCase()} (N° Inspección ${d.numeroInspeccion} · Rev. ${d.numeroRevision})`;
+  // bandeja del destinatario. §4: si el PDF trae todo el historial, se indica.
+  const detalle = d.todasLasRevisiones
+    ? `N° Inspección ${d.numeroInspeccion} · todas las revisiones`
+    : `N° Inspección ${d.numeroInspeccion} · Rev. ${d.numeroRevision}`;
+  return `Check List camión de transportes ${d.transporte} — ${d.patenteCamion.toUpperCase()} / ${d.patenteRampla.toUpperCase()} (${detalle})`;
 }
 
 /**
