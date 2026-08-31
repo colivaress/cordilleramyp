@@ -13,7 +13,7 @@ Ejecuta el desarrollo de principio a fin siguiendo este orden: (1) scaffold del 
 
 > ⚠️ Next.js 16 tiene breaking changes respecto a versiones anteriores más conocidas. Antes de escribir código de rutas, layouts o data fetching, revisa las guías en `node_modules/next/dist/docs/` (indicado también en `AGENTS.md`, importado arriba).
 
-**Restricción de formato de salida:** el "Informe de Inspección de Flota" que genera la app (sección 4) no debe incluir códigos documentales ni números de versión de ningún tipo (nada de "Doc-ID", "Rev. 00", "Versión 1.2", etc.). Es el único lugar del proyecto donde aplica esta restricción; no afecta al versionado normal del código (git, package.json, etc.).
+**Restricción de formato de salida:** el "Informe de Inspección" que genera la app (sección 4) no debe incluir códigos documentales ni números de versión de ningún tipo (nada de "Doc-ID", "Rev. 00", "Versión 1.2", etc.). Es el único lugar del proyecto donde aplica esta restricción; no afecta al versionado normal del código (git, package.json, etc.).
 
 > 🔒 **Ningún token, API key o credencial debe llegar a GitHub ni quedar expuesto en el código.** Regla obligatoria durante todo el desarrollo, detallada en la sección 9 — revísala antes del primer commit y antes de cada push.
 
@@ -386,6 +386,11 @@ No la agregues `not null` a nivel de base (hay usuarios existentes sin este dato
 
   La ventana de alerta ("por vencer") se parametriza como constante/env var (no hardcodeada dispersa en el código) con dos umbrales: `<= 48h` (color `warning`) y `<= 24h` (color `alert`), sobre el mismo ticket con estado distinto de `finalizada_sin_observaciones`.
 - **Resaltado visual:** en el dashboard de administrador, cualquier ticket con `horas_restantes <= 48` y estado distinto de `FINALIZADA_SIN_OBSERVACIONES` se resalta con fondo `warning-100`/texto `warning-700` si `horas_restantes` está entre 24 y 48, o fondo `alert-100`/texto `alert-700` si `horas_restantes <= 24` (tokens de color definidos en §6).
+- **Corrección — formato del texto de la columna "Vencimiento" en las tablas de tickets (dashboard de administrador y "Inspecciones" del supervisor):** hoy esa columna combina días y horas en el mismo texto (por ejemplo "9 días 23 h restantes", "vencido hace 1 día 7 h") en todos los casos. Corrige a estos tres formatos, según corresponda:
+  - **Si `horas_restantes > 48` (todavía no entra a la ventana de alerta, estado "vigente"):** no muestres cuenta regresiva — muestra directamente **la fecha de vencimiento** (`fecha_vencimiento`), por ejemplo "31-08-2026" o "31-08-2026, 15:39" (mismo formato de fecha que ya se usa en el resto de la app, §2.6/§7).
+  - **Si `horas_restantes <= 48` y el ticket todavía no está vencido ("por vencer", zonas ámbar/naranja):** muestra la cuenta regresiva **solo en horas**, sin desglosar en días — por ejemplo "37 h restantes", nunca "1 día 13 h restantes".
+  - **Si ya está vencido:** sigue mostrando "vencido hace...", pero **solo en días**, sin horas — por ejemplo "vencido hace 5 días", nunca "vencido hace 5 días 3 h". Si el vencimiento fue hace menos de un día completo, muestra "vencido hace menos de 1 día" (o "vencido hoy", a criterio de la implementación) en vez de mostrar horas.
+  - Esto es solo el formato de texto de esta columna — el cálculo de `horas_restantes` y los umbrales de color (48h/24h, punto anterior) no cambian.
 - **Botón "Notificar por WhatsApp"** (nombre corregido, antes decía "Notificar Vencimiento por WhatsApp" — ver la corrección de rol y ubicación en §2.6): solo se renderiza/habilita cuando el ticket está en estado "por vencer" o "vencido", **y solo en la tabla del dashboard de administrador** — no en "Mis inspecciones" del supervisor ni en el detalle del ticket (§2.6). Abre un **deep link nativo de WhatsApp** (`target="_blank"`, `rel="noopener noreferrer"`) construido así:
 
   ```ts
@@ -426,7 +431,9 @@ No la agregues `not null` a nivel de base (hay usuarios existentes sin este dato
 
 ## 4. Informe digital
 
-Genera una vista imprimible/exportable "Informe de Inspección de Flota - Cordillera M&P" en `/tickets/[id]/report`, con:
+Genera una vista imprimible/exportable "Informe de Inspección - Cordillera M&P" en `/tickets/[id]/report`, con:
+
+**Corrección de texto — donde diga "Informe de Inspección de Flota" (título de la página del informe, encabezado del PDF, o cualquier otro lugar de la app) pasa a decir simplemente "Informe de Inspección"** (se saca la palabra "Flota"). Revisa el título de la pestaña/página, el encabezado visible en pantalla y en el PDF, y cualquier otro texto de interfaz donde haya quedado la versión anterior.
 
 - Cabecera completa (§1) + **Nro de Inspección** y **Nro de Revisión** (`numero_inspeccion` y `numero_revision` de §2.6 — nunca el UUID interno del ticket) + estado.
 - Los 18 elementos del checklist con su resultado (Conforme/No conforme/No aplica), observación y foto cuando aplique.
@@ -438,7 +445,7 @@ Genera una vista imprimible/exportable "Informe de Inspección de Flota - Cordil
 Lo acciona el **supervisor** dueño de ese ticket (ver §2.6), no el administrador. Abre un selector **multi-destinatario** poblado desde la tabla `destinatarios_correo` (checkboxes, no un solo `<select>`), permite tildar varios antes de confirmar el envío. Al enviar:
 
 - **Genera un PDF real del informe y adjúntalo al correo** — hoy el correo se envía sin nada adjunto, eso es un bug a corregir, no una opción. Usa una librería de generación de PDF en el servidor (por ejemplo renderizar el HTML del informe con Puppeteer/Playwright, o `@react-pdf/renderer`) — el resultado tiene que ser un PDF real adjunto (`.pdf`), no un link.
-- **El PDF debe tener formato formal y profesional**: encabezado claro con el nombre de la empresa y "Informe de Inspección de Flota", tipografía y espaciado cuidados, tabla del checklist ordenada y legible, sección de firmas con las imágenes a un tamaño que se vea bien impreso, y **las fotos de los ítems no conformes en tamaño legible** (no miniaturas diminutas — deben poder distinguirse los detalles de la falla). Sigue la paleta y tipografía de §6 en la medida en que tenga sentido en un documento imprimible (fondo blanco, no los fondos de color del dashboard).
+- **El PDF debe tener formato formal y profesional**: encabezado claro con el nombre de la empresa y "Informe de Inspección" (sin "de Flota", ver la corrección de texto de arriba), tipografía y espaciado cuidados, tabla del checklist ordenada y legible, sección de firmas con las imágenes a un tamaño que se vea bien impreso, y **las fotos de los ítems no conformes en tamaño legible** (no miniaturas diminutas — deben poder distinguirse los detalles de la falla). Sigue la paleta y tipografía de §6 en la medida en que tenga sentido en un documento imprimible (fondo blanco, no los fondos de color del dashboard).
 - **Cuerpo del correo — corrección: pásalo a HTML con una tabla, formato formal y profesional** (reemplaza tanto el texto plano anterior como cualquier otro texto genérico que haya quedado, por ejemplo si el asunto del correo todavía dice algo como "Se realizó la inspección técnica del camión. Se adjunta checklist" — unifica todo a esta redacción). Envía el correo como HTML (`html:` en `nodemailer`, no `text:` plano) con esta estructura:
 
   ```html
@@ -531,6 +538,12 @@ alter table personal
 - **Verifica soporte antes de mostrar el botón como habilitado:** no todos los navegadores/dispositivos soportan compartir archivos así (funciona bien en Chrome/Safari de celular; la mayoría de los navegadores de escritorio no lo soportan). Antes de intentar el envío, valida con `navigator.canShare && navigator.canShare({ files: [archivoPdf] })`. Si no está disponible, **no rompas la página ni falles en silencio** — oculta el botón, o muéstralo deshabilitado con un texto/tooltip como "Compartir por WhatsApp solo está disponible desde el celular", según lo que sea más simple de implementar.
 - Maneja el caso en que el usuario cancela el panel de compartir (`AbortError` de `navigator.share`) sin mostrarlo como un error — es un flujo normal, no un fallo.
 - Este botón lo puede usar tanto el supervisor como el administrador, igual que "Enviar por correo" (§2.6, sección "Envío del informe por correo") — no hace falta restringirlo por rol.
+
+### 4.3 Botón "Volver a las inspecciones" junto a "Enviar por correo"
+
+**Nueva funcionalidad/corrección de ubicación:** en la página del informe (`/tickets/[id]/report`), agrega (o reubica si ya existe con otro nombre — ver nota abajo) un botón/enlace con el texto **"Volver a las inspecciones"**, ubicado **al lado de "Enviar por correo"** (junto con "Enviar por WhatsApp" del punto anterior, los tres quedan agrupados como acciones de esa pantalla). Al presionarlo, lleva al listado de inspecciones correspondiente al rol de quien está autenticado: el administrador vuelve a `/dashboard` (tabla "Inspecciones", §2.6/§2.11) y el supervisor vuelve a su tabla "Inspecciones" (antes "Mis inspecciones", §2.12). Disponible para **ambos roles** — administrador y supervisor —, igual que "Enviar por correo" y "Enviar por WhatsApp".
+
+**Nota — esto reemplaza/consolida el enlace "Inspecciones" ya pedido en §2.6** (el que se agregó al informe cuando "Ver" pasó a llevar directo ahí): si ese enlace ya está implementado, solo hay que renombrarlo a "Volver a las inspecciones" y confirmar que quede ubicado junto a "Enviar por correo" — no agregues un segundo botón duplicado que haga lo mismo. El enlace secundario "Ver historial completo" (que lleva al detalle del ticket, `/tickets/[id]`) es distinto y se mantiene sin cambios.
 
 ---
 

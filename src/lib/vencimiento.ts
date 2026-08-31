@@ -94,6 +94,41 @@ export function formatearTiempoRestante(
   return vencido ? `vencido hace ${texto}` : `${texto} restantes`;
 }
 
+const fmtFechaCorta = new Intl.DateTimeFormat("es-CL", {
+  timeZone: "America/Santiago",
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
+
+/**
+ * Texto de la columna "Vencimiento" de las tablas de tickets — §3. Tres formatos
+ * según el caso (el cálculo de horas y los umbrales de color no cambian):
+ *  - faltan MÁS de 48 h → la fecha de vencimiento ("31-08-2026"), sin cuenta regresiva.
+ *  - faltan 48 h o menos y no venció → cuenta regresiva SOLO en horas ("37 h restantes").
+ *  - vencido → "vencido hace N días" (solo días; "menos de 1 día" si venció hace < 24 h).
+ */
+export function textoVencimientoTabla(
+  fechaVencimiento: string | Date | null | undefined,
+  ahora: Date = new Date(),
+): string {
+  const horas = horasRestantes(fechaVencimiento, ahora);
+  if (horas === null) return "sin fecha de vencimiento";
+
+  if (horas < 0) {
+    const dias = Math.floor(Math.abs(horas) / 24);
+    return dias < 1
+      ? "vencido hace menos de 1 día"
+      : `vencido hace ${dias} ${dias === 1 ? "día" : "días"}`;
+  }
+
+  if (horas > HORAS_AMARILLO) {
+    return fmtFechaCorta.format(new Date(fechaVencimiento as string | Date));
+  }
+
+  return `${Math.round(horas)} h restantes`;
+}
+
 /** Clases Tailwind para el resaltado de fila del dashboard — §3. */
 export function clasesFilaAlerta(nivel: NivelAlerta): string {
   switch (nivel) {

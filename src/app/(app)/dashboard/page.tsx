@@ -294,6 +294,7 @@ export default async function DashboardPage({
                         <CountdownBadge
                           fechaVencimiento={t.fecha_vencimiento}
                           estadoTicket={t.estado}
+                          formatoTabla
                         />
                       </TableCell>
                       <TableCell>{t.supervisor?.nombre ?? "—"}</TableCell>

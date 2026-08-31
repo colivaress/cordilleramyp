@@ -4,6 +4,7 @@ import {
   formatearTiempoRestante,
   horasRestantes,
   nivelAlerta,
+  textoVencimientoTabla,
 } from "@/lib/vencimiento";
 
 const CLASES: Record<string, string> = {
@@ -21,10 +22,13 @@ export function CountdownBadge({
   fechaVencimiento,
   estadoTicket,
   className,
+  /** §3: formato de tres casos para la columna "Vencimiento" de las tablas. */
+  formatoTabla = false,
 }: {
   fechaVencimiento: string | null;
   estadoTicket: TicketEstado;
   className?: string;
+  formatoTabla?: boolean;
 }) {
   if (!fechaVencimiento) return null;
   const nivel = nivelAlerta(fechaVencimiento, estadoTicket);
@@ -39,7 +43,9 @@ export function CountdownBadge({
       )}
       title={`Vence: ${new Date(fechaVencimiento).toLocaleString("es-CL")}`}
     >
-      {formatearTiempoRestante(horas)}
+      {formatoTabla
+        ? textoVencimientoTabla(fechaVencimiento)
+        : formatearTiempoRestante(horas)}
     </span>
   );
 }
