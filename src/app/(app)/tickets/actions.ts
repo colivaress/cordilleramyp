@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getSesion } from "@/lib/auth";
 import {
   estadoTrasChecklist,
@@ -519,17 +520,35 @@ export async function finalizarReinspeccion(input: {
     input.revisionNumero,
   );
 
-  const { error } = await supabase
-    .from("tickets")
-    .update({
-      estado,
-      revision_actual: input.revisionNumero,
-      fecha_vencimiento: rev.fecha_vencimiento,
-      conductor: rev.conductor ?? undefined,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", input.ticketId);
-  if (error) throw new Error(error.message);
+  const cambios = {
+    estado,
+    revision_actual: input.revisionNumero,
+    fecha_vencimiento: rev.fecha_vencimiento,
+    conductor: rev.conductor ?? undefined,
+    updated_at: new Date().toISOString(),
+  };
+  let errFinal = (
+    await supabase.from("tickets").update(cambios).eq("id", input.ticketId)
+  ).error;
+
+  // §2.6: si un supervisor que NO creó el ticket cierra la reinspección dejándolo
+  // "sin observaciones", ese mismo UPDATE lo saca de su vista (la RLS ya no
+  // muestra un ticket ajeno cerrado) y Postgres lo rechaza. Se completa con el
+  // cliente de servicio — la autorización ya se validó arriba
+  // (rev.supervisor_id === perfil.id).
+  if (errFinal && ticket.supervisor_id !== perfil.id) {
+    try {
+      const admin = createAdminClient();
+      errFinal = (
+        await admin.from("tickets").update(cambios).eq("id", input.ticketId)
+      ).error;
+    } catch {
+      throw new Error(
+        "No se pudo cerrar la re-inspección de un ticket de otro supervisor: falta configurar SUPABASE_SERVICE_ROLE_KEY en el servidor.",
+      );
+    }
+  }
+  if (errFinal) throw new Error(errFinal.message);
 
   revalidatePath(`/tickets/${input.ticketId}`);
   revalidatePath("/dashboard");
