@@ -504,18 +504,9 @@ export function InspeccionForm({
         <CardContent className="grid gap-4 sm:grid-cols-2">
           {modo === "nueva" ? (
             <>
-              {/* §2.6: correlativo del ticket, solo lectura. Se asigna al pasar
-                  al checklist ("Realizar revisión"). */}
-              <div className="grid gap-1.5">
-                <Label htmlFor="numero-inspeccion">Nro de Inspección</Label>
-                <Input
-                  id="numero-inspeccion"
-                  readOnly
-                  disabled
-                  value={numInsp != null ? String(numInsp) : ""}
-                  placeholder="Se asigna al presionar “Realizar revisión”"
-                />
-              </div>
+              {/* §2.6: el "Nro de Inspección" NO se muestra en este paso — el
+                  ticket todavía no existe. Aparece recién en el paso 2 (título
+                  "Inspección Nro X"), en el detalle, el informe y la tabla. */}
               {CAMPOS_CABECERA.map((c) => (
                 <div key={c.key} className="grid gap-1.5">
                   <Label htmlFor={c.key}>{c.label}</Label>
