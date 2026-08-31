@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { getSesion } from "@/lib/auth";
 import {
   estadoTrasChecklist,
@@ -527,27 +526,15 @@ export async function finalizarReinspeccion(input: {
     conductor: rev.conductor ?? undefined,
     updated_at: new Date().toISOString(),
   };
-  let errFinal = (
-    await supabase.from("tickets").update(cambios).eq("id", input.ticketId)
-  ).error;
-
-  // §2.6: si un supervisor que NO creó el ticket cierra la reinspección dejándolo
-  // "sin observaciones", ese mismo UPDATE lo saca de su vista (la RLS ya no
-  // muestra un ticket ajeno cerrado) y Postgres lo rechaza. Se completa con el
-  // cliente de servicio — la autorización ya se validó arriba
-  // (rev.supervisor_id === perfil.id).
-  if (errFinal && ticket.supervisor_id !== perfil.id) {
-    try {
-      const admin = createAdminClient();
-      errFinal = (
-        await admin.from("tickets").update(cambios).eq("id", input.ticketId)
-      ).error;
-    } catch {
-      throw new Error(
-        "No se pudo cerrar la re-inspección de un ticket de otro supervisor: falta configurar SUPABASE_SERVICE_ROLE_KEY en el servidor.",
-      );
-    }
-  }
+  // §2.6: la RLS de `update` en `tickets` ya permite cerrar la re-inspección de
+  // un ticket ajeno "con observaciones" al supervisor que la está haciendo
+  // (private.hizo_revision(id) en USING/WITH CHECK, y también en la policy de
+  // `select` para que Postgres no rechace la fila resultante). No hace falta el
+  // cliente de servicio para este flujo.
+  const { error: errFinal } = await supabase
+    .from("tickets")
+    .update(cambios)
+    .eq("id", input.ticketId);
   if (errFinal) throw new Error(errFinal.message);
 
   revalidatePath(`/tickets/${input.ticketId}`);
