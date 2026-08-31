@@ -330,6 +330,40 @@ No la agregues `not null` a nivel de base (hay usuarios existentes sin este dato
 - **Librería de gráficos:** usa [Recharts](https://recharts.org) (`npm install recharts`) — es la librería de gráficos más estándar para React/Next.js, se integra bien con Tailwind y con los tokens de color de §6 (usa `brand`, `success`, `warning`, `alert` para los gráficos, manteniendo la misma paleta del resto de la app en vez de los colores por defecto de la librería).
 - Esta página, como el resto del dashboard de administrador, queda con control de acceso real (ruta + RLS) exclusivo del rol `administrador` — mismo patrón de §2.6.
 
+### 2.12 Correcciones de texto visible: nombres de los estados y título de la página del supervisor
+
+**Corrección — nombres visibles de los estados de una inspección (no se tocan los valores del enum en la base de datos):**
+
+- Donde hoy se muestra el texto **"Finalizada con observaciones"** (badges de estado en las tablas de tickets, en el detalle del ticket, en el informe, en el filtro "Estado" del listado, en el desglose por estado y la tabla por supervisor de la página de analítica §2.11, en cualquier tooltip o texto de ayuda) → cambia el texto visible a **"Con observaciones"**.
+- Donde hoy se muestra **"Finalizada sin observaciones"** → cambia el texto visible a **"Finalizado"**.
+- El estado `en_revision` sigue mostrándose igual, como **"En revisión"** — no cambia.
+- Esto es **solo el texto que ve el usuario**. Los valores reales de la columna `tickets.estado` en la base de datos (`finalizada_con_observaciones`, `finalizada_sin_observaciones`) **no cambian** — toda la lógica de negocio, las políticas RLS, los filtros por `estado` en la URL/query, y el resto de este documento siguen refiriéndose a esos mismos valores de enum; solo cambia el label que se le muestra a la persona en pantalla.
+- Si no existe ya, centraliza esto en un único helper/mapa (por ejemplo `estadoLabel(estado)`) en vez de tener el string de cada estado repetido y hardcodeado en cada componente — así un cambio de texto como este no vuelve a requerir tocar diez archivos distintos.
+- Revisa en particular todos los lugares donde este documento quedó escrito con el texto viejo ("Finalizada con observaciones"/"Finalizada sin observaciones"): son referencias al texto que se debía mostrar en ese momento, ya desactualizadas por esta corrección — aplica el nuevo texto ahí también.
+
+**Corrección — título de la página de inicio del supervisor:** cambia el encabezado **"Mis inspecciones"** por **"Inspecciones"** (el subtítulo "Tus inspecciones y alertas de vencimiento." se mantiene igual, no hace falta tocarlo) — mismo criterio de simplificar el texto que ya se aplicó en el dashboard de administrador (§2.6, "Tickets" → "Inspecciones").
+
+### 2.13 Bug: el "Nro de Inspección" no aparece de inmediato al crear el ticket
+
+**Síntoma reportado:** en el formulario de "Nueva inspección", el campo "Nro de Inspección" muestra el placeholder "Se asigna al presionar 'Realizar revisión'" — eso es correcto mientras el ticket todavía no existe. El problema es que, **después** de presionar "Realizar revisión" y quedar creado el ticket (con su `numero_inspeccion` ya asignado por la secuencia `identity` de la base de datos, §2.6), ese número no queda visible en ningún lado de inmediato — recién se puede ver más tarde, al volver al listado o entrar al detalle del ticket.
+
+**Corrige esto:** apenas se crea el ticket, muestra su `numero_inspeccion` en la pantalla siguiente del wizard (checklist/firmas, "Elementos a Fiscalizar") — por ejemplo como parte del título o subtítulo de esa pantalla ("Inspección Nro X") — igual que ya se muestra en el detalle del ticket. No hace falta esperar a que termine toda la revisión para poder verlo.
+
+### 2.14 Bug confirmado: "Registrar re-inspección" no lleva al checklist de la nueva revisión — queda atascada e imposible de completar
+
+**Síntoma reportado, reproducido con datos reales:** al presionar "Registrar re-inspección" sobre un ticket en `finalizada_con_observaciones` (§2.6), el supervisor esperaría llegar a una pantalla de checklist/firmas para la nueva revisión ("Revisión #2"), igual que el flujo de una inspección nueva (§2.4, §2.5, §2.7). En cambio:
+
+1. El flujo **salta directo** al detalle del ticket (`/tickets/[id]`), mostrando la nueva revisión ("Revisión #2") ya en estado `en_revision`, con un aviso amarillo "Inspección sin finalizar: El checklist y las firmas de esta revisión ya están guardados, pero el cierre no se completó. Se puede finalizar ahora sin rehacer nada." y un botón "Finalizar revisión pendiente" — **sin que el supervisor haya llegado nunca a ver ni completar el checklist ni las firmas de esa revisión.**
+2. Al presionar "Finalizar revisión pendiente" aparece el error "Faltan las firmas del conductor y/o del fiscalizador" — cierto (nunca se capturaron), pero **la pantalla donde se deberían haber capturado nunca se mostró.** Resultado: queda una fila de `ticket_revisiones` (Revisión #2) creada, sin checklist ni firmas, y no hay ninguna forma de completarla desde la interfaz — el ticket queda atascado.
+
+**Causa raíz probable, revísala:** el botón "Registrar re-inspección" (§2.6) parece estar creando la fila de `ticket_revisiones` de la nueva revisión (o marcando el ticket como `en_revision`) y redirigiendo directo al detalle del ticket, en vez de llevar al supervisor por el mismo wizard de captura ("Elementos a Fiscalizar" → firmas) que ya existe para la revisión #1. El aviso "Inspección sin finalizar / se puede finalizar ahora sin rehacer nada" — pensado para el caso real de §2.8, cuando el supervisor ya guardó checklist y firmas pero no llegó a presionar "Finalizar revisión" por un corte de sesión o de red — se está mostrando también, incorrectamente, para una revisión que **nunca pasó por el checklist**, dando a entender que ya hay datos guardados cuando no los hay.
+
+**Corrige así:**
+
+- "Registrar re-inspección" debe llevar al supervisor al mismo formulario de checklist + firmas que usa una inspección nueva (§2.4, §2.5), precargado con los datos de cabecera del ticket (transporte, patentes, etc. — no hace falta volver a pedirlos, ya existen en `tickets`) y permitiendo confirmar o cambiar el `conductor` de esta revisión (§2.6, ya contempla esto). Recién al completar los 18 ítems y ambas firmas, y presionar "Finalizar revisión", se cierra esa revisión según §2.3.
+- El banner "Inspección sin finalizar / Finalizar revisión pendiente" debe seguir existiendo, pero **solo para el caso real que motivó §2.8**: una revisión que ya tiene respuestas de checklist guardadas en `ticket_checklist_respuestas` (o al menos alguna firma ya subida), pero que no llegó a cerrarse. Agrega esa condición explícita: si una revisión en `en_revision` **no tiene ningún dato guardado todavía**, el supervisor debe caer directo en el formulario de checklist/firmas vacío, nunca en ese banner.
+- **Reproducción para verificar que quedó resuelto:** 1) tomar un ticket en `finalizada_con_observaciones`; 2) presionar "Registrar re-inspección"; 3) confirmar que se llega a una pantalla de checklist (18 ítems) vacía, lista para completar — no al detalle del ticket con el banner amarillo; 4) completar el checklist y ambas firmas; 5) presionar "Finalizar revisión" y confirmar que la revisión se cierra según el resultado correspondiente (§2.3), sin el error de firmas faltantes.
+
 ---
 
 ## 3. Fecha de vencimiento y alertas automáticas

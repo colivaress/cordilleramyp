@@ -19,11 +19,14 @@ export type EstadoVencimiento = "vigente" | "por_vencer" | "vencido";
 /** Nivel de alerta visual — §3 (umbrales 48h / 24h). */
 export type NivelAlerta = "ninguno" | "amarillo" | "naranja" | "vencido";
 
+// §2.12: SOLO texto visible. Los valores del enum en la columna `tickets.estado`
+// (`finalizada_con_observaciones`, `finalizada_sin_observaciones`) NO cambian —
+// filtros por query, RLS y lógica de negocio siguen usándolos igual.
 export const ETIQUETA_ESTADO: Record<TicketEstado, string> = {
   en_revision: "En revisión",
-  finalizada_con_observaciones: "Finalizada con observaciones",
+  finalizada_con_observaciones: "Con observaciones",
   en_reparacion_de_observaciones: "En reparación de observaciones",
-  finalizada_sin_observaciones: "Finalizada sin observaciones",
+  finalizada_sin_observaciones: "Finalizado",
 };
 
 export const ETIQUETA_ITEM: Record<ItemEstado, string> = {

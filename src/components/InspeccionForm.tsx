@@ -6,7 +6,13 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
   ChecklistItemRow,
@@ -597,6 +603,11 @@ export function InspeccionForm({
                 2. Elementos a Fiscalizar
                 {modo === "reinspeccion" ? ` — Revisión #${numeroRevision}` : ""}
               </CardTitle>
+              {/* §2.13: el Nro de Inspección se conoce apenas se crea el ticket
+                  ("Realizar revisión") — se muestra acá de inmediato. */}
+              {numInsp != null && (
+                <CardDescription>Inspección Nro {numInsp}</CardDescription>
+              )}
             </CardHeader>
             <CardContent>
               <div className="rounded-lg border">

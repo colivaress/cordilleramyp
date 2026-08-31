@@ -171,9 +171,7 @@ export default async function DashboardPage({
     <div className="grid gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {esAdmin ? "Inspecciones" : "Mis inspecciones"}
-          </h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Inspecciones</h1>
           <p className="text-sm text-muted-foreground">
             {esAdmin
               ? "Todas las inspecciones y alertas de vencimiento."

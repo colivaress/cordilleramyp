@@ -76,14 +76,31 @@ export default async function TicketDetallePage({
 
   const revActual = revs.find((r) => r.numero_revision === numeroRevisionActual);
 
-  // §2.8: inspección que quedó a medio finalizar (el checklist y las firmas ya
-  // están guardados, pero "Finalizar revisión" no llegó a cerrarla). La puede
-  // cerrar el creador del ticket o el supervisor que hizo esa revisión (§2.6).
-  const finalizacionPendiente =
+  const puedeGestionarRev =
     esSupervisor &&
     ticket.estado === "en_revision" &&
     (ticket.supervisor_id === perfil.id ||
       revActual?.supervisor_id === perfil.id);
+
+  // §2.14: ¿la revisión en curso tiene datos reales? El seed de §2.8 crea las 18
+  // respuestas en `conforme` apenas se inicia — no cuentan. Sí cuentan una firma
+  // subida o un ítem marcado como no conforme.
+  const tieneDatos =
+    !!(revActual?.firma_conductor_url || revActual?.firma_fiscalizador_url) ||
+    resp.some(
+      (r) =>
+        r.revision_numero === numeroRevisionActual &&
+        r.estado === "no_conforme",
+    );
+
+  // §2.8: revisión con checklist/firmas ya guardados que no llegó a cerrarse
+  // (corte de sesión/red) — se ofrece cerrarla sin rehacer nada.
+  const finalizacionPendiente = puedeGestionarRev && tieneDatos;
+
+  // §2.14: re-inspección iniciada (Revisión #N) pero sin tocar todavía el
+  // checklist — hay que volver al formulario a completarlo, no al banner.
+  const reinspeccionSinCompletar =
+    puedeGestionarRev && !tieneDatos && numeroRevisionActual > 1;
 
   return (
     <div className="grid gap-6">
@@ -133,6 +150,29 @@ export default async function TicketDetallePage({
               ticketId={id}
               revisionNumero={numeroRevisionActual}
             />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* §2.14: re-inspección abierta pero todavía sin completar el checklist. */}
+      {reinspeccionSinCompletar && (
+        <Card className="border-warning-200 bg-warning-50">
+          <CardHeader>
+            <CardTitle className="text-warning-700">
+              Re-inspección sin completar
+            </CardTitle>
+            <CardDescription>
+              La Revisión #{numeroRevisionActual} ya está iniciada, pero falta
+              cargar el checklist y las firmas.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link
+              href={`/tickets/${id}/reinspeccion`}
+              className={buttonVariants({})}
+            >
+              Continuar re-inspección
+            </Link>
           </CardContent>
         </Card>
       )}
