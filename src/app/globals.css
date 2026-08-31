@@ -241,7 +241,7 @@
   }
 }
 
-/* Informe de Inspección de Flota (§4): ocultar cromo de la app al imprimir. */
+/* Informe de Inspección (§4): ocultar cromo de la app al imprimir. */
 @media print {
   .no-print {
     display: none !important;

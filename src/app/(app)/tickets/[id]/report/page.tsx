@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import Image from "next/image";
@@ -12,6 +13,9 @@ import { puedeReinspeccionar } from "@/lib/ticket-state-machine";
 import { ETIQUETA_ESTADO, ETIQUETA_ITEM } from "@/lib/tipos";
 
 export const dynamic = "force-dynamic";
+
+// §4: "Informe de Inspección" (sin "de Flota") — también en la pestaña.
+export const metadata: Metadata = { title: "Informe de Inspección" };
 
 const fmt = (v: string | null) =>
   v ? new Date(v).toLocaleString("es-CL", { dateStyle: "medium", timeStyle: "short" }) : "—";
@@ -65,18 +69,10 @@ export default async function InformePage({
   return (
     <div className="grid gap-6">
       <div className="no-print flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">Informe de Inspección de Flota</h1>
+        <h1 className="text-xl font-semibold">Informe de Inspección</h1>
         {/* §2.6: "Ver" de la tabla entra acá; se traen las acciones que antes
             solo estaban en el detalle del ticket. */}
         <div className="flex flex-wrap items-center gap-2">
-          {esSupervisor && (
-            <Link
-              href="/dashboard"
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-            >
-              Inspecciones
-            </Link>
-          )}
           {esSupervisor && puedeReinspeccionar(ticket.estado) && (
             <Link
               href={`/tickets/${id}/reinspeccion`}
@@ -98,7 +94,7 @@ export default async function InformePage({
       <article className="print-full mx-auto w-full max-w-3xl rounded-xl bg-card p-8 text-sm ring-1 ring-foreground/10">
         <header className="mb-6 border-b pb-4">
           <p className="text-lg font-semibold">
-            Cordillera M&amp;P — Informe de Inspección de Flota
+            Cordillera M&amp;P — Informe de Inspección
           </p>
           <p className="text-muted-foreground">
             Nro de Inspección{" "}
@@ -205,6 +201,14 @@ export default async function InformePage({
               patenteCamion={ticket.patente_camion}
               nombreArchivo={`informe-inspeccion-${ticket.numero_inspeccion}-rev-${ticket.revision_actual}.pdf`}
             />
+            {/* §4.3: volver al listado — admin y supervisor van a /dashboard,
+                que se renderiza según el rol. */}
+            <Link
+              href="/dashboard"
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              Volver a las inspecciones
+            </Link>
             <a
               href={`/api/informe/${ticket.id}/enviar`}
               target="_blank"

@@ -158,13 +158,13 @@ export function InformePDF({ datos }: { datos: InformePDFDatos }) {
   const { cabecera: c, firmas } = datos;
   return (
     <Document
-      title={`Informe de Inspección de Flota - Nro Inspección ${datos.numeroInspeccion} Rev ${datos.numeroRevision}`}
+      title={`Informe de Inspección - Nro Inspección ${datos.numeroInspeccion} Rev ${datos.numeroRevision}`}
       author="Cordillera M&P"
     >
       <Page size="A4" style={s.page}>
         <View style={s.header} fixed>
           <Text style={s.empresa}>Cordillera M&amp;P</Text>
-          <Text style={s.titulo}>Informe de Inspección de Flota</Text>
+          <Text style={s.titulo}>Informe de Inspección</Text>
           <Text style={s.sub}>
             Nro de Inspección {datos.numeroInspeccion} · Nro de Revisión{" "}
             {datos.numeroRevision} · {datos.estado}
@@ -243,7 +243,7 @@ export function InformePDF({ datos }: { datos: InformePDFDatos }) {
           style={s.footer}
           fixed
           render={({ pageNumber, totalPages }) =>
-            `Cordillera M&P · Informe de Inspección de Flota · emitido ${datos.emitidoEl} · pág. ${pageNumber}/${totalPages}`
+            `Cordillera M&P · Informe de Inspección · emitido ${datos.emitidoEl} · pág. ${pageNumber}/${totalPages}`
           }
         />
       </Page>
