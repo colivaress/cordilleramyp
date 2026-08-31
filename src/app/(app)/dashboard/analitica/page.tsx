@@ -67,10 +67,13 @@ export default async function AnaliticaPage() {
       <Card>
         <CardHeader>
           <CardTitle>Desglose por estado</CardTitle>
-          <CardDescription>Conteo exacto por cada valor de estado.</CardDescription>
+          <CardDescription>
+            Inspecciones ya finalizadas, según cómo terminaron. Las que siguen en
+            revisión no entran acá (van en la tarjeta “Inspecciones” de arriba).
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2">
             {porEstado.map((x) => (
               <div
                 key={x.estado}

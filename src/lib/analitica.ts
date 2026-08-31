@@ -22,13 +22,6 @@ type RevisionAnalitica = {
   estado_resultante: TicketEstado;
 };
 
-const TODOS_ESTADOS: TicketEstado[] = [
-  "en_revision",
-  "finalizada_con_observaciones",
-  "finalizada_sin_observaciones",
-  "en_reparacion_de_observaciones",
-];
-
 /**
  * Todos los datasets de la página de analítica (§2.11). Cálculo puro sobre los
  * tickets y sus revisiones — sin tocar la base de datos.
@@ -37,13 +30,24 @@ export function construirAnalitica(
   tickets: TicketAnalitica[],
   revisiones: RevisionAnalitica[],
 ) {
-  // --- Desglose por estado (todos los valores; el legado solo si tiene datos) ---
-  const porEstado = TODOS_ESTADOS.map((estado) => ({
-    estado,
-    total: tickets.filter((t) => t.estado === estado).length,
-  })).filter(
-    (x) => x.estado !== "en_reparacion_de_observaciones" || x.total > 0,
-  );
+  // --- Desglose de inspecciones FINALIZADAS, según cómo terminaron (§2.11).
+  //     `en_revision` NO va acá (no está finalizado); el legado
+  //     `en_reparacion_de_observaciones` se suma dentro de "con observaciones".
+  const porEstado: { estado: TicketEstado; total: number }[] = [
+    {
+      estado: "finalizada_con_observaciones",
+      total: tickets.filter(
+        (t) =>
+          t.estado === "finalizada_con_observaciones" ||
+          t.estado === "en_reparacion_de_observaciones",
+      ).length,
+    },
+    {
+      estado: "finalizada_sin_observaciones",
+      total: tickets.filter((t) => t.estado === "finalizada_sin_observaciones")
+        .length,
+    },
+  ];
 
   // --- Eje de meses: los meses con datos, tope 12 (los más recientes) ---
   const mesesConDatos = [...new Set(tickets.map((t) => mesKey(t.created_at)))].sort();
