@@ -121,10 +121,6 @@ export default async function AnaliticaPage() {
       <Card>
         <CardHeader>
           <CardTitle>Inspecciones con observaciones por mes</CardTitle>
-          <CardDescription>
-            Tickets que en ese mes tuvieron una revisión que quedó “finalizada con
-            observaciones”, aunque hoy ya estén resueltos.
-          </CardDescription>
         </CardHeader>
         <CardContent>
           <GraficoConObservaciones datos={conObservacionesPorMes} />
