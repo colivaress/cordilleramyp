@@ -1,5 +1,12 @@
+import path from "node:path";
 import nodemailer from "nodemailer";
 import type Mail from "nodemailer/lib/mailer";
+
+// §8: logo real de la empresa embebido en el correo por `cid` (no por URL
+// pública — la app puede no estar desplegada). El HTML del cuerpo lo referencia
+// como <img src="cid:logo-cordillera-mp">.
+const LOGO_CID = "logo-cordillera-mp";
+const LOGO_PATH = path.join(process.cwd(), "public", "logo-cordillera-mp.png");
 
 export type ResultadoEnvio = {
   ok: boolean;
@@ -57,6 +64,11 @@ export async function enviarInformePorCorreo(opts: {
         filename: opts.nombreArchivo,
         content: opts.pdf,
         contentType: "application/pdf",
+      },
+      {
+        filename: "logo-cordillera-mp.png",
+        path: LOGO_PATH,
+        cid: LOGO_CID,
       },
     ],
   };

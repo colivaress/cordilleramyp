@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getSesion } from "@/lib/auth";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Logo } from "@/components/Logo";
 
 export default async function AppLayout({
   children,
@@ -15,9 +16,9 @@ export default async function AppLayout({
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <header className="no-print sticky top-0 z-20 border-b bg-card/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-6xl items-center gap-4 px-4 py-3">
-          <Link href="/dashboard" className="font-semibold tracking-tight">
-            Cordillera <span className="text-primary">M&amp;P</span>
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+          <Link href="/dashboard" aria-label="Cordillera M&P — inicio">
+            <Logo />
           </Link>
           <nav className="flex items-center gap-1 text-sm">
             {/* §2.11: "Dashboard" = analítica; "Inspecciones" = el listado.

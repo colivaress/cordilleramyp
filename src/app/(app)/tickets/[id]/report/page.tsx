@@ -149,11 +149,20 @@ export default async function InformePage({
       )}
 
       <article className="print-full mx-auto w-full max-w-3xl rounded-xl bg-card p-8 text-sm ring-1 ring-foreground/10">
-        <header className="mb-6 border-b pb-4">
-          <p className="text-lg font-semibold">
-            Cordillera M&amp;P — Informe de Inspección
-          </p>
-          <p className="text-muted-foreground">
+        <header className="mb-6 flex items-center gap-4 border-b pb-4">
+          <Image
+            src="/logo-cordillera-mp.png"
+            alt="Cordillera M&P"
+            width={2816}
+            height={1408}
+            priority
+            className="h-14 w-auto object-contain"
+          />
+          <div>
+            <p className="text-lg font-semibold">
+              Cordillera M&amp;P — Informe de Inspección
+            </p>
+            <p className="text-muted-foreground">
             Nro de Inspección{" "}
             <span className="font-mono font-medium text-foreground">
               {ticket.numero_inspeccion}
@@ -176,7 +185,8 @@ export default async function InformePage({
                 · {ETIQUETA_ESTADO[revSel.estado_resultante]}
               </>
             )}
-          </p>
+            </p>
+          </div>
         </header>
 
         <section className="mb-6 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">

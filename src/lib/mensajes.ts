@@ -177,6 +177,8 @@ export function construirCuerpoInforme(d: DatosInforme): string {
 
     <p style="margin: 0 0 20px;">Para mayor respaldo, se adjunta la lista de chequeo y el registro fotográfico que ilustra la condición actual del vehículo.</p>
 
-    <p style="margin: 0;">Atentamente,<br>${esc(d.firmanteNombre)}<br>${CARGO_SUPERVISOR}</p>
+    <p style="margin: 0 0 12px;">Atentamente,<br>${esc(d.firmanteNombre)}<br>${CARGO_SUPERVISOR}</p>
+
+    <img src="cid:logo-cordillera-mp" alt="Cordillera M&amp;P" width="180" style="display:block; width:180px; height:auto; border:0;" />
   </div>`;
 }

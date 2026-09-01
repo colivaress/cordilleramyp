@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { renderToBuffer } from "@react-pdf/renderer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
@@ -28,6 +30,23 @@ const fmtCorta = (v: string | null) =>
         year: "numeric",
       })
     : "—";
+
+// §8: logo real de la empresa, embebido en el PDF. Se lee del filesystem una
+// sola vez (no por URL — el PDF se genera server-only y el archivo está en el
+// repo, `public/`).
+let logoCache: string | null | undefined;
+function logoDataUri(): string | null {
+  if (logoCache !== undefined) return logoCache;
+  try {
+    const buf = fs.readFileSync(
+      path.join(process.cwd(), "public", "logo-cordillera-mp.png"),
+    );
+    logoCache = `data:image/png;base64,${buf.toString("base64")}`;
+  } catch {
+    logoCache = null;
+  }
+  return logoCache;
+}
 
 async function aDataUri(url: string | undefined): Promise<string | null> {
   if (!url) return null;
@@ -241,6 +260,7 @@ export async function generarInformePdf(
       modo === "todas"
         ? ETIQUETA_ESTADO[ticket.estado]
         : construidas[0].revisionPDF.estadoResultante,
+    logoDataUri: logoDataUri(),
     emitidoEl: fmt(new Date().toISOString()),
     modo,
     cabecera: {

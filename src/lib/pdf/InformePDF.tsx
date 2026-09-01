@@ -38,6 +38,8 @@ export type InformePDFDatos = {
   /** Estado a mostrar en la cabecera: la revisión seleccionada ("una") o el
    *  estado actual del ticket ("todas"). */
   estado: string;
+  /** §8: logo real de la empresa, embebido como data URI (o null si no carga). */
+  logoDataUri: string | null;
   emitidoEl: string;
   /** §4: "una" = una revisión puntual; "todas" = historial completo. */
   modo: "una" | "todas";
@@ -81,6 +83,8 @@ const s = StyleSheet.create({
     paddingBottom: 10,
     marginBottom: 16,
   },
+  headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 3 },
+  logo: { width: 84, height: 42, objectFit: "contain", marginRight: 12 },
   empresa: { fontSize: 15, fontFamily: "Helvetica-Bold", color: C.marca },
   titulo: { fontSize: 11, fontFamily: "Helvetica-Bold", marginTop: 2 },
   sub: { fontSize: 9, color: C.suave, marginTop: 3 },
@@ -279,8 +283,15 @@ export function InformePDF({ datos }: { datos: InformePDFDatos }) {
     >
       <Page size="A4" style={s.page}>
         <View style={s.header} fixed>
-          <Text style={s.empresa}>Cordillera M&amp;P</Text>
-          <Text style={s.titulo}>Informe de Inspección</Text>
+          <View style={s.headerRow}>
+            {datos.logoDataUri ? (
+              <Image style={s.logo} src={datos.logoDataUri} />
+            ) : null}
+            <View>
+              <Text style={s.empresa}>Cordillera M&amp;P</Text>
+              <Text style={s.titulo}>Informe de Inspección</Text>
+            </View>
+          </View>
           <Text style={s.sub}>
             Nro de Inspección {datos.numeroInspeccion} ·{" "}
             {esTodas

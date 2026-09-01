@@ -14,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Logo } from "@/components/Logo";
 import { mensajeErrorAuth, mensajeErrorParam } from "@/lib/auth-errores";
 
 function LoginForm() {
@@ -88,6 +89,9 @@ function LoginForm() {
     return (
       <Card className="w-full max-w-sm">
         <CardHeader>
+          <div className="mb-2 flex justify-center">
+            <Logo imgClassName="h-12 w-auto" conTexto={false} />
+          </div>
           <CardTitle className="text-xl">Recuperar contraseña</CardTitle>
           <CardDescription>
             Te enviaremos un enlace para restablecer tu contraseña.
@@ -152,6 +156,9 @@ function LoginForm() {
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
+        <div className="mb-2 flex justify-center">
+          <Logo imgClassName="h-12 w-auto" conTexto={false} />
+        </div>
         <CardTitle className="text-xl">Iniciar sesión</CardTitle>
         <CardDescription>
           Cordillera M&amp;P — Revisión de Equipos y Camiones
