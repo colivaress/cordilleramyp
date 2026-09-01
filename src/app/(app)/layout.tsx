@@ -17,7 +17,13 @@ export default async function AppLayout({
     <div className="flex min-h-full flex-1 flex-col">
       <header className="no-print sticky top-0 z-20 border-b bg-card/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-          <Link href="/dashboard" aria-label="Cordillera M&P — inicio">
+          {/* §8: el logo lleva al inicio del rol (admin y supervisor: /dashboard,
+              que se renderiza distinto según el rol). */}
+          <Link
+            href="/dashboard"
+            aria-label="Ir al inicio"
+            className="inline-flex cursor-pointer items-center"
+          >
             <Logo />
           </Link>
           <nav className="flex items-center gap-1 text-sm">

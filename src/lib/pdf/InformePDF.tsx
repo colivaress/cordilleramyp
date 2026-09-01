@@ -83,8 +83,13 @@ const s = StyleSheet.create({
     paddingBottom: 10,
     marginBottom: 16,
   },
-  headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 3 },
-  logo: { width: 84, height: 42, objectFit: "contain", marginRight: 12 },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  headerTextCol: { flexShrink: 1, paddingRight: 12 },
+  logo: { width: 128, height: 64, objectFit: "contain", flexShrink: 0 },
   empresa: { fontSize: 15, fontFamily: "Helvetica-Bold", color: C.marca },
   titulo: { fontSize: 11, fontFamily: "Helvetica-Bold", marginTop: 2 },
   sub: { fontSize: 9, color: C.suave, marginTop: 3 },
@@ -284,21 +289,22 @@ export function InformePDF({ datos }: { datos: InformePDFDatos }) {
       <Page size="A4" style={s.page}>
         <View style={s.header} fixed>
           <View style={s.headerRow}>
+            {/* §8: título + datos a la izquierda; logo a la derecha. */}
+            <View style={s.headerTextCol}>
+              <Text style={s.empresa}>Cordillera M&amp;P</Text>
+              <Text style={s.titulo}>Informe de Inspección</Text>
+              <Text style={s.sub}>
+                Nro de Inspección {datos.numeroInspeccion} ·{" "}
+                {esTodas
+                  ? `Todas las revisiones (${datos.revisiones.length})`
+                  : `Nro de Revisión ${rev0.numeroRevision}`}{" "}
+                · {datos.estado}
+              </Text>
+            </View>
             {datos.logoDataUri ? (
               <Image style={s.logo} src={datos.logoDataUri} />
             ) : null}
-            <View>
-              <Text style={s.empresa}>Cordillera M&amp;P</Text>
-              <Text style={s.titulo}>Informe de Inspección</Text>
-            </View>
           </View>
-          <Text style={s.sub}>
-            Nro de Inspección {datos.numeroInspeccion} ·{" "}
-            {esTodas
-              ? `Todas las revisiones (${datos.revisiones.length})`
-              : `Nro de Revisión ${rev0.numeroRevision}`}{" "}
-            · {datos.estado}
-          </Text>
         </View>
 
         <View style={s.grid}>

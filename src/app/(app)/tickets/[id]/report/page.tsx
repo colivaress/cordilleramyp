@@ -149,15 +149,8 @@ export default async function InformePage({
       )}
 
       <article className="print-full mx-auto w-full max-w-3xl rounded-xl bg-card p-8 text-sm ring-1 ring-foreground/10">
-        <header className="mb-6 flex items-center gap-4 border-b pb-4">
-          <Image
-            src="/logo-cordillera-mp.png"
-            alt="Cordillera M&P"
-            width={2816}
-            height={1408}
-            priority
-            className="h-14 w-auto object-contain"
-          />
+        <header className="mb-6 flex items-center justify-between gap-4 border-b pb-4">
+          {/* §8: título + datos a la izquierda; logo a la derecha (no clicable). */}
           <div>
             <p className="text-lg font-semibold">
               Cordillera M&amp;P — Informe de Inspección
@@ -187,6 +180,14 @@ export default async function InformePage({
             )}
             </p>
           </div>
+          <Image
+            src="/logo-cordillera-mp.png"
+            alt="Cordillera M&P"
+            width={2816}
+            height={1408}
+            priority
+            className="h-16 w-auto shrink-0 object-contain"
+          />
         </header>
 
         <section className="mb-6 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">

@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
  */
 export function Logo({
   className,
-  imgClassName = "h-9 w-auto",
+  imgClassName = "h-12 w-auto",
   conTexto = true,
 }: {
   className?: string;
