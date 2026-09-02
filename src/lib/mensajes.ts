@@ -179,6 +179,12 @@ export function construirCuerpoInforme(d: DatosInforme): string {
 
     <p style="margin: 0 0 12px;">Atentamente,<br>${esc(d.firmanteNombre)}<br>${CARGO_SUPERVISOR}</p>
 
-    <img src="cid:logo-cordillera-mp" alt="Cordillera M&amp;P" width="180" style="display:block; margin:12px 0 0 0; width:180px; height:auto; border:0; text-align:left;" />
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin:12px 0 0 0;">
+      <tr>
+        <td align="left" style="text-align:left; padding:0;">
+          <img src="cid:logo-cordillera-mp" alt="Cordillera M&amp;P" width="180" style="display:block; border:0; outline:none; text-decoration:none; width:180px; max-width:180px; height:auto;" />
+        </td>
+      </tr>
+    </table>
   </div>`;
 }
