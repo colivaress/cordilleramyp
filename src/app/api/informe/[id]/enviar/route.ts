@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -58,7 +59,11 @@ async function preparar(id: string, opciones: OpcionesInforme) {
     };
   }
 
+  const tPdf = performance.now();
   const informe = await generarInformePdf(supabase, id, opciones);
+  console.log(
+    `[informe] generarInformePdf total: ${Math.round(performance.now() - tPdf)}ms`,
+  );
   if (!informe) {
     return {
       error: NextResponse.json(

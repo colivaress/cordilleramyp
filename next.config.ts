@@ -5,8 +5,8 @@ const supabaseHost = process.env.NEXT_PUBLIC_SUPABASE_URL
   : "*.supabase.co";
 
 const nextConfig: NextConfig = {
-  // @react-pdf/renderer y nodemailer no deben pasar por el bundler del servidor.
-  serverExternalPackages: ["@react-pdf/renderer", "nodemailer"],
+  // @react-pdf/renderer, nodemailer y sharp no deben pasar por el bundler del servidor.
+  serverExternalPackages: ["@react-pdf/renderer", "nodemailer", "sharp"],
   images: {
     remotePatterns: [
       {

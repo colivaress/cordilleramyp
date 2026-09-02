@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { MailIcon } from "lucide-react";
+import { Loader2Icon, MailIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -134,10 +134,11 @@ export function EmailRecipientsSelect({
         type="button"
         onClick={enviar}
         disabled={enviando}
+        aria-busy={enviando}
         className="w-fit"
       >
-        <MailIcon />
-        {enviando ? "Enviando…" : "Enviar por correo"}
+        {enviando ? <Loader2Icon className="animate-spin" /> : <MailIcon />}
+        {enviando ? "Generando informe y enviando…" : "Enviar por correo"}
       </Button>
     </div>
   );

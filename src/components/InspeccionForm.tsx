@@ -107,6 +107,45 @@ function nombreFoto(ext: string) {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 }
 
+/**
+ * §4.1: comprime/redimensiona la foto ANTES de subirla al bucket `fallas`
+ * (máx. 1600px de ancho, JPEG ~80%). Una foto de celular sin comprimir pesa
+ * varios MB y hace lento tanto el informe por correo como el lightbox del
+ * detalle. Si el navegador no puede decodificar el formato (p. ej. HEIC en
+ * Android/Chrome), se sube el archivo original sin tocar.
+ */
+async function comprimirImagen(
+  file: File,
+  maxAncho = 1600,
+  calidad = 0.8,
+): Promise<{ blob: Blob; ext: string }> {
+  try {
+    const bitmap = await createImageBitmap(file, {
+      imageOrientation: "from-image",
+    });
+    const escala = Math.min(1, maxAncho / bitmap.width);
+    const w = Math.max(1, Math.round(bitmap.width * escala));
+    const h = Math.max(1, Math.round(bitmap.height * escala));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("sin contexto 2d");
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((res) =>
+      canvas.toBlob(res, "image/jpeg", calidad),
+    );
+    if (!blob) throw new Error("toBlob devolvió null");
+    return { blob, ext: "jpg" };
+  } catch {
+    return {
+      blob: file,
+      ext: file.name.split(".").pop()?.toLowerCase() || "jpg",
+    };
+  }
+}
+
 export function InspeccionForm({
   modo,
   items,
@@ -351,14 +390,14 @@ export function InspeccionForm({
     }
     patchResp(key, { subiendoFoto: true });
     try {
-      const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+      const { blob, ext } = await comprimirImagen(file);
       const path = await subirArchivo(
         "fallas",
         `${ticketId}/${key}/${nombreFoto(ext)}`,
-        file,
-        file.type || "image/jpeg",
+        blob,
+        blob.type || "image/jpeg",
       );
-      const previewUrl = URL.createObjectURL(file);
+      const previewUrl = URL.createObjectURL(blob);
       patchResp(key, {
         fotoPath: path,
         fotoNombre: file.name,

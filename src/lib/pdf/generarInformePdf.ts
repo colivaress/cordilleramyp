@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
+import sharp from "sharp";
 import { renderToBuffer } from "@react-pdf/renderer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
@@ -31,31 +33,65 @@ const fmtCorta = (v: string | null) =>
       })
     : "—";
 
-// §8: logo real de la empresa, embebido en el PDF. Se lee del filesystem una
-// sola vez (no por URL — el PDF se genera server-only y el archivo está en el
-// repo, `public/`).
+// §4.1: las imágenes se redimensionan/comprimen con sharp ANTES de embeberlas
+// en el PDF. Sin esto, @react-pdf/renderer decodifica en JS puro cada PNG de
+// varios megapíxeles (fotos de celular, logo 2816×1408) y la generación del
+// informe tarda ~1 min. Con el resize baja a pocos segundos y el PDF de ~5 MB a
+// unos cientos de KB.
+
+// §8: logo real de la empresa. Se lee y redimensiona una sola vez por proceso.
 let logoCache: string | null | undefined;
-function logoDataUri(): string | null {
+async function logoDataUri(): Promise<string | null> {
   if (logoCache !== undefined) return logoCache;
   try {
-    const buf = fs.readFileSync(
+    const buf = await fs.promises.readFile(
       path.join(process.cwd(), "public", "logo-cordillera-mp.png"),
     );
-    logoCache = `data:image/png;base64,${buf.toString("base64")}`;
+    const chico = await sharp(buf)
+      .resize({ width: 520, withoutEnlargement: true })
+      .png({ compressionLevel: 9, palette: true })
+      .toBuffer();
+    logoCache = `data:image/png;base64,${chico.toString("base64")}`;
   } catch {
     logoCache = null;
   }
   return logoCache;
 }
 
-async function aDataUri(url: string | undefined): Promise<string | null> {
+/** Descarga una imagen y la comprime para el PDF (JPEG ~1400px para fotos). */
+async function fotoDataUri(url: string | undefined): Promise<string | null> {
   if (!url) return null;
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
-    const ct = res.headers.get("content-type") || "image/jpeg";
-    return `data:${ct};base64,${buf.toString("base64")}`;
+    const chica = await sharp(buf)
+      .rotate() // respeta la orientación EXIF de las fotos de celular
+      .resize({ width: 1400, withoutEnlargement: true })
+      .jpeg({ quality: 78, mozjpeg: true })
+      .toBuffer();
+    return `data:image/jpeg;base64,${chica.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Descarga una firma (PNG chico con transparencia) — sin recomprimir a JPEG. */
+async function firmaDataUri(url: string | undefined): Promise<string | null> {
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    // Las firmas ya son livianas; solo se acotan si vinieran enormes.
+    const png =
+      buf.length > 120_000
+        ? await sharp(buf)
+            .resize({ width: 900, withoutEnlargement: true })
+            .png({ compressionLevel: 9 })
+            .toBuffer()
+        : buf;
+    return `data:image/png;base64,${png.toString("base64")}`;
   } catch {
     return null;
   }
@@ -123,29 +159,31 @@ async function construirRevisionPDF(
     rev.firma_fiscalizador_url,
   ]);
 
-  const items = await Promise.all(
-    filas.map(async (r, i) => ({
-      n: i + 1,
-      nombre: r.item?.nombre ?? r.item_key,
-      estado: ETIQUETA_ITEM[r.estado],
-      esNoConforme: r.estado === "no_conforme",
-      observacion: r.observacion,
-      fotoDataUri:
-        r.estado === "no_conforme" && r.foto_url
-          ? await aDataUri(urlFotos[r.foto_url])
-          : null,
-    })),
-  );
-
-  const [firmaConductorUri, firmaFiscalizadorUri] = await Promise.all([
-    aDataUri(
-      rev.firma_conductor_url ? urlFirmas[rev.firma_conductor_url] : undefined,
+  // §4.1: todas las fotos + firmas de la revisión, EN PARALELO.
+  const [items, [firmaConductorUri, firmaFiscalizadorUri]] = await Promise.all([
+    Promise.all(
+      filas.map(async (r, i) => ({
+        n: i + 1,
+        nombre: r.item?.nombre ?? r.item_key,
+        estado: ETIQUETA_ITEM[r.estado],
+        esNoConforme: r.estado === "no_conforme",
+        observacion: r.observacion,
+        fotoDataUri:
+          r.estado === "no_conforme" && r.foto_url
+            ? await fotoDataUri(urlFotos[r.foto_url])
+            : null,
+      })),
     ),
-    aDataUri(
-      rev.firma_fiscalizador_url
-        ? urlFirmas[rev.firma_fiscalizador_url]
-        : undefined,
-    ),
+    Promise.all([
+      firmaDataUri(
+        rev.firma_conductor_url ? urlFirmas[rev.firma_conductor_url] : undefined,
+      ),
+      firmaDataUri(
+        rev.firma_fiscalizador_url
+          ? urlFirmas[rev.firma_fiscalizador_url]
+          : undefined,
+      ),
+    ]),
   ]);
 
   const observaciones = filas
@@ -232,17 +270,31 @@ export async function generarInformePdf(
     objetivo = [ultima];
   }
 
-  const construidas = await Promise.all(
-    objetivo.map((rev) =>
-      construirRevisionPDF(
-        supabase,
-        ticketId,
-        rev,
-        ticket.conductor,
-        ticket.fecha_vencimiento,
-        supervisorNombre,
+  // §4.1: descarga + compresión de imágenes (logo, fotos, firmas) EN PARALELO.
+  const tImg = performance.now();
+  const [logo, construidas] = await Promise.all([
+    logoDataUri(),
+    Promise.all(
+      objetivo.map((rev) =>
+        construirRevisionPDF(
+          supabase,
+          ticketId,
+          rev,
+          ticket.conductor,
+          ticket.fecha_vencimiento,
+          supervisorNombre,
+        ),
       ),
     ),
+  ]);
+  const nFotos = construidas.reduce(
+    (acc, c) => acc + c.revisionPDF.items.filter((i) => i.fotoDataUri).length,
+    0,
+  );
+  console.log(
+    `[informe] imágenes (${objetivo.length} rev, ${nFotos} fotos): ${Math.round(
+      performance.now() - tImg,
+    )}ms`,
   );
 
   // Para el asunto/cuerpo del correo y el nombre de archivo: en modo "todas" se
@@ -260,7 +312,7 @@ export async function generarInformePdf(
       modo === "todas"
         ? ETIQUETA_ESTADO[ticket.estado]
         : construidas[0].revisionPDF.estadoResultante,
-    logoDataUri: logoDataUri(),
+    logoDataUri: logo,
     emitidoEl: fmt(new Date().toISOString()),
     modo,
     cabecera: {
@@ -275,7 +327,13 @@ export async function generarInformePdf(
     revisiones: construidas.map((c) => c.revisionPDF),
   };
 
+  const tRender = performance.now();
   const pdf = await renderToBuffer(InformePDF({ datos }));
+  console.log(
+    `[informe] render PDF: ${Math.round(performance.now() - tRender)}ms (${Math.round(
+      pdf.length / 1024,
+    )} KB)`,
+  );
 
   return {
     pdf,
