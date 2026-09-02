@@ -182,7 +182,7 @@ export function construirCuerpoInforme(d: DatosInforme): string {
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin:12px 0 0 0;">
       <tr>
         <td align="left" style="text-align:left; padding:0;">
-          <img src="cid:logo-cordillera-mp" alt="Cordillera M&amp;P" width="180" style="display:block; border:0; outline:none; text-decoration:none; width:180px; max-width:180px; height:auto;" />
+          <img src="cid:logo-cordillera-mp" alt="Cordillera M&amp;P" width="150" style="display:block; margin:0; border:0; outline:none; text-decoration:none; width:150px; max-width:150px; height:auto;" />
         </td>
       </tr>
     </table>
