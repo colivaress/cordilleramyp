@@ -30,9 +30,6 @@ import {
 } from "@/app/(app)/usuarios/actions";
 import type { Personal, RolUsuario } from "@/lib/tipos";
 
-const fmtFecha = (v: string | null) =>
-  v ? new Date(v + "T00:00:00").toLocaleDateString("es-CL") : "—";
-
 type Form = {
   nombre: string;
   apellido: string;
@@ -158,7 +155,6 @@ export function UsuariosTabla({
               <TableHead>Nombre</TableHead>
               <TableHead>Correo</TableHead>
               <TableHead>Teléfono</TableHead>
-              <TableHead>Fecha de nacimiento</TableHead>
               <TableHead>Rol</TableHead>
               <TableHead>Estado</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
@@ -175,7 +171,6 @@ export function UsuariosTabla({
                   </TableCell>
                   <TableCell>{u.email ?? "—"}</TableCell>
                   <TableCell>{u.telefono ?? "—"}</TableCell>
-                  <TableCell>{fmtFecha(u.fecha_nacimiento)}</TableCell>
                   <TableCell>
                     <Badge variant={u.rol === "administrador" ? "default" : "secondary"}>
                       {u.rol === "administrador" ? "Administrador" : "Supervisor"}
