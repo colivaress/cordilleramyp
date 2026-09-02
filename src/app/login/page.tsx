@@ -89,8 +89,8 @@ function LoginForm() {
     return (
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <div className="mb-2 flex justify-center">
-            <Logo imgClassName="h-16 w-auto" />
+          <div className="mb-4 flex justify-center">
+            <Logo imgClassName="h-36 w-auto max-w-full" />
           </div>
           <CardTitle className="text-xl">Recuperar contraseña</CardTitle>
           <CardDescription>
@@ -156,8 +156,8 @@ function LoginForm() {
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
-        <div className="mb-2 flex justify-center">
-          <Logo imgClassName="h-16 w-auto" />
+        <div className="mb-4 flex justify-center">
+          <Logo imgClassName="h-36 w-auto max-w-full" />
         </div>
         <CardTitle className="text-xl">Iniciar sesión</CardTitle>
         <CardDescription>
