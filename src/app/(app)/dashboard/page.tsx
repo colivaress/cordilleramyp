@@ -19,7 +19,6 @@ import {
 } from "@/components/ui/table";
 import { TicketStatusBadge } from "@/components/TicketStatusBadge";
 import { CountdownBadge } from "@/components/CountdownBadge";
-import { WhatsAppNotifyButton } from "@/components/WhatsAppNotifyButton";
 import { DashboardFilters } from "@/components/DashboardFilters";
 import { Paginacion } from "@/components/Paginacion";
 import { ResumenCards } from "@/components/ResumenCards";
@@ -32,7 +31,6 @@ import {
   mesKey,
 } from "@/lib/dashboard";
 import { nombreCompleto } from "@/lib/mensajes";
-import type { FallaResumen } from "@/lib/mensajes";
 import type { TicketEstado } from "@/lib/tipos";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +59,7 @@ export default async function DashboardPage({
   const { data: tickets } = await supabase
     .from("tickets")
     .select(
-      "*, supervisor:personal!tickets_supervisor_id_fkey(id, nombre, apellido, telefono)",
+      "*, supervisor:personal!tickets_supervisor_id_fkey(id, nombre, apellido)",
     )
     .order("numero_inspeccion", { ascending: false });
   const lista = tickets ?? [];
@@ -77,29 +75,6 @@ export default async function DashboardPage({
   }
   const numeroRevision = (t: { id: string; revision_actual: number }): number =>
     ultimoNumeroRevision.get(t.id) ?? t.revision_actual;
-
-  // No conformes de la última revisión, por ticket — para el mensaje de WhatsApp.
-  const { data: respuestas } = await supabase
-    .from("ticket_checklist_respuestas")
-    .select(
-      "ticket_id, revision_numero, estado, observacion, item:checklist_items(nombre)",
-    )
-    .eq("estado", "no_conforme");
-  const fallasPorTicket = new Map<string, FallaResumen[]>();
-  for (const t of lista) {
-    fallasPorTicket.set(
-      t.id,
-      (respuestas ?? [])
-        .filter(
-          (r) =>
-            r.ticket_id === t.id && r.revision_numero === t.revision_actual,
-        )
-        .map((r) => ({
-          nombre: r.item?.nombre ?? r.ticket_id,
-          observacion: r.observacion,
-        })),
-    );
-  }
 
   // §2.6/§2.11: las tarjetas muestran los totales globales (sin filtrar), para
   // que coincidan con la página de analítica (§2.11).
@@ -209,13 +184,10 @@ export default async function DashboardPage({
             <Table>
               <TableHeader>
                 <TableRow>
-                  {/* §2.6: col 1 "Ver" y col 2 "WhatsApp" sin título visible;
-                      la columna de WhatsApp queda reservada en ambas pantallas. */}
+                  {/* §2.6: primera columna "Ver" sin título visible. La columna
+                      del botón de WhatsApp se eliminó por completo (§2.6/§3). */}
                   <TableHead>
                     <span className="sr-only">Ver</span>
-                  </TableHead>
-                  <TableHead>
-                    <span className="sr-only">Notificar por WhatsApp</span>
                   </TableHead>
                   {/* §2.6/§2.7: encabezado corto "Nro" (el resto de la app usa
                       "Nro de Inspección"). El nro de revisión va pegado acá
@@ -231,7 +203,7 @@ export default async function DashboardPage({
               <TableBody>
                 {listaPagina.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-muted-foreground">
+                    <TableCell colSpan={7} className="text-muted-foreground">
                       {hayFiltro
                         ? "No hay inspecciones para los filtros seleccionados."
                         : "No hay inspecciones todavía."}
@@ -254,24 +226,6 @@ export default async function DashboardPage({
                         >
                           Ver
                         </Link>
-                      </TableCell>
-                      <TableCell>
-                        {esAdmin && (
-                          <WhatsAppNotifyButton
-                            ticketId={t.id}
-                            numeroInspeccion={t.numero_inspeccion}
-                            numeroRevision={numeroRevision(t)}
-                            patenteCamion={t.patente_camion}
-                            patenteRampla={t.patente_rampla}
-                            transporte={t.transporte}
-                            conductor={t.conductor}
-                            supervisorTelefono={t.supervisor?.telefono}
-                            supervisorNombre={t.supervisor?.nombre}
-                            fallas={fallasPorTicket.get(t.id) ?? []}
-                            fechaVencimiento={t.fecha_vencimiento}
-                            estadoTicket={t.estado}
-                          />
-                        )}
                       </TableCell>
                       <TableCell className="font-mono tabular-nums whitespace-nowrap">
                         {t.numero_inspeccion}

@@ -89,7 +89,7 @@ const s = StyleSheet.create({
     justifyContent: "space-between",
   },
   headerTextCol: { flexShrink: 1, paddingRight: 12 },
-  logo: { width: 128, height: 64, objectFit: "contain", flexShrink: 0 },
+  logo: { width: 192, height: 96, objectFit: "contain", flexShrink: 0 },
   empresa: { fontSize: 15, fontFamily: "Helvetica-Bold", color: C.marca },
   titulo: { fontSize: 11, fontFamily: "Helvetica-Bold", marginTop: 2 },
   sub: { fontSize: 9, color: C.suave, marginTop: 3 },

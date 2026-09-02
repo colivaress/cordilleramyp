@@ -151,7 +151,7 @@ export default async function InformePage({
       <article className="print-full mx-auto w-full max-w-3xl rounded-xl bg-card p-8 text-sm ring-1 ring-foreground/10">
         <header className="mb-6 flex items-center justify-between gap-4 border-b pb-4">
           {/* §8: título + datos a la izquierda; logo a la derecha (no clicable). */}
-          <div>
+          <div className="min-w-0">
             <p className="text-lg font-semibold">
               Cordillera M&amp;P — Informe de Inspección
             </p>
@@ -186,7 +186,7 @@ export default async function InformePage({
             width={2816}
             height={1408}
             priority
-            className="h-16 w-auto shrink-0 object-contain"
+            className="h-20 w-auto shrink-0 object-contain sm:h-24"
           />
         </header>
 

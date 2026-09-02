@@ -90,7 +90,7 @@ function LoginForm() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <div className="mb-2 flex justify-center">
-            <Logo imgClassName="h-12 w-auto" conTexto={false} />
+            <Logo imgClassName="h-16 w-auto" />
           </div>
           <CardTitle className="text-xl">Recuperar contraseña</CardTitle>
           <CardDescription>
@@ -157,7 +157,7 @@ function LoginForm() {
     <Card className="w-full max-w-sm">
       <CardHeader>
         <div className="mb-2 flex justify-center">
-          <Logo imgClassName="h-12 w-auto" conTexto={false} />
+          <Logo imgClassName="h-16 w-auto" />
         </div>
         <CardTitle className="text-xl">Iniciar sesión</CardTitle>
         <CardDescription>
