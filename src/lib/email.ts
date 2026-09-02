@@ -117,3 +117,31 @@ export async function enviarInformePorCorreo(opts: {
   );
   return { ok: true, messageId: info.messageId };
 }
+
+/**
+ * §3.2 — correo HTML genérico (sin PDF adjunto) con el logo embebido por `cid`.
+ * Reutiliza el mismo transporter/Gmail de §4.1. Lo usa el aviso automático de
+ * vencimiento a los administradores.
+ */
+export async function enviarCorreoHtml(opts: {
+  destinatarios: string[];
+  asunto: string;
+  cuerpoHtml: string;
+}): Promise<ResultadoEnvio> {
+  const { transporter, from } = obtenerTransporte();
+  const info = await transporter.sendMail({
+    from,
+    to: opts.destinatarios,
+    subject: opts.asunto,
+    html: opts.cuerpoHtml,
+    attachments: [
+      {
+        filename: "logo-cordillera-mp.png",
+        content: await logoAdjunto(),
+        contentType: "image/png",
+        cid: LOGO_CID,
+      },
+    ],
+  });
+  return { ok: true, messageId: info.messageId };
+}

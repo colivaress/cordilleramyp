@@ -9,8 +9,10 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.17"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -247,6 +249,9 @@ export type Database = {
       }
       tickets: {
         Row: {
+          alerta_admin_24h_enviada: boolean
+          alerta_admin_48h_enviada: boolean
+          alerta_admin_vencido_enviada: boolean
           alerta_naranja_enviada: boolean
           conductor: string
           created_at: string
@@ -265,6 +270,9 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          alerta_admin_24h_enviada?: boolean
+          alerta_admin_48h_enviada?: boolean
+          alerta_admin_vencido_enviada?: boolean
           alerta_naranja_enviada?: boolean
           conductor: string
           created_at?: string
@@ -283,6 +291,9 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          alerta_admin_24h_enviada?: boolean
+          alerta_admin_48h_enviada?: boolean
+          alerta_admin_vencido_enviada?: boolean
           alerta_naranja_enviada?: boolean
           conductor?: string
           created_at?: string

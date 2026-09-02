@@ -33,6 +33,8 @@ Todo ticket se crea con estos campos obligatorios, validados en el formulario an
 
 **El `conductor` puede cambiar entre revisiones de un mismo ticket** (en una segunda inspección puede presentarse un chofer distinto al de la primera) — ver §2.6 para cómo se registra esto sin perder el historial del conductor de cada revisión anterior.
 
+**Corrección — `fecha` deja de ser un campo editable, se carga sola con el momento en que se presiona "Nueva inspección":** hoy `fecha` es un input de fecha/hora que el supervisor completa a mano, igual que el resto de los campos de esta sección — corrige esto. Al entrar a la pantalla de "Nueva inspección" (el paso "Datos de Inspección", §2.7), `fecha` se completa automáticamente con la fecha y hora actual en ese momento (`now()` del cliente o del servidor, a criterio de la implementación) y se **muestra en pantalla solo como texto/dato de solo lectura** (por ejemplo junto al resto de la cabecera, o como un campo deshabilitado con el valor ya cargado) — el supervisor la ve, pero no puede modificarla ni escribir un valor distinto. Esto es distinto de `fecha_vencimiento` (§2.7), que sigue siendo **editable** como ya está especificado (se precarga como `fecha + 10 días` pero el supervisor puede cambiarla) — esta corrección no toca `fecha_vencimiento`, solo `fecha`. Como `fecha` ya no es un input que el usuario completa, sácala de la lista de campos que se validan como "obligatorios de cliente" en §2.7 (ya no aplica esa validación, siempre va a tener un valor porque se carga sola).
+
 ---
 
 ## 2. Roles, ciclo de vida del ticket y checklist de 18 elementos
@@ -232,7 +234,7 @@ alter table tickets
 
 **Esto es un ajuste sobre lo ya construido** (el formulario actual deja campos opcionales, ubica el vencimiento junto a la carga de fotos, y usa textos en voseo argentino que no corresponden al español de Chile) — corrige así:
 
-- **Todos los campos de "Datos de Inspección" son obligatorios**, sin excepción: los siete de §1 (`transporte`, `conductor`, `fecha`, `procedencia`, `tipo_camion`, `patente_camion`, `patente_rampla`) más el nuevo `fecha_vencimiento` de este punto. Esto es validación de cliente real — el botón para avanzar al checklist debe quedar deshabilitado (o mostrar los errores correspondientes) mientras falte cualquiera de estos campos, no solo confiar en el `not null` de la base de datos.
+- **Todos los campos de "Datos de Inspección" son obligatorios**, sin excepción: los siete de §1 (`transporte`, `conductor`, `fecha`, `procedencia`, `tipo_camion`, `patente_camion`, `patente_rampla`) más el nuevo `fecha_vencimiento` de este punto. Esto es validación de cliente real — el botón para avanzar al checklist debe quedar deshabilitado (o mostrar los errores correspondientes) mientras falte cualquiera de estos campos, no solo confiar en el `not null` de la base de datos. **Excepción — `fecha` (ver la corrección en §1):** ya no es un input editable por el supervisor, se carga sola con la fecha/hora actual al entrar a esta pantalla y se muestra solo como dato de lectura — no aplica esta validación de "obligatorio de cliente" sobre `fecha`, siempre va a tener un valor.
 - **Ubicación de `fecha_vencimiento`:** este campo (ver §2.4 y §3 — ya no se pide por ítem, es un solo campo por revisión) va **dentro de la sección de cabecera del formulario ("Datos de Inspección"), junto al resto de los campos de §1** — no al costado de la carga de fotos ni de ningún ítem del checklist, que es donde está hoy.
 - **Valor por defecto:** al completarse/cambiar la `fecha` de inspección, precarga `fecha_vencimiento` automáticamente como `fecha + 10 días`. El campo queda **editable** — el valor precargado es solo un punto de partida cómodo, el supervisor puede cambiarlo a cualquier otra fecha antes de guardar. Si el supervisor ya había modificado `fecha_vencimiento` a mano y luego cambia `fecha`, no pises ese valor editado manualmente (recalcula el default solo mientras el campo de vencimiento siga en su valor precargado, o bien recalcúlalo siempre y acepta que es un detalle menor de UX — a criterio de la implementación, pero el campo debe seguir siendo editable en cualquier caso).
 - **Cambios de texto (corrige cada instancia donde aparezca en la app, no solo en la pantalla principal del formulario):**
@@ -448,6 +450,39 @@ No la agregues `not null` a nivel de base (hay usuarios existentes sin este dato
 - **Manejo de errores:** si la API de Meta falla para un ticket puntual (token vencido, número inválido, plantilla no aprobada, etc.), el job debe seguir procesando el resto de los tickets pendientes de esa corrida — no debe abortar todo por el error de uno solo — y dejar el error registrado (log del servidor como mínimo; idealmente también una fila en `notificaciones` marcando el fallo) para poder revisarlo después.
 
 **Requisitos previos con Meta, fuera del código (los gestiona el usuario, o junto con el usuario):** verificar la empresa en Meta Business Manager, configurar un número de WhatsApp Business (puede ser el mismo número que ya se usa para el enlace `wa.me` manual, siempre que quede registrado como número de WhatsApp Business), y generar un `WHATSAPP_TOKEN` de acceso **permanente** desde Meta for Developers (no el token temporal de 24 horas que Meta entrega por defecto al empezar a probar).
+
+### 3.2 Aviso automático por correo a los administradores — 48h, 24h y al vencer
+
+**Nueva funcionalidad:** además del aviso automático por WhatsApp al supervisor (§3.1, una sola vez a las 24h) y del botón manual de alerta por correo (§3, lo dispara alguien a mano), agrega un **aviso automático por correo a los administradores** con tres momentos distintos en el ciclo de vencimiento de cada inspección:
+
+1. Cuando la inspección llega a **48 horas** para vencer.
+2. Cuando llega a **24 horas** para vencer.
+3. Si llega a **vencer** (`horas_restantes < 0`) sin haberse resuelto.
+
+Cada uno de estos tres momentos es una notificación **independiente y única por ciclo** (no un recordatorio que se repite en cada corrida del cron) — un ticket puede llegar a mandar hasta tres correos distintos a los administradores a lo largo de su ciclo de vencimiento (48h, 24h, vencido), pero nunca el mismo aviso dos veces.
+
+- **Reutiliza el mismo job programado del aviso de WhatsApp (§3.1)** — el Route Handler `app/api/cron/alertas-whatsapp/route.ts` (o renómbralo a algo más general tipo `app/api/cron/alertas-vencimiento/route.ts` si prefieres, ajustando la entrada en `vercel.json`) ya recorre periódicamente todos los tickets abiertos y calcula `horas_restantes` de cada uno — agrega esta lógica de correo a esa misma corrida en vez de crear un cron aparte, para no duplicar la consulta ni la infraestructura. Mismos umbrales de frecuencia/plan de Vercel ya explicados en §3.1 (30–60 min en plan Pro, 1 vez al día en Hobby).
+- **A quién se le manda:** a **todos los administradores activos** — `personal.email` de cada fila con `rol = 'administrador'` y `activo = true` (no a la tabla `destinatarios_correo` de §4, esa es para la distribución del informe a contactos de la empresa; esto es específicamente para los usuarios con rol Administrador del sistema). Si en ese momento no hay ningún administrador activo con correo cargado, registra el intento igual en `notificaciones` con una nota indicando que no había destinatarios, y sigue con el resto de los tickets de la corrida.
+- **Contenido del correo (HTML, mismo transporter de nodemailer/Gmail ya configurado en §4.1 — reutilízalo, no crees una configuración SMTP aparte):**
+  - Asunto y cuerpo según el momento: "La inspección Nro {numero_inspeccion} vencerá en 48 horas", "La inspección Nro {numero_inspeccion} vencerá en 24 horas", o "La inspección Nro {numero_inspeccion} venció" — usa siempre el `numero_inspeccion` legible (§2.6), nunca el UUID interno.
+  - Incluye como mínimo: Nro de Inspección, Patente Camión, Patente Rampla, Transporte, Supervisor a cargo, y la fecha/hora de vencimiento.
+  - **Agrega un botón** (un `<a>` con estilo de botón, mismo criterio visual que el resto de los correos HTML de la app) que linkee directo a `/tickets/[id]/report` (el informe de esa inspección, ya que es la pantalla de entrada principal desde §2.6) para que el administrador pueda revisarla con un clic. Como es un link dentro de un correo, tiene que ser una **URL absoluta** — agrega una variable de entorno nueva `NEXT_PUBLIC_APP_URL` (la URL pública de la app en producción, ver §9) y arma el link como `${process.env.NEXT_PUBLIC_APP_URL}/tickets/${ticketId}/report`.
+- **Persistencia para no repetir el aviso (mismo patrón que `alerta_naranja_enviada` de §3.1):** agrega tres columnas nuevas a `tickets` — `alerta_admin_48h_enviada`, `alerta_admin_24h_enviada` y `alerta_admin_vencido_enviada` (booleanas, `default false`, ver DDL en §7). En cada corrida del cron, para cada ticket con estado distinto de `finalizada_sin_observaciones`:
+  - Si `horas_restantes <= 48` y `alerta_admin_48h_enviada = false` → manda el correo de 48h y marca esa columna en `true`.
+  - Si `horas_restantes <= 24` y `alerta_admin_24h_enviada = false` → manda el correo de 24h y marca esa columna en `true` (esto puede pasar en la misma corrida en que también se cruza el de 48h si el cron corre poco seguido — está bien, se mandan los dos correos correspondientes, cada uno una sola vez).
+  - Si `horas_restantes < 0` (ya vencido) y `alerta_admin_vencido_enviada = false` → manda el correo de vencido y marca esa columna en `true`.
+- **Reinicia las tres columnas a `false` cada vez que el ticket vuelve a `en_revision`** (nueva revisión/reinspección, §2.3, con una `fecha_vencimiento` nueva) — igual que `alerta_naranja_enviada` en §3.1, para que el nuevo ciclo de vencimiento pueda volver a generar sus propios avisos de 48h/24h/vencido sin quedar "gastado" por el ciclo anterior.
+- **Migración para bases de datos ya desplegadas** (mismo caso que las demás migraciones incrementales de este documento — si `tickets` ya existe de una construcción anterior, no la recrees, solo agrega las columnas):
+
+  ```sql
+  alter table tickets
+    add column if not exists alerta_admin_48h_enviada boolean not null default false,
+    add column if not exists alerta_admin_24h_enviada boolean not null default false,
+    add column if not exists alerta_admin_vencido_enviada boolean not null default false;
+  ```
+- **Registro para trazabilidad:** cada envío (o intento fallido) se guarda en la tabla `notificaciones` (`tipo = 'email'`), igual que el resto de los avisos automáticos y manuales de este documento.
+- **Manejo de errores:** si el envío falla para un ticket puntual (SMTP rechaza, sin destinatarios, etc.), el job sigue procesando el resto de los tickets de esa corrida — no debe abortar todo por el error de uno solo — y deja el error registrado (log del servidor como mínimo, idealmente también en `notificaciones`).
+- **Verifica en vivo:** con un ticket de prueba, ajusta manualmente su `fecha_vencimiento` (vía SQL) para simular cada uno de los tres umbrales, dispara el cron a mano (o espera su corrida) y confirma que llega el correo correspondiente a los administradores activos, con el botón funcionando y llevando al informe correcto — y que no se repite en la corrida siguiente.
 
 ---
 
@@ -794,6 +829,9 @@ create table tickets (
   supervisor_id uuid references personal(id),
   fecha_vencimiento timestamptz, -- vencimiento efectivo: el de la revisión más reciente de este ticket (ver §2.6 y §3)
   alerta_naranja_enviada boolean not null default false, -- evita reenviar el WhatsApp automático de §3.1 en cada corrida del cron
+  alerta_admin_48h_enviada boolean not null default false, -- avisos automáticos por correo a administradores, §3.2
+  alerta_admin_24h_enviada boolean not null default false,
+  alerta_admin_vencido_enviada boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -931,6 +969,7 @@ Regla general, válida durante todo el desarrollo: **ningún token, API key, con
 - `SUPABASE_SERVICE_ROLE_KEY` (solo si el proyecto la necesita, p. ej. para operaciones administrativas desde el servidor): **nunca** debe usarse en un Client Component ni en cualquier código que se ejecute en el navegador, y **nunca** debe llevar el prefijo `NEXT_PUBLIC_`. Solo en Server Components, Route Handlers o Server Actions.
 - Credenciales del proveedor de correo (§8) y cualquier otro secreto futuro: mismo tratamiento.
 - `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` y `CRON_SECRET` (§3.1, aviso automático por WhatsApp): mismo tratamiento — solo se leen desde el Route Handler del cron (server-only), nunca en un Client Component ni con prefijo `NEXT_PUBLIC_`.
+- `NEXT_PUBLIC_APP_URL` (§3.2, botón "Ver inspección" en los correos automáticos a administradores): la URL pública de la app en producción (por ejemplo `https://cordilleramyp.vercel.app` o el dominio final) — a diferencia de las otras variables de este cron, esta sí necesita el prefijo `NEXT_PUBLIC_` porque se usa para armar un link absoluto dentro del HTML del correo, no es un secreto. Agrégala igual a `.env.local`/variables del hosting y a `.env.example`.
 - Crea un `.env.example` versionado en git, con los nombres de las variables sin valores reales, para documentar qué se necesita sin exponer nada.
 
 **El token de Supabase en `.mcp.json`** es aparte: lo usa Claude Code/el MCP para administrar la base de datos, no la aplicación en sí, y no se despliega — pero igual debe estar en `.gitignore` (ver §10, ya lo está en este repo).

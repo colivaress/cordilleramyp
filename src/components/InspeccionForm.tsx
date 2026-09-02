@@ -45,20 +45,21 @@ type Cabecera = {
 const cabeceraVacia = (): Cabecera => ({
   transporte: "",
   conductor: "",
-  fecha: "",
-  fechaVencimiento: "",
+  // §1: la fecha/hora de inspección NO es editable — se fija al abrir el
+  // formulario. `fechaVencimiento` se precarga como fecha + 10 días (editable).
+  fecha: aDatetimeLocal(new Date()),
+  fechaVencimiento: vencimientoPorDefecto(),
   procedencia: "",
   tipo_camion: "",
   patente_camion: "",
   patente_rampla: "",
 });
 
-// §2.7: todos los campos de "Datos de Inspección" son obligatorios, incluido el
-// nuevo `fechaVencimiento` (ubicado acá, no junto a la carga de fotos).
+// §2.7: campos obligatorios de "Datos de Inspección" (validación de cliente).
+// §1: `fecha` NO va acá — no es un input, se carga sola y siempre tiene valor.
 const CAMPOS_CABECERA: { key: keyof Cabecera; label: string; type?: string }[] = [
   { key: "transporte", label: "Transporte" },
   { key: "conductor", label: "Conductor" },
-  { key: "fecha", label: "Fecha y hora de inspección", type: "datetime-local" },
   {
     key: "fechaVencimiento",
     label: "Fecha de vencimiento de la corrección",
@@ -182,9 +183,6 @@ export function InspeccionForm({
   const [numInsp, setNumInsp] = useState<number | null>(numeroInspeccion);
 
   const [cabecera, setCabecera] = useState<Cabecera>(cabeceraVacia);
-  // ¿el supervisor editó la fecha de vencimiento a mano? Si sí, no la pisamos al
-  // cambiar la fecha de inspección (§2.7).
-  const [vencManual, setVencManual] = useState(false);
 
   // §2.6: conductor de ESTA revisión (solo re-inspección), prellenado con el de
   // la revisión anterior. §2.7: la fecha de vencimiento también es por revisión.
@@ -281,16 +279,7 @@ export function InspeccionForm({
   );
 
   function setCampoCabecera(key: keyof Cabecera, value: string) {
-    setCabecera((prev) => {
-      const next = { ...prev, [key]: value };
-      if (key === "fechaVencimiento") {
-        setVencManual(true);
-      } else if (key === "fecha" && !vencManual && value) {
-        // Precarga automática: fecha de inspección + 10 días (editable).
-        next.fechaVencimiento = sumarDias(value, 10);
-      }
-      return next;
-    });
+    setCabecera((prev) => ({ ...prev, [key]: value }));
   }
 
   async function irAlChecklist() {
@@ -546,6 +535,29 @@ export function InspeccionForm({
               {/* §2.6: el "Nro de Inspección" NO se muestra en este paso — el
                   ticket todavía no existe. Aparece recién en el paso 2 (título
                   "Inspección Nro X"), en el detalle, el informe y la tabla. */}
+              {/* §1: la fecha/hora de inspección se registra sola, solo lectura. */}
+              <div className="grid gap-1.5">
+                <Label htmlFor="fecha-inspeccion">
+                  Fecha y hora de inspección
+                </Label>
+                <Input
+                  id="fecha-inspeccion"
+                  type="text"
+                  readOnly
+                  disabled
+                  value={
+                    cabecera.fecha
+                      ? new Date(cabecera.fecha).toLocaleString("es-CL", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })
+                      : ""
+                  }
+                />
+                <span className="text-xs text-muted-foreground">
+                  Se registra automáticamente al abrir la inspección.
+                </span>
+              </div>
               {CAMPOS_CABECERA.map((c) => (
                 <div key={c.key} className="grid gap-1.5">
                   <Label htmlFor={c.key}>{c.label}</Label>

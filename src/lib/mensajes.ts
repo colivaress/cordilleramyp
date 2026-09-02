@@ -188,3 +188,80 @@ export function construirCuerpoInforme(d: DatosInforme): string {
     </table>
   </div>`;
 }
+
+/** §3.2 — momento del ciclo de vencimiento para el aviso a administradores. */
+export type MomentoVencimiento = "48h" | "24h" | "vencido";
+
+export type DatosAvisoVencimiento = {
+  ticketId: string;
+  numeroInspeccion: number;
+  transporte: string;
+  patenteCamion: string;
+  patenteRampla: string;
+  supervisorNombre: string;
+  /** Fecha/hora de vencimiento de la revisión más reciente. */
+  fechaVencimiento: string | Date | null;
+  /** URL absoluta a `/tickets/[id]/report` (arma el link del botón). */
+  urlInforme: string;
+};
+
+/**
+ * §3.2 — asunto + cuerpo HTML del aviso automático por correo a los
+ * administradores (48h / 24h antes de vencer, o al vencer). Sin PDF adjunto;
+ * lleva un botón que abre el informe de esa inspección.
+ */
+export function construirCorreoVencimientoAdmin(
+  momento: MomentoVencimiento,
+  d: DatosAvisoVencimiento,
+): { asunto: string; html: string } {
+  const asunto =
+    momento === "vencido"
+      ? `La inspección Nro ${d.numeroInspeccion} venció`
+      : `La inspección Nro ${d.numeroInspeccion} vencerá en ${
+          momento === "48h" ? "48" : "24"
+        } horas`;
+
+  const intro =
+    momento === "vencido"
+      ? "La siguiente inspección venció sin que se resolvieran sus observaciones:"
+      : `La siguiente inspección vencerá en ${
+          momento === "48h" ? "48" : "24"
+        } horas si no se resuelven sus observaciones:`;
+
+  const celdaEtiqueta =
+    "background:#eef1f6; font-weight:bold; padding:8px 12px; border:1px solid #dde3ee; width:170px;";
+  const celdaValor = "padding:8px 12px; border:1px solid #dde3ee;";
+  const fila = (etiqueta: string, valor: string) =>
+    `<tr><td style="${celdaEtiqueta}">${etiqueta}</td><td style="${celdaValor}">${esc(
+      valor,
+    )}</td></tr>`;
+
+  const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin:0 0 16px 0;">
+      <tr><td align="left" style="text-align:left; padding:0;">
+        <img src="cid:logo-cordillera-mp" alt="Cordillera M&amp;P" width="150" style="display:block; margin:0; border:0; outline:none; text-decoration:none; width:150px; max-width:150px; height:auto;" />
+      </td></tr>
+    </table>
+
+    <p style="margin: 0 0 8px;">${intro}</p>
+
+    <table style="border-collapse: collapse; width: 100%; margin: 0 0 20px;">
+      ${fila("Nro de Inspección", String(d.numeroInspeccion))}
+      ${fila("Patente Camión", d.patenteCamion.toUpperCase())}
+      ${fila("Patente Rampla", d.patenteRampla.toUpperCase())}
+      ${fila("Transporte", d.transporte)}
+      ${fila("Supervisor a cargo", d.supervisorNombre)}
+      ${fila("Vence", fmtFecha(d.fechaVencimiento))}
+    </table>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 8px 0;">
+      <tr><td align="left" bgcolor="#1e40af" style="border-radius:6px;">
+        <a href="${d.urlInforme}" style="display:inline-block; padding:10px 18px; font-weight:bold; color:#ffffff; text-decoration:none; font-family: Arial, Helvetica, sans-serif; font-size:14px;">Ver inspección</a>
+      </td></tr>
+    </table>
+
+    <p style="margin: 12px 0 0; font-size: 12px; color: #64748b;">Aviso automático de Cordillera M&amp;P — no responder a este correo.</p>
+  </div>`;
+
+  return { asunto, html };
+}
