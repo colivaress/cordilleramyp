@@ -90,8 +90,7 @@ const s = StyleSheet.create({
   },
   headerTextCol: { flexShrink: 1, paddingRight: 12 },
   logo: { width: 192, height: 96, objectFit: "contain", flexShrink: 0 },
-  empresa: { fontSize: 15, fontFamily: "Helvetica-Bold", color: C.marca },
-  titulo: { fontSize: 11, fontFamily: "Helvetica-Bold", marginTop: 2 },
+  titulo: { fontSize: 14, fontFamily: "Helvetica-Bold", color: C.marca },
   sub: { fontSize: 9, color: C.suave, marginTop: 3 },
   grid: { flexDirection: "row", flexWrap: "wrap", marginBottom: 14 },
   celda: { width: "33.33%", marginBottom: 7, paddingRight: 8 },
@@ -289,9 +288,9 @@ export function InformePDF({ datos }: { datos: InformePDFDatos }) {
       <Page size="A4" style={s.page}>
         <View style={s.header} fixed>
           <View style={s.headerRow}>
-            {/* §8: título + datos a la izquierda; logo a la derecha. */}
+            {/* §8: título + datos a la izquierda; logo a la derecha.
+                §4: título en texto plano, sin "Cordillera M&P" (va en el logo). */}
             <View style={s.headerTextCol}>
-              <Text style={s.empresa}>Cordillera M&amp;P</Text>
               <Text style={s.titulo}>Informe de Inspección</Text>
               <Text style={s.sub}>
                 Nro de Inspección {datos.numeroInspeccion} ·{" "}

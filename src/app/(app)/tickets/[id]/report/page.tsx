@@ -152,9 +152,9 @@ export default async function InformePage({
         <header className="mb-6 flex items-center justify-between gap-4 border-b pb-4">
           {/* §8: título + datos a la izquierda; logo a la derecha (no clicable). */}
           <div className="min-w-0">
-            <p className="text-lg font-semibold">
-              Cordillera M&amp;P — Informe de Inspección
-            </p>
+            {/* §4: título en texto plano, sin "Cordillera M&P —" (la marca ya
+                está en el logo del encabezado). */}
+            <p className="text-lg font-semibold">Informe de Inspección</p>
             <p className="text-muted-foreground">
             Nro de Inspección{" "}
             <span className="font-mono font-medium text-foreground">
