@@ -52,10 +52,12 @@ Un PR hacia `develop` o `main` necesita:
 
 ## Estado de esta infraestructura en el repo
 
-> Nota para quien retome esto — actualizada al agregar Docker/CI:
+> Nota para quien retome esto — actualizada tras el PR #2 (migraciones):
 >
-> **Ya existen:**
-> - Ramas `main` y `develop` en GitHub.
+> **Ya existe, todo funcionando de punta a punta:**
+> - Ramas `main` y `develop` en GitHub, con protección de ramas configurada
+>   (checks requeridos `Lint y tipos`, `Auditoría de dependencias`, `Build de
+>   prueba`).
 > - `next.config.ts` con `output: "standalone"` (lo necesita el `Dockerfile`
 >   de producción) — build de prueba verificado.
 > - `Dockerfile` (etapas `base`/`deps`/`dev`/`builder`/`production`),
@@ -69,13 +71,17 @@ Un PR hacia `develop` o `main` necesita:
 >   `deploy-production.yml` (push a `main`, con `vercel-args: '--prod'`) —
 >   cada uno aplica `supabase db push` y despliega a Vercel usando los
 >   secrets del Environment correspondiente.
->
-> **Todavía pendiente (manual, no pasa por una sesión de Claude Code):**
-> - Los Environments `staging`/`production` de GitHub con sus secrets
+> - Dos proyectos de Supabase separados: `cordilleramyp` (producción,
+>   `ozhcmhorhzjvkgivttnp`) y `cordilleramyp-staging` (staging,
+>   `dqyvedbzsiefecgvmfhq`).
+> - Environment `staging` de GitHub con sus 6 secrets cargados
 >   (`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`,
->   `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_ID`, `SUPABASE_DB_PASSWORD`) —
->   requiere además un **segundo proyecto de Supabase** para staging (hoy
->   solo existe el de producción).
-> - La protección de ramas (`gh api .../branches/{main,develop}/protection`)
->   con los checks requeridos `Lint y tipos`, `Auditoría de dependencias`,
->   `Build de prueba` (ya coinciden con los `name:` de `ci.yml`).
+>   `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_ID`, `SUPABASE_DB_PASSWORD`).
+> - `supabase/migrations/*.sql` (PR #2) — las 20 migraciones ya aplicadas en
+>   staging, ahora versionadas en el repo; `supabase db push` corrió limpio
+>   (no-op) en el primer deploy a staging después de mergear.
+>
+> **Todavía pendiente:**
+> - Environment `production` de GitHub con sus mismos 6 secrets, apuntando
+>   al proyecto de producción — no se toca hasta que se decida promover
+>   `develop` → `main` a propósito.
