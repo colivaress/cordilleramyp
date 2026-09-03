@@ -3,6 +3,7 @@ name: Deploy a Staging
 on:
   push:
     branches: [develop]
+  workflow_dispatch:
 
 concurrency:
   group: deploy-staging
