@@ -52,19 +52,30 @@ Un PR hacia `develop` o `main` necesita:
 
 ## Estado de esta infraestructura en el repo
 
-> Nota para quien retome esto: al momento de escribir este documento, lo
-> siguiente **todavía está pendiente**, no asumas que ya existe:
-> - `Dockerfile`, `docker-compose.yml` y los workflows de
->   `.github/workflows/` (`ci.yml`, `deploy-staging.yml`,
->   `deploy-production.yml`) — se agregan en una tarea aparte.
+> Nota para quien retome esto — actualizada al agregar Docker/CI:
+>
+> **Ya existen:**
+> - Ramas `main` y `develop` en GitHub.
+> - `next.config.ts` con `output: "standalone"` (lo necesita el `Dockerfile`
+>   de producción) — build de prueba verificado.
+> - `Dockerfile` (etapas `base`/`deps`/`dev`/`builder`/`production`),
+>   `docker-compose.yml` (levanta `dev` sobre la red de `supabase start`).
+> - `.env.example` con las variables separadas por ambiente (local/staging/
+>   producción).
+> - `.github/workflows/ci.yml` — jobs `Lint y tipos`, `Auditoría de
+>   dependencias`, `Análisis de seguridad del código (CodeQL)`, `Build de
+>   prueba`, en cada PR hacia `develop`/`main`.
+> - `.github/workflows/deploy-staging.yml` (push a `develop`) y
+>   `deploy-production.yml` (push a `main`, con `vercel-args: '--prod'`) —
+>   cada uno aplica `supabase db push` y despliega a Vercel usando los
+>   secrets del Environment correspondiente.
+>
+> **Todavía pendiente (manual, no pasa por una sesión de Claude Code):**
 > - Los Environments `staging`/`production` de GitHub con sus secrets
 >   (`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`,
 >   `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_ID`, `SUPABASE_DB_PASSWORD`) —
->   se configuran a mano en GitHub (Settings → Environments), nunca pasan por
->   una sesión de Claude Code.
+>   requiere además un **segundo proyecto de Supabase** para staging (hoy
+>   solo existe el de producción).
 > - La protección de ramas (`gh api .../branches/{main,develop}/protection`)
->   depende de que `ci.yml` ya exista, para que los nombres de los checks
->   requeridos coincidan con los jobs reales.
->
-> Ya existen: las ramas `main` y `develop` en GitHub, y `next.config.ts` con
-> `output: "standalone"` (lo necesita el `Dockerfile` de producción).
+>   con los checks requeridos `Lint y tipos`, `Auditoría de dependencias`,
+>   `Build de prueba` (ya coinciden con los `name:` de `ci.yml`).

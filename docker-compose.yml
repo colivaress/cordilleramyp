@@ -1,0 +1,37 @@
+# Este docker-compose SOLO levanta la app Next.js. La base de datos, Auth y
+# Storage locales los levanta Supabase CLI con `supabase start` (usa Docker
+# por debajo, con las mismas imágenes que corren en la nube — es la forma
+# oficial de tener paridad real con producción, en vez de armar un Postgres
+# suelto que no replicaría Auth/Storage/RLS).
+#
+# Orden para levantar todo:
+#   1) supabase start          (una sola vez por sesión de trabajo)
+#   2) docker compose up       (levanta la app, conectada a la red que
+#                                creó Supabase CLI)
+#
+# `supabase start` imprime las URLs y keys locales (algo como
+# http://127.0.0.1:54321) — esas van en tu .env.local, no las de producción.
+
+services:
+  app:
+    build:
+      context: .
+      target: dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    env_file:
+      - .env.local
+    environment:
+      - NODE_ENV=development
+      - WATCHPACK_POLLING=true
+    networks:
+      - default
+      - supabase_network_cordilleraMyP
+
+networks:
+  supabase_network_cordilleraMyP:
+    external: true
