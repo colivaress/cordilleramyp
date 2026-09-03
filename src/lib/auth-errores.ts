@@ -63,6 +63,8 @@ export function mensajeErrorParam(param: string | null): string | null {
   switch (param) {
     case "perfil_no_encontrado":
       return "El usuario no tiene un perfil asociado. Contacta a un administrador de Cordillera M&P.";
+    case "error_perfil":
+      return "Ocurrió un error al cargar tu perfil. Intenta de nuevo.";
     case "cuenta_desactivada":
       return "Tu cuenta está desactivada. Contacta a un administrador de Cordillera M&P.";
     case "sesion_expirada":
