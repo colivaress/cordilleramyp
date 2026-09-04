@@ -46,7 +46,10 @@ export function Reveal({
     <div
       ref={ref}
       className={cn(
-        "transition-[opacity,transform] duration-700 ease-out will-change-transform motion-reduce:transition-none motion-reduce:opacity-100 motion-reduce:translate-x-0 motion-reduce:translate-y-0",
+        // Tailwind v4 anima translate-x-*/translate-y-* vía la propiedad CSS
+        // nativa `translate` (no `transform`) — transition/will-change deben
+        // nombrarla explícitamente o el desplazamiento salta sin animar.
+        "transition-[opacity,translate] duration-700 ease-out will-change-[opacity,translate] motion-reduce:transition-none motion-reduce:opacity-100 motion-reduce:translate-x-0 motion-reduce:translate-y-0",
         visible ? "opacity-100 translate-x-0 translate-y-0" : `opacity-0 ${DIRECCION_TRANSFORM[direccion]}`,
         className,
       )}
