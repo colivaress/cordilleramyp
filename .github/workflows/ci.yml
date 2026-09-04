@@ -38,6 +38,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # El npm que trae Node 22 en el runner sigue usando el endpoint de
+      # auditoría que npm está retirando — falla con "400 Bad Request /
+      # Invalid package tree" (mensaje engañoso: no es el lockfile, es el
+      # endpoint viejo). Actualizar npm antes de auditar usa el endpoint
+      # nuevo. `npm ci` ya corrió arriba con el npm original del runner,
+      # sin depender de esta actualización.
+      - run: npm install -g npm@latest
       - run: npm audit --audit-level=high
 
   codeql:
