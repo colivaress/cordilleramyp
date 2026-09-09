@@ -31,11 +31,31 @@ function LoginForm() {
       : null,
   );
   const [cargando, setCargando] = useState(false);
+  // Cuenta de intentos fallidos consecutivos en ESTA pantalla (se resetea al
+  // entrar bien). `mensajeErrorAuth` la usa para distinguir un error de red
+  // real de un throttling de Supabase Auth, indistinguibles por el texto del
+  // error — ver el comentario en auth-errores.ts.
+  const [intentosFallidos, setIntentosFallidos] = useState(0);
+  // A partir de 3 fallos seguidos, pausa el botón unos segundos para no
+  // seguir golpeando el throttling con reintentos inmediatos.
+  const [bloqueado, setBloqueado] = useState(false);
 
   // §8.1: recuperación de contraseña — se despliega en el mismo lugar.
   const [modo, setModo] = useState<"login" | "recuperar">("login");
   const [recuperarEmail, setRecuperarEmail] = useState("");
   const [recuperarEnviado, setRecuperarEnviado] = useState(false);
+
+  function registrarFallo(error: unknown) {
+    // Usa la cuenta de fallos PREVIA a este (0 en el primer intento) para
+    // decidir el mensaje, y recién después suma este fallo para el próximo.
+    setError(mensajeErrorAuth(error, { intentosFallidos }));
+    const siguiente = intentosFallidos + 1;
+    setIntentosFallidos(siguiente);
+    if (siguiente >= 3) {
+      setBloqueado(true);
+      window.setTimeout(() => setBloqueado(false), 15000);
+    }
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -47,14 +67,16 @@ function LoginForm() {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         console.error("Login falló:", error);
-        setError(mensajeErrorAuth(error));
+        registrarFallo(error);
         return;
       }
+      setIntentosFallidos(0);
+      setBloqueado(false);
       router.replace(redirectTo);
       router.refresh();
     } catch (err) {
       console.error("Login falló (excepción):", err);
-      setError(mensajeErrorAuth(err));
+      registrarFallo(err);
     } finally {
       setCargando(false);
     }
@@ -198,8 +220,12 @@ function LoginForm() {
               {error}
             </p>
           )}
-          <Button type="submit" disabled={cargando}>
-            {cargando ? "Ingresando…" : "Ingresar"}
+          <Button type="submit" disabled={cargando || bloqueado}>
+            {cargando
+              ? "Ingresando…"
+              : bloqueado
+                ? "Espera unos segundos…"
+                : "Ingresar"}
           </Button>
           <button
             type="button"
