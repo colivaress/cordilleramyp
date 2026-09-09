@@ -47,11 +47,11 @@ export default function Home() {
         />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(17,19,21,.15)_0%,rgba(17,19,21,.35)_45%,rgba(17,19,21,.92)_100%)]" />
         <div className="relative z-[2] mx-auto w-full max-w-[1180px] px-5 pb-10 min-[880px]:px-7 min-[880px]:pb-14">
-          <div className="mb-3.5 max-w-[520px] text-[14.5px] font-semibold text-landing-paper">
+          <div className="mb-3.5 max-w-[520px] text-[14.5px] font-semibold text-white [text-shadow:0_1px_4px_rgba(0,0,0,0.55)]">
             Puente Alto, Región Metropolitana · Operando desde 2019
           </div>
           <h1 className="mb-5 max-w-[760px] font-landing-heading text-[clamp(40px,6.2vw,74px)] font-bold leading-[1.02] tracking-[0.01em] text-white">
-            Su carga, asegurada <em className="text-landing-orange not-italic">de planta a destino</em>.
+            Su carga, asegurada de planta a destino.
           </h1>
           <p className="mb-[30px] max-w-[520px] text-[17px] text-[#DCD8CE]">
             Encarpe, amarre técnico y transporte terrestre para la gran industria — con el
@@ -365,7 +365,7 @@ export default function Home() {
       {/* FOOTER */}
       <footer className="bg-landing-charcoal px-0 pt-[60px] pb-[26px] text-[#9AA2AB]">
         <div className="mx-auto max-w-[1180px] px-5 min-[880px]:px-7">
-          <div className="mb-11 grid grid-cols-1 gap-10 min-[880px]:grid-cols-[1.4fr_1fr_1fr_1fr]">
+          <div className="mb-11 grid grid-cols-1 gap-10 min-[880px]:grid-cols-[1.4fr_1fr_1fr]">
             <div>
               <Image
                 src="/images/logo-cordillera.png"
@@ -402,15 +402,6 @@ export default function Home() {
               <ScrollToButton targetId="servicios" className="mb-[11px] block w-full cursor-pointer border-none bg-none text-left font-landing-body text-[14px] text-[#9AA2AB] hover:text-landing-paper">
                 Fletes interurbanos
               </ScrollToButton>
-            </div>
-            <div>
-              <h4 className="mb-4 text-[14px] font-semibold text-white">Acceso</h4>
-              <button type="button" disabled className="mb-[11px] block w-full cursor-default border-none bg-none text-left font-landing-body text-[14px] text-[#9AA2AB] opacity-60">
-                Ingreso trabajadores
-              </button>
-              <button type="button" disabled className="mb-[11px] block w-full cursor-default border-none bg-none text-left font-landing-body text-[14px] text-[#9AA2AB] opacity-60">
-                Ingreso administración
-              </button>
             </div>
           </div>
           <div className="flex flex-wrap justify-between gap-2.5 border-t border-[#33393F] pt-[22px] text-[12.5px] text-[#6E767E]">
