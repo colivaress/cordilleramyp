@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -31,11 +31,59 @@ function LoginForm() {
       : null,
   );
   const [cargando, setCargando] = useState(false);
+  // Cuenta de intentos fallidos consecutivos en ESTA pantalla (se resetea al
+  // entrar bien). `mensajeErrorAuth` la usa para distinguir un error de red
+  // real de un throttling de Supabase Auth, indistinguibles por el texto del
+  // error — ver el comentario en auth-errores.ts.
+  const [intentosFallidos, setIntentosFallidos] = useState(0);
+  // A partir de 3 fallos seguidos, pausa el botón unos segundos para no
+  // seguir golpeando el throttling con reintentos inmediatos. El botón tiene
+  // que decir CUÁNTO falta (no solo quedar deshabilitado) — un botón muerto
+  // sin explicación es peor que el mensaje que este fix viene a corregir: el
+  // supervisor lo lee como "está roto" y llama a soporte igual.
+  const [segundosRestantes, setSegundosRestantes] = useState(0);
+  const intervaloBloqueoRef = useRef<number | null>(null);
+
+  function limpiarBloqueo() {
+    if (intervaloBloqueoRef.current !== null) {
+      window.clearInterval(intervaloBloqueoRef.current);
+      intervaloBloqueoRef.current = null;
+    }
+    setSegundosRestantes(0);
+  }
+
+  useEffect(() => limpiarBloqueo, []);
 
   // §8.1: recuperación de contraseña — se despliega en el mismo lugar.
   const [modo, setModo] = useState<"login" | "recuperar">("login");
   const [recuperarEmail, setRecuperarEmail] = useState("");
   const [recuperarEnviado, setRecuperarEnviado] = useState(false);
+
+  function registrarFallo(error: unknown) {
+    // Usa la cuenta de fallos PREVIA a este (0 en el primer intento) para
+    // decidir el mensaje, y recién después suma este fallo para el próximo.
+    setError(mensajeErrorAuth(error, { intentosFallidos }));
+    const siguiente = intentosFallidos + 1;
+    setIntentosFallidos(siguiente);
+    if (siguiente >= 3) {
+      if (intervaloBloqueoRef.current !== null) {
+        window.clearInterval(intervaloBloqueoRef.current);
+      }
+      setSegundosRestantes(15);
+      intervaloBloqueoRef.current = window.setInterval(() => {
+        setSegundosRestantes((s) => {
+          if (s <= 1) {
+            if (intervaloBloqueoRef.current !== null) {
+              window.clearInterval(intervaloBloqueoRef.current);
+              intervaloBloqueoRef.current = null;
+            }
+            return 0;
+          }
+          return s - 1;
+        });
+      }, 1000);
+    }
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -47,14 +95,16 @@ function LoginForm() {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         console.error("Login falló:", error);
-        setError(mensajeErrorAuth(error));
+        registrarFallo(error);
         return;
       }
+      setIntentosFallidos(0);
+      limpiarBloqueo();
       router.replace(redirectTo);
       router.refresh();
     } catch (err) {
       console.error("Login falló (excepción):", err);
-      setError(mensajeErrorAuth(err));
+      registrarFallo(err);
     } finally {
       setCargando(false);
     }
@@ -198,8 +248,12 @@ function LoginForm() {
               {error}
             </p>
           )}
-          <Button type="submit" disabled={cargando}>
-            {cargando ? "Ingresando…" : "Ingresar"}
+          <Button type="submit" disabled={cargando || segundosRestantes > 0}>
+            {cargando
+              ? "Ingresando…"
+              : segundosRestantes > 0
+                ? `Espera ${segundosRestantes} s…`
+                : "Ingresar"}
           </Button>
           <button
             type="button"
