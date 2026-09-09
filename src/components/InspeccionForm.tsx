@@ -217,6 +217,26 @@ export function InspeccionForm({
     };
   }, []);
 
+  // iOS Safari: tras cerrar el teclado virtual (al salir de un campo de texto),
+  // el hit-test de los elementos no siempre se recalcula hasta el próximo
+  // scroll — un botón puede quedar "clickeable visualmente" pero sin responder
+  // al primer toque hasta que el usuario scrollea. Forzamos un scroll de 1px
+  // (con demora, para dar tiempo a la animación de cierre del teclado) apenas
+  // se sale de cualquier campo del formulario, para que Safari recalcule solo.
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    const onFocusOut = () => {
+      window.setTimeout(() => {
+        window.scrollBy(0, 1);
+        window.scrollBy(0, -1);
+      }, 300);
+    };
+    form.addEventListener("focusout", onFocusOut);
+    return () => form.removeEventListener("focusout", onFocusOut);
+  }, []);
+
   const rutaFirma = (quien: "conductor" | "fiscalizador") =>
     `${ticketId}/${rev}/${quien}.png`;
 
@@ -522,7 +542,7 @@ export function InspeccionForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="grid gap-6">
+    <form ref={formRef} onSubmit={onSubmit} className="grid gap-6">
       <Card className={cn(paso === 2 && "hidden")}>
         <CardHeader>
           <CardTitle>

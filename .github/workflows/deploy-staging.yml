@@ -1,0 +1,44 @@
+name: Deploy a Staging
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy a staging
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Aplicar migraciones al Supabase de staging
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: |
+          supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+          supabase db push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      - name: Instalar Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Descargar configuración del proyecto (preview)
+        run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build
+        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy a Vercel (preview/staging)
+        run: vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }}

@@ -87,6 +87,19 @@
   --color-danger-800: var(--color-red-800);
   --color-danger-900: var(--color-red-900);
   --color-danger-950: var(--color-red-950);
+
+  /* Portada pública (§ landing) — paleta propia, distinta de la del panel
+     de gestión (brand/success/warning/...): identidad de marca para el
+     sitio de cara al público, no comunica estado como los tokens de arriba. */
+  --color-landing-charcoal: #1c1f22;
+  --color-landing-charcoal-soft: #2a2e33;
+  --color-landing-cream: #f6f4ef;
+  --color-landing-paper: #c9a876;
+  --color-landing-paper-deep: #a9865a;
+  --color-landing-orange: #f13d00;
+  --color-landing-orange-deep: #c22f00;
+  --color-landing-steel: #5b6570;
+  --color-landing-line: #e4dfd4;
 }
 
 /* Mapeo de la paleta semántica a las variables de shadcn (§6). */
@@ -96,6 +109,12 @@
   --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
+
+  /* Portada pública: Barlow Condensed (títulos) + Inter (cuerpo), aplicadas
+     por next/font solo en el wrapper de src/app/page.tsx — el resto de la
+     app (dashboard, login, etc.) sigue con font-sans (Geist) de siempre. */
+  --font-landing-heading: var(--font-landing-heading);
+  --font-landing-body: var(--font-landing-body);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);

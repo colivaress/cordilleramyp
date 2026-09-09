@@ -14,11 +14,19 @@ export async function getSesion(): Promise<{ userId: string; perfil: Personal }>
 
   if (!user) redirect("/login");
 
-  const { data: perfil } = await supabase
+  const { data: perfil, error } = await supabase
     .from("personal")
     .select("*")
     .eq("user_id", user.id)
     .maybeSingle();
+
+  if (error) {
+    // No confundir un error real (RLS, red, credenciales) con "no tiene
+    // perfil" — antes se ignoraba `error` y ambos casos mostraban el mismo
+    // mensaje engañoso ("contacta a un administrador"), sin dejar rastro.
+    console.error("getSesion: error consultando personal:", error);
+    redirect("/login?error=error_perfil");
+  }
 
   if (!perfil) {
     // El trigger handle_new_user no alcanzó a vincular la fila, o fue borrada.

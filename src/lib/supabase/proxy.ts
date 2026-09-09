@@ -2,8 +2,8 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "./database.types";
 
-/** Rutas accesibles sin sesión. */
-const RUTAS_PUBLICAS = ["/login", "/registro", "/auth"];
+/** Rutas accesibles sin sesión. "/" es la portada pública (§ landing). */
+const RUTAS_PUBLICAS = ["/", "/login", "/registro", "/auth"];
 
 /**
  * Refresca la sesión de Supabase en cada request y redirige a /login

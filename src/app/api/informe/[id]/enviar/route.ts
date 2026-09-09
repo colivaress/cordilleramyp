@@ -27,8 +27,11 @@ function leerOpciones(req: NextRequest): OpcionesInforme {
 }
 
 /** Autoriza y genera el PDF, o devuelve una respuesta de error. */
-async function preparar(id: string, opciones: OpcionesInforme) {
-  const supabase = await createClient();
+async function preparar(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  id: string,
+  opciones: OpcionesInforme,
+) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -97,7 +100,7 @@ async function preparar(id: string, opciones: OpcionesInforme) {
     };
   }
 
-  return { supabase, informe, perfil };
+  return { informe, perfil };
 }
 
 /** Nombre de archivo del PDF según lo seleccionado en pantalla (§4). */
@@ -117,7 +120,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const prep = await preparar(id, leerOpciones(req));
+  const supabase = await createClient();
+  const prep = await preparar(supabase, id, leerOpciones(req));
   if (prep.error) return prep.error;
 
   const nombre = nombreArchivoInforme(prep.informe.meta);
@@ -161,9 +165,42 @@ export async function POST(
     );
   }
 
-  const prep = await preparar(id, leerOpciones(req));
+  const supabase = await createClient();
+
+  // Corrección crítica de seguridad: el informe solo se puede mandar a
+  // destinatarios pre-autorizados por un administrador (destinatarios_correo,
+  // activo = true) — nunca a una dirección libre escrita por quien envía.
+  // Se valida ANTES de preparar() (que genera el PDF, caro en CPU) para no
+  // pagar ese costo cuando el pedido ya está mal formado. Comparación en
+  // minúsculas por ambos lados: una mayúscula no debe romper un correo legítimo.
+  const { data: autorizados, error: errDestinatarios } = await supabase
+    .from("destinatarios_correo")
+    .select("email")
+    .eq("activo", true);
+  if (errDestinatarios) {
+    return NextResponse.json(
+      { error: "No se pudo validar los destinatarios." },
+      { status: 500 },
+    );
+  }
+  const permitidos = new Set(
+    (autorizados ?? []).map((d) => d.email.toLowerCase()),
+  );
+  const noAutorizados = destinatarios.filter(
+    (e) => !permitidos.has(e.toLowerCase()),
+  );
+  if (noAutorizados.length > 0) {
+    return NextResponse.json(
+      {
+        error: `Destinatario(s) no autorizados: ${noAutorizados.join(", ")}`,
+      },
+      { status: 400 },
+    );
+  }
+
+  const prep = await preparar(supabase, id, leerOpciones(req));
   if (prep.error) return prep.error;
-  const { supabase, informe, perfil } = prep;
+  const { informe, perfil } = prep;
 
   const datosCorreo = {
     numeroInspeccion: informe.meta.numeroInspeccion,

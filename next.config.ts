@@ -5,6 +5,10 @@ const supabaseHost = process.env.NEXT_PUBLIC_SUPABASE_URL
   : "*.supabase.co";
 
 const nextConfig: NextConfig = {
+  // Requerido por el Dockerfile de producción (pipeline CI/CD): genera
+  // .next/standalone con un server.js autocontenido, sin necesitar node_modules
+  // completo en la imagen final.
+  output: "standalone",
   // @react-pdf/renderer, nodemailer y sharp no deben pasar por el bundler del servidor.
   serverExternalPackages: ["@react-pdf/renderer", "nodemailer", "sharp"],
   images: {
