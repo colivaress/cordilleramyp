@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { Loader2Icon, MailIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
 import type { DestinatarioCorreo } from "@/lib/tipos";
@@ -26,7 +25,6 @@ export function EmailRecipientsSelect({
 }) {
   const [lista, setLista] = useState<DestinatarioCorreo[]>([]);
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
-  const [extra, setExtra] = useState("");
   const [cargando, setCargando] = useState(true);
   const [enviando, setEnviando] = useState(false);
 
@@ -53,13 +51,7 @@ export function EmailRecipientsSelect({
   }
 
   async function enviar() {
-    const destinatarios = [
-      ...seleccion,
-      ...extra
-        .split(/[;,\s]+/)
-        .map((s) => s.trim())
-        .filter(Boolean),
-    ];
+    const destinatarios = [...seleccion];
     if (destinatarios.length === 0) {
       toast.error("Seleccionar al menos un destinatario.");
       return;
@@ -96,8 +88,8 @@ export function EmailRecipientsSelect({
         <p className="text-sm text-muted-foreground">Cargando destinatarios…</p>
       ) : lista.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No hay destinatarios cargados en <code>destinatarios_correo</code>. Se
-          pueden escribir correos manualmente abajo.
+          No hay destinatarios configurados. Pedile a un administrador que
+          cargue al menos uno para poder enviar el informe por correo.
         </p>
       ) : (
         <ul className="grid gap-2 sm:grid-cols-2">
@@ -121,19 +113,10 @@ export function EmailRecipientsSelect({
           ))}
         </ul>
       )}
-      <div className="grid gap-1.5">
-        <Label htmlFor="extra-correos">Otros correos (separados por coma)</Label>
-        <Input
-          id="extra-correos"
-          value={extra}
-          onChange={(e) => setExtra(e.target.value)}
-          placeholder="jefe.flota@empresa.cl, taller@empresa.cl"
-        />
-      </div>
       <Button
         type="button"
         onClick={enviar}
-        disabled={enviando}
+        disabled={enviando || seleccion.size === 0}
         aria-busy={enviando}
         className="w-fit"
       >
