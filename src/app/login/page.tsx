@@ -1,7 +1,6 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -267,12 +266,6 @@ function LoginForm() {
           >
             ¿Olvidaste tu contraseña?
           </button>
-          <p className="text-center text-sm text-muted-foreground">
-            ¿Tienes una invitación?{" "}
-            <Link href="/registro" className="text-primary underline">
-              Activar cuenta
-            </Link>
-          </p>
         </form>
       </CardContent>
     </Card>
