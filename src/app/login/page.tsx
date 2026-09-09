@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -37,8 +37,22 @@ function LoginForm() {
   // error — ver el comentario en auth-errores.ts.
   const [intentosFallidos, setIntentosFallidos] = useState(0);
   // A partir de 3 fallos seguidos, pausa el botón unos segundos para no
-  // seguir golpeando el throttling con reintentos inmediatos.
-  const [bloqueado, setBloqueado] = useState(false);
+  // seguir golpeando el throttling con reintentos inmediatos. El botón tiene
+  // que decir CUÁNTO falta (no solo quedar deshabilitado) — un botón muerto
+  // sin explicación es peor que el mensaje que este fix viene a corregir: el
+  // supervisor lo lee como "está roto" y llama a soporte igual.
+  const [segundosRestantes, setSegundosRestantes] = useState(0);
+  const intervaloBloqueoRef = useRef<number | null>(null);
+
+  function limpiarBloqueo() {
+    if (intervaloBloqueoRef.current !== null) {
+      window.clearInterval(intervaloBloqueoRef.current);
+      intervaloBloqueoRef.current = null;
+    }
+    setSegundosRestantes(0);
+  }
+
+  useEffect(() => limpiarBloqueo, []);
 
   // §8.1: recuperación de contraseña — se despliega en el mismo lugar.
   const [modo, setModo] = useState<"login" | "recuperar">("login");
@@ -52,8 +66,22 @@ function LoginForm() {
     const siguiente = intentosFallidos + 1;
     setIntentosFallidos(siguiente);
     if (siguiente >= 3) {
-      setBloqueado(true);
-      window.setTimeout(() => setBloqueado(false), 15000);
+      if (intervaloBloqueoRef.current !== null) {
+        window.clearInterval(intervaloBloqueoRef.current);
+      }
+      setSegundosRestantes(15);
+      intervaloBloqueoRef.current = window.setInterval(() => {
+        setSegundosRestantes((s) => {
+          if (s <= 1) {
+            if (intervaloBloqueoRef.current !== null) {
+              window.clearInterval(intervaloBloqueoRef.current);
+              intervaloBloqueoRef.current = null;
+            }
+            return 0;
+          }
+          return s - 1;
+        });
+      }, 1000);
     }
   }
 
@@ -71,7 +99,7 @@ function LoginForm() {
         return;
       }
       setIntentosFallidos(0);
-      setBloqueado(false);
+      limpiarBloqueo();
       router.replace(redirectTo);
       router.refresh();
     } catch (err) {
@@ -220,11 +248,11 @@ function LoginForm() {
               {error}
             </p>
           )}
-          <Button type="submit" disabled={cargando || bloqueado}>
+          <Button type="submit" disabled={cargando || segundosRestantes > 0}>
             {cargando
               ? "Ingresando…"
-              : bloqueado
-                ? "Espera unos segundos…"
+              : segundosRestantes > 0
+                ? `Espera ${segundosRestantes} s…`
                 : "Ingresar"}
           </Button>
           <button
