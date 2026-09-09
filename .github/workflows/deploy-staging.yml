@@ -41,4 +41,12 @@ jobs:
         run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy a Vercel (preview/staging)
-        run: vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }}
+        id: deploy
+        run: |
+          url=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Asignar alias fijo de staging
+        # cordilleramyp-staging.vercel.app siempre apunta al último deploy de
+        # develop — evita ir a buscar la URL con hash al log de cada corrida.
+        run: vercel alias set ${{ steps.deploy.outputs.url }} cordilleramyp-staging.vercel.app --token=${{ secrets.VERCEL_TOKEN }}
