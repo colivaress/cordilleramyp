@@ -124,6 +124,16 @@ function esc(v: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/**
+ * Defensa explícita contra inyección de cabeceras (CRLF) en el asunto del
+ * correo: transporte/patentes son texto libre que ingresa un supervisor al
+ * crear el ticket, sin validación de formato. No es HTML (asunto ≠ cuerpo),
+ * así que no aplica esc() acá — el riesgo es un salto de línea coincidiendo
+ * con el formato de cabeceras SMTP, no markup. No depende de que nodemailer
+ * lo maneje por su cuenta.
+ */
+const sinSaltosDeLinea = (v: string) => v.replace(/[\r\n]/g, " ");
+
 export function construirAsuntoInforme(d: DatosInforme): string {
   // §4.1: misma redacción que el cuerpo ("Check List camión de transportes …"),
   // con el par (N° Inspección, N° Revisión) para diferenciar el correo en la
@@ -131,7 +141,10 @@ export function construirAsuntoInforme(d: DatosInforme): string {
   const detalle = d.todasLasRevisiones
     ? `N° Inspección ${d.numeroInspeccion} · todas las revisiones`
     : `N° Inspección ${d.numeroInspeccion} · Rev. ${d.numeroRevision}`;
-  return `Check List camión de transportes ${d.transporte} — ${d.patenteCamion.toUpperCase()} / ${d.patenteRampla.toUpperCase()} (${detalle})`;
+  const transporte = sinSaltosDeLinea(d.transporte);
+  const patenteCamion = sinSaltosDeLinea(d.patenteCamion.toUpperCase());
+  const patenteRampla = sinSaltosDeLinea(d.patenteRampla.toUpperCase());
+  return `Check List camión de transportes ${transporte} — ${patenteCamion} / ${patenteRampla} (${detalle})`;
 }
 
 /**
@@ -161,7 +174,7 @@ export function construirCuerpoInforme(d: DatosInforme): string {
     </ol>`
       : `<p style="margin: 0 0 20px;">Tras la revisión, no se detectaron observaciones. El camión cumple con todas las exigencias del Check List.</p>`;
 
-  return `<div style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
+  return `<div lang="es" style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
     <p style="margin: 0 0 16px;">Estimados,</p>
 
     <p style="margin: 0 0 16px;">Junto con saludar, informo que se ha ejecutado la inspección técnica y operativa al camión de transportes cuyos datos se detallan a continuación:</p>
@@ -236,7 +249,7 @@ export function construirCorreoVencimientoAdmin(
       valor,
     )}</td></tr>`;
 
-  const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
+  const html = `<div lang="es" style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin:0 0 16px 0;">
       <tr><td align="left" style="text-align:left; padding:0;">
         <img src="cid:logo-cordillera-mp" alt="Cordillera M&amp;P" width="150" style="display:block; margin:0; border:0; outline:none; text-decoration:none; width:150px; max-width:150px; height:auto;" />
@@ -256,7 +269,7 @@ export function construirCorreoVencimientoAdmin(
 
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 8px 0;">
       <tr><td align="left" bgcolor="#1e40af" style="border-radius:6px;">
-        <a href="${d.urlInforme}" style="display:inline-block; padding:10px 18px; font-weight:bold; color:#ffffff; text-decoration:none; font-family: Arial, Helvetica, sans-serif; font-size:14px;">Ver inspección</a>
+        <a href="${esc(d.urlInforme)}" style="display:inline-block; padding:10px 18px; font-weight:bold; color:#ffffff; text-decoration:none; font-family: Arial, Helvetica, sans-serif; font-size:14px;">Ver inspección</a>
       </td></tr>
     </table>
 
@@ -312,7 +325,7 @@ export function construirCorreoVencimientoExterno(
       valor,
     )}</td></tr>`;
 
-  const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
+  const html = `<div lang="es" style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin:0 0 16px 0;">
       <tr><td align="left" style="text-align:left; padding:0;">
         <img src="cid:logo-cordillera-mp" alt="Cordillera M&amp;P" width="150" style="display:block; margin:0; border:0; outline:none; text-decoration:none; width:150px; max-width:150px; height:auto;" />
