@@ -10,15 +10,25 @@ import type { Transporter } from "nodemailer";
 // pública — la app puede no estar desplegada). El HTML del cuerpo lo referencia
 // como <img src="cid:logo-cordillera-mp">.
 const LOGO_CID = "logo-cordillera-mp";
-const LOGO_PATH = path.join(process.cwd(), "public", "logo-cordillera-mp.png");
+// Archivo aparte del logo-cordillera-mp.png que usan el header/login (Logo.tsx),
+// la vista del informe y el PDF — ese sigue en su resolución original (2816×1408,
+// 2.4 MB) porque lo necesitan a más tamaño. Este ya viene recortado a ~300px de
+// ancho (el doble de los 150px a los que se muestra en el correo, para pantallas
+// de alta densidad) y comprimido — no reducir el archivo compartido.
+const LOGO_PATH = path.join(
+  process.cwd(),
+  "public",
+  "logo-cordillera-mp-email.png",
+);
 
 // §8/§4.1: el PNG del logo tiene ~24% de margen blanco a cada lado (el arte está
 // centrado en un lienzo 2816×1408). Por eso, aunque el <img> del cuerpo esté
 // perfectamente alineado a la izquierda, el círculo naranjo se ve corrido hacia
 // la derecha respecto al texto de la firma. `.trim()` recorta ese borde blanco
 // uniforme (no altera el arte) para que en el correo el logo quede pegado al
-// mismo margen que "Atentamente,". Además se redimensiona a ~400px: sin esto el
-// PNG original de 2.4 MB va adjunto en cada correo y el envío SMTP tarda ~20s.
+// mismo margen que "Atentamente,". Además se redimensiona a ~400px (no-op ya
+// que LOGO_PATH ya viene a 300px): sin esto un logo compartido sin recortar
+// iría adjunto pesado en cada correo y el envío SMTP tarda ~20s.
 let logoBufCache: Promise<Buffer> | null = null;
 function logoAdjunto(): Promise<Buffer> {
   if (!logoBufCache) {
