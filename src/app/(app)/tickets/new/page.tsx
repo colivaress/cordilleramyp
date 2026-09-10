@@ -9,10 +9,13 @@ export default async function NuevaInspeccionPage() {
   await requireRol("supervisor");
   const supabase = await createClient();
 
-  const { data: items } = await supabase
-    .from("checklist_items")
-    .select("*")
-    .order("orden");
+  // Fase "tipos de inspección" — parte 2/4. Trae TODOS los ítems (de los 4
+  // tipos) sin filtrar — InspeccionForm filtra por el tipo que elija el
+  // supervisor — y los tipos disponibles para poblar el combo.
+  const [{ data: items }, { data: tipos }] = await Promise.all([
+    supabase.from("checklist_items").select("*").order("orden"),
+    supabase.from("tipos_inspeccion").select("*"),
+  ]);
 
   return (
     <div className="grid gap-6">
@@ -25,7 +28,7 @@ export default async function NuevaInspeccionPage() {
           elementos a fiscalizar y firmar.
         </p>
       </div>
-      <InspeccionForm modo="nueva" items={items ?? []} />
+      <InspeccionForm modo="nueva" items={items ?? []} tipos={tipos ?? []} />
     </div>
   );
 }

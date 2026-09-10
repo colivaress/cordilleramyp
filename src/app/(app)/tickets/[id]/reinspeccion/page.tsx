@@ -19,11 +19,12 @@ export default async function ReinspeccionPage({
   const { data: ticket } = await supabase
     .from("tickets")
     .select(
-      "id, estado, revision_actual, numero_inspeccion, patente_camion, patente_rampla, conductor, fecha_vencimiento, supervisor_id",
+      "id, estado, revision_actual, numero_inspeccion, patente_camion, patente_rampla, conductor, fecha_vencimiento, supervisor_id, tipo_inspeccion",
     )
     .eq("id", id)
     .maybeSingle();
   if (!ticket) notFound();
+  if (!ticket.tipo_inspeccion) notFound();
 
   // §2.14: al presionar "Realizar revisión" el ticket pasa a `en_revision` y el
   // Server Action refresca esta misma ruta. Si el guard solo mirara
@@ -57,9 +58,12 @@ export default async function ReinspeccionPage({
     ? ticket.revision_actual
     : ticket.revision_actual + 1;
 
+  // Fase "tipos de inspección" — parte 2/4. El tipo es fijo desde que se creó
+  // el ticket — se filtra server-side, no se vuelve a pedir en el formulario.
   const { data: items } = await supabase
     .from("checklist_items")
     .select("*")
+    .eq("tipo", ticket.tipo_inspeccion)
     .order("orden");
 
   return (
@@ -81,6 +85,7 @@ export default async function ReinspeccionPage({
         numeroInspeccion={ticket.numero_inspeccion}
         conductorInicial={ticket.conductor}
         fechaVencimientoInicial={ticket.fecha_vencimiento}
+        tipoInspeccionInicial={ticket.tipo_inspeccion}
       />
     </div>
   );
