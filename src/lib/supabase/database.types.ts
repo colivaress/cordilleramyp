@@ -18,24 +18,38 @@ export type Database = {
     Tables: {
       checklist_items: {
         Row: {
-          exigencia: string
+          exigencia: string | null
           key: string
+          modo: Database["public"]["Enums"]["item_modo"]
           nombre: string
           orden: number
+          tipo: string
         }
         Insert: {
-          exigencia: string
+          exigencia?: string | null
           key: string
+          modo?: Database["public"]["Enums"]["item_modo"]
           nombre: string
           orden: number
+          tipo: string
         }
         Update: {
-          exigencia?: string
+          exigencia?: string | null
           key?: string
+          modo?: Database["public"]["Enums"]["item_modo"]
           nombre?: string
           orden?: number
+          tipo?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "checklist_items_tipo_fkey"
+            columns: ["tipo"]
+            isOneToOne: false
+            referencedRelation: "tipos_inspeccion"
+            referencedColumns: ["clave"]
+          },
+        ]
       }
       destinatarios_correo: {
         Row: {
@@ -141,10 +155,72 @@ export type Database = {
         }
         Relationships: []
       }
+      personal_tipos_inspeccion: {
+        Row: {
+          personal_id: string
+          tipo_inspeccion: string
+        }
+        Insert: {
+          personal_id: string
+          tipo_inspeccion: string
+        }
+        Update: {
+          personal_id?: string
+          tipo_inspeccion?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "personal_tipos_inspeccion_personal_id_fkey"
+            columns: ["personal_id"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "personal_tipos_inspeccion_tipo_inspeccion_fkey"
+            columns: ["tipo_inspeccion"]
+            isOneToOne: false
+            referencedRelation: "tipos_inspeccion"
+            referencedColumns: ["clave"]
+          },
+        ]
+      }
+      ticket_checklist_fotos: {
+        Row: {
+          created_at: string
+          id: string
+          orden: number
+          respuesta_id: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          orden?: number
+          respuesta_id: string
+          url: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          orden?: number
+          respuesta_id?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ticket_checklist_fotos_respuesta_id_fkey"
+            columns: ["respuesta_id"]
+            isOneToOne: false
+            referencedRelation: "ticket_checklist_respuestas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ticket_checklist_respuestas: {
         Row: {
           created_at: string
-          estado: Database["public"]["Enums"]["item_estado"]
+          estado: Database["public"]["Enums"]["item_estado"] | null
           foto_url: string | null
           id: string
           item_key: string
@@ -154,7 +230,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
-          estado: Database["public"]["Enums"]["item_estado"]
+          estado?: Database["public"]["Enums"]["item_estado"] | null
           foto_url?: string | null
           id?: string
           item_key: string
@@ -164,7 +240,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
-          estado?: Database["public"]["Enums"]["item_estado"]
+          estado?: Database["public"]["Enums"]["item_estado"] | null
           foto_url?: string | null
           id?: string
           item_key?: string
@@ -265,6 +341,9 @@ export type Database = {
           fecha: string
           fecha_vencimiento: string | null
           id: string
+          nombre_encarpador: string | null
+          nombre_guardia: string | null
+          nro_contenedor: string | null
           numero_inspeccion: number
           patente_camion: string
           patente_rampla: string
@@ -272,6 +351,7 @@ export type Database = {
           revision_actual: number
           supervisor_id: string | null
           tipo_camion: string
+          tipo_inspeccion: string | null
           transporte: string
           updated_at: string
         }
@@ -286,6 +366,9 @@ export type Database = {
           fecha: string
           fecha_vencimiento?: string | null
           id?: string
+          nombre_encarpador?: string | null
+          nombre_guardia?: string | null
+          nro_contenedor?: string | null
           numero_inspeccion?: never
           patente_camion: string
           patente_rampla: string
@@ -293,6 +376,7 @@ export type Database = {
           revision_actual?: number
           supervisor_id?: string | null
           tipo_camion: string
+          tipo_inspeccion?: string | null
           transporte: string
           updated_at?: string
         }
@@ -307,6 +391,9 @@ export type Database = {
           fecha?: string
           fecha_vencimiento?: string | null
           id?: string
+          nombre_encarpador?: string | null
+          nombre_guardia?: string | null
+          nro_contenedor?: string | null
           numero_inspeccion?: never
           patente_camion?: string
           patente_rampla?: string
@@ -314,6 +401,7 @@ export type Database = {
           revision_actual?: number
           supervisor_id?: string | null
           tipo_camion?: string
+          tipo_inspeccion?: string | null
           transporte?: string
           updated_at?: string
         }
@@ -325,7 +413,29 @@ export type Database = {
             referencedRelation: "personal"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "tickets_tipo_inspeccion_fkey"
+            columns: ["tipo_inspeccion"]
+            isOneToOne: false
+            referencedRelation: "tipos_inspeccion"
+            referencedColumns: ["clave"]
+          },
         ]
+      }
+      tipos_inspeccion: {
+        Row: {
+          clave: string
+          titulo: string
+        }
+        Insert: {
+          clave: string
+          titulo: string
+        }
+        Update: {
+          clave?: string
+          titulo?: string
+        }
+        Relationships: []
       }
     }
     Views: {
@@ -336,6 +446,7 @@ export type Database = {
     }
     Enums: {
       item_estado: "conforme" | "no_conforme" | "no_aplica"
+      item_modo: "estado" | "fotos"
       notificacion_tipo: "whatsapp" | "email"
       rol_usuario: "supervisor" | "administrador" | "conductor"
       ticket_estado:
@@ -471,6 +582,7 @@ export const Constants = {
   public: {
     Enums: {
       item_estado: ["conforme", "no_conforme", "no_aplica"],
+      item_modo: ["estado", "fotos"],
       notificacion_tipo: ["whatsapp", "email"],
       rol_usuario: ["supervisor", "administrador", "conductor"],
       ticket_estado: [

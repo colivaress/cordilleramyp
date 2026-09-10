@@ -261,7 +261,11 @@ export default async function TicketDetallePage({
                   <li key={r.id} className="grid gap-2 py-2">
                     <div className="flex items-center gap-2 text-sm">
                       <span className="font-medium">{r.item?.nombre}</span>
-                      <ItemEstadoBadge estado={r.estado} />
+                      {/* estado es nullable desde la migración de tipos de inspección
+                          (ítems de modo "fotos"); ningún ítem de ese modo se usa en
+                          ningún ticket real todavía, así que este fallback no cambia
+                          nada hoy — se resuelve en la fase siguiente. */}
+                      <ItemEstadoBadge estado={r.estado ?? "conforme"} />
                     </div>
                     {r.estado === "no_conforme" && (
                       <div className="grid gap-2 text-sm sm:grid-cols-[1fr_auto]">
