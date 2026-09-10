@@ -798,13 +798,20 @@ export function InspeccionForm({
                   obligatorio, sin valor preseleccionado. */}
               <div className="grid gap-1.5 sm:col-span-2">
                 <Label htmlFor="tipo-inspeccion">Tipo de inspección</Label>
+                {/* w-fit + justify-self-start: en una grilla CSS los <select>
+                    se estiran a ocupar toda la columna por defecto
+                    (justify-items: stretch) — acá se lo dimensiona según su
+                    contenido (la opción más larga, "Exportación (Chimolsa)")
+                    en vez de a las dos columnas de la grilla. El padding
+                    derecho (pr-8) deja lugar cómodo para la flecha nativa
+                    del combo, que no debe quedar pegada al texto. */}
                 <select
                   id="tipo-inspeccion"
                   required
                   disabled={paso === 2}
                   value={tipoSeleccionado}
                   onChange={(e) => onCambiarTipo(e.target.value)}
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  className="h-9 w-fit min-w-0 justify-self-start rounded-md border border-input bg-transparent py-1 pl-3 pr-8 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
                   <option value="">Seleccionar…</option>
                   {opcionesTipo.map((clave) => (
