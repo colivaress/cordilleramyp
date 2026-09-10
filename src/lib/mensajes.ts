@@ -265,3 +265,72 @@ export function construirCorreoVencimientoAdmin(
 
   return { asunto, html };
 }
+
+/** §3.2 (destinatarios externos) — sin ticketId/supervisorNombre/urlInforme: nadie fuera de Cordillera tiene cuenta en el sistema, así que no hay nada ahí que mostrarles. */
+export type DatosAvisoVencimientoExterno = {
+  numeroInspeccion: number;
+  transporte: string;
+  patenteCamion: string;
+  patenteRampla: string;
+  /** Fecha/hora de vencimiento de la revisión más reciente. */
+  fechaVencimiento: string | Date | null;
+};
+
+/**
+ * §3.2 — versión del aviso automático de vencimiento para destinatarios
+ * externos a Cordillera M&P (destinatarios_correo con recibe_vencimientos,
+ * no personal.rol = administrador). A diferencia de
+ * construirCorreoVencimientoAdmin, esta versión NO incluye el enlace al
+ * informe (`/tickets/[id]/report` requiere sesión en el sistema, que estos
+ * destinatarios no tienen) ni el nombre del supervisor a cargo (información
+ * interna, no le corresponde a un tercero). Mismo esc() en todos los campos
+ * de origen humano que la versión interna.
+ */
+export function construirCorreoVencimientoExterno(
+  momento: MomentoVencimiento,
+  d: DatosAvisoVencimientoExterno,
+): { asunto: string; html: string } {
+  const asunto =
+    momento === "vencido"
+      ? `La inspección Nro ${d.numeroInspeccion} venció`
+      : `La inspección Nro ${d.numeroInspeccion} vencerá en ${
+          momento === "48h" ? "48" : "24"
+        } horas`;
+
+  const intro =
+    momento === "vencido"
+      ? "La siguiente inspección venció sin que se resolvieran sus observaciones:"
+      : `La siguiente inspección vencerá en ${
+          momento === "48h" ? "48" : "24"
+        } horas si no se resuelven sus observaciones:`;
+
+  const celdaEtiqueta =
+    "background:#eef1f6; font-weight:bold; padding:8px 12px; border:1px solid #dde3ee; width:170px;";
+  const celdaValor = "padding:8px 12px; border:1px solid #dde3ee;";
+  const fila = (etiqueta: string, valor: string) =>
+    `<tr><td style="${celdaEtiqueta}">${etiqueta}</td><td style="${celdaValor}">${esc(
+      valor,
+    )}</td></tr>`;
+
+  const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin:0 0 16px 0;">
+      <tr><td align="left" style="text-align:left; padding:0;">
+        <img src="cid:logo-cordillera-mp" alt="Cordillera M&amp;P" width="150" style="display:block; margin:0; border:0; outline:none; text-decoration:none; width:150px; max-width:150px; height:auto;" />
+      </td></tr>
+    </table>
+
+    <p style="margin: 0 0 8px;">${intro}</p>
+
+    <table style="border-collapse: collapse; width: 100%; margin: 0 0 20px;">
+      ${fila("Nro de Inspección", String(d.numeroInspeccion))}
+      ${fila("Patente Camión", d.patenteCamion.toUpperCase())}
+      ${fila("Patente Rampla", d.patenteRampla.toUpperCase())}
+      ${fila("Transporte", d.transporte)}
+      ${fila("Vence", fmtFecha(d.fechaVencimiento))}
+    </table>
+
+    <p style="margin: 12px 0 0; font-size: 12px; color: #64748b;">Aviso automático de Cordillera M&amp;P — no responder a este correo.</p>
+  </div>`;
+
+  return { asunto, html };
+}

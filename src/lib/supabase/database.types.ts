@@ -44,6 +44,8 @@ export type Database = {
           email: string
           id: string
           nombre: string
+          recibe_informes: boolean
+          recibe_vencimientos: boolean
         }
         Insert: {
           activo?: boolean
@@ -51,6 +53,8 @@ export type Database = {
           email: string
           id?: string
           nombre: string
+          recibe_informes?: boolean
+          recibe_vencimientos?: boolean
         }
         Update: {
           activo?: boolean
@@ -58,6 +62,8 @@ export type Database = {
           email?: string
           id?: string
           nombre?: string
+          recibe_informes?: boolean
+          recibe_vencimientos?: boolean
         }
         Relationships: []
       }
