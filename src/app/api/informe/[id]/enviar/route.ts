@@ -169,14 +169,18 @@ export async function POST(
 
   // Corrección crítica de seguridad: el informe solo se puede mandar a
   // destinatarios pre-autorizados por un administrador (destinatarios_correo,
-  // activo = true) — nunca a una dirección libre escrita por quien envía.
-  // Se valida ANTES de preparar() (que genera el PDF, caro en CPU) para no
-  // pagar ese costo cuando el pedido ya está mal formado. Comparación en
+  // activo = true, recibe_informes = true) — nunca a una dirección libre
+  // escrita por quien envía. recibe_informes distingue esto de
+  // recibe_vencimientos (el aviso automático de vencimiento del cron, otro
+  // flujo aparte) — un destinatario puede estar activo para uno y no para el
+  // otro. Se valida ANTES de preparar() (que genera el PDF, caro en CPU) para
+  // no pagar ese costo cuando el pedido ya está mal formado. Comparación en
   // minúsculas por ambos lados: una mayúscula no debe romper un correo legítimo.
   const { data: autorizados, error: errDestinatarios } = await supabase
     .from("destinatarios_correo")
     .select("email")
-    .eq("activo", true);
+    .eq("activo", true)
+    .eq("recibe_informes", true);
   if (errDestinatarios) {
     return NextResponse.json(
       { error: "No se pudo validar los destinatarios." },
