@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
@@ -17,6 +18,7 @@ import { cn } from "@/lib/utils";
 import {
   ChecklistItemRow,
   respuestaVacia,
+  type FotoSlot,
   type RespuestaEditable,
 } from "@/components/ChecklistItemRow";
 import { SignaturePad } from "@/components/SignaturePad";
@@ -28,8 +30,16 @@ import {
   finalizarReinspeccion,
   guardarRespuestaItem,
   guardarFirmaRevision,
+  guardarFotoChecklistItem,
+  guardarObservacionGeneral,
 } from "@/app/(app)/tickets/actions";
-import type { ChecklistItem, ItemEstado } from "@/lib/tipos";
+import {
+  ETIQUETA_TIPO_INSPECCION,
+  ORDEN_TIPOS_INSPECCION,
+  type ChecklistItem,
+  type ItemEstado,
+  type TipoInspeccion,
+} from "@/lib/tipos";
 
 type Cabecera = {
   transporte: string;
@@ -46,9 +56,10 @@ const cabeceraVacia = (): Cabecera => ({
   transporte: "",
   conductor: "",
   // §1: la fecha/hora de inspección NO es editable — se fija al abrir el
-  // formulario. `fechaVencimiento` se precarga como fecha + 10 días (editable).
+  // formulario. `fechaVencimiento` se precarga según el tipo elegido (§8 de
+  // la fase "tipos de inspección"), editable siempre.
   fecha: aDatetimeLocal(new Date()),
-  fechaVencimiento: vencimientoPorDefecto(),
+  fechaVencimiento: vencimientoPorDefecto(10),
   procedencia: "",
   tipo_camion: "",
   patente_camion: "",
@@ -85,7 +96,16 @@ function sumarDias(datetimeLocal: string, dias: number): string {
   d.setDate(d.getDate() + dias);
   return aDatetimeLocal(d);
 }
-const vencimientoPorDefecto = () => sumarDias(aDatetimeLocal(new Date()), 10);
+const vencimientoPorDefecto = (dias: number) => sumarDias(aDatetimeLocal(new Date()), dias);
+
+/**
+ * Fase "tipos de inspección" — parte 2/4, §8. Control de Salida vence en 1
+ * día; los otros tres tipos siguen con 10 días, como hasta ahora. Solo cambia
+ * el valor precargado — el campo sigue siendo editable por el supervisor.
+ */
+function diasVencimientoPorTipo(tipo: string): number {
+  return tipo === "control_salida" ? 1 : 10;
+}
 
 async function subirArchivo(
   bucket: string,
@@ -150,20 +170,31 @@ async function comprimirImagen(
 export function InspeccionForm({
   modo,
   items,
+  tipos,
   ticketId: ticketIdProp,
   numeroRevision = 1,
   numeroInspeccion = null,
   conductorInicial = "",
   fechaVencimientoInicial = null,
+  tipoInspeccionInicial = null,
 }: {
   modo: "nueva" | "reinspeccion";
+  /**
+   * En modo "nueva": TODOS los ítems del checklist, de los 4 tipos, sin
+   * filtrar — se filtra acá según el tipo que elija el supervisor. En modo
+   * "reinspeccion": ya vienen filtrados por el tipo fijo del ticket.
+   */
   items: ChecklistItem[];
+  /** Solo modo "nueva" — puebla el combo "Tipo de inspección". */
+  tipos?: TipoInspeccion[];
   ticketId?: string;
   numeroRevision?: number;
   /** §2.6: correlativo legible del ticket (solo lectura). Null en inspección nueva sin guardar. */
   numeroInspeccion?: number | null;
   conductorInicial?: string;
   fechaVencimientoInicial?: string | null;
+  /** Solo modo "reinspeccion" — el tipo es fijo desde que se creó el ticket. */
+  tipoInspeccionInicial?: string | null;
 }) {
   const router = useRouter();
 
@@ -184,21 +215,87 @@ export function InspeccionForm({
 
   const [cabecera, setCabecera] = useState<Cabecera>(cabeceraVacia);
 
+  // Fase "tipos de inspección" — parte 2/4. Combo obligatorio, arranca sin
+  // preseleccionar ("Seleccionar…"). Solo aplica en modo "nueva" — en
+  // reinspección el tipo es fijo (tipoInspeccionInicial, §3 de la fase).
+  const [tipoSeleccionado, setTipoSeleccionado] = useState("");
+  const tipoInspeccion =
+    modo === "nueva" ? tipoSeleccionado : tipoInspeccionInicial ?? "";
+  const [nombreEncarpador, setNombreEncarpador] = useState("");
+  const [nombreGuardia, setNombreGuardia] = useState("");
+  const [nroContenedor, setNroContenedor] = useState("");
+
   // §2.6: conductor de ESTA revisión (solo re-inspección), prellenado con el de
   // la revisión anterior. §2.7: la fecha de vencimiento también es por revisión.
   const [conductorRevision, setConductorRevision] = useState(conductorInicial);
   const [vencRevision, setVencRevision] = useState(
-    () => isoADatetimeLocal(fechaVencimientoInicial) || vencimientoPorDefecto(),
+    () => isoADatetimeLocal(fechaVencimientoInicial) || vencimientoPorDefecto(10),
+  );
+
+  const opcionesTipo = useMemo(() => {
+    if (!tipos || tipos.length === 0) return ORDEN_TIPOS_INSPECCION;
+    const claves = new Set(tipos.map((t) => t.clave));
+    return ORDEN_TIPOS_INSPECCION.filter((c) => claves.has(c));
+  }, [tipos]);
+
+  // Ítems del checklist DEL TIPO elegido, ordenados — §4 de la fase.
+  const itemsDelTipo = useMemo(() => {
+    if (modo === "reinspeccion")
+      return [...items].sort((a, b) => a.orden - b.orden);
+    if (!tipoSeleccionado) return [];
+    return items
+      .filter((i) => i.tipo === tipoSeleccionado)
+      .sort((a, b) => a.orden - b.orden);
+  }, [items, modo, tipoSeleccionado]);
+
+  // §7 de la fase: si TODO el checklist de este tipo es modo 'fotos' (hoy,
+  // solo exportacion_chimolsa), no hay Conforme/No conforme por ítem — hay
+  // una única observación general que define el estado resultante.
+  const esSoloFotos = useMemo(
+    () =>
+      itemsDelTipo.length > 0 &&
+      itemsDelTipo.every((i) => i.modo === "fotos"),
+    [itemsDelTipo],
   );
 
   const [respuestas, setRespuestas] = useState<Record<string, RespuestaEditable>>(
-    () => Object.fromEntries(items.map((i) => [i.key, respuestaVacia()])),
+    () => Object.fromEntries(itemsDelTipo.map((i) => [i.key, respuestaVacia()])),
   );
   // Espejo para leer el estado más reciente dentro de callbacks async.
   const respuestasRef = useRef(respuestas);
   useEffect(() => {
     respuestasRef.current = respuestas;
   }, [respuestas]);
+
+  const [observacionGeneral, setObservacionGeneral] = useState("");
+
+  // El checklist a mostrar depende del tipo elegido — mientras el supervisor
+  // no haya avanzado al paso 2, cambiar el tipo reinicia las respuestas
+  // locales (nada se persistió todavía) y vuelve a precargar el vencimiento
+  // por defecto de ese tipo (§8 de la fase). Se hace en el propio handler del
+  // combo, no en un efecto — es una reacción directa a la elección del
+  // usuario, no una sincronización con un sistema externo.
+  function onCambiarTipo(nuevoTipo: string) {
+    setTipoSeleccionado(nuevoTipo);
+    const nuevosItems = nuevoTipo
+      ? items
+          .filter((i) => i.tipo === nuevoTipo)
+          .sort((a, b) => a.orden - b.orden)
+      : [];
+    setRespuestas(
+      Object.fromEntries(nuevosItems.map((i) => [i.key, respuestaVacia()])),
+    );
+    setObservacionGeneral("");
+    if (nuevoTipo) {
+      setCabecera((prev) => ({
+        ...prev,
+        fechaVencimiento: sumarDias(
+          prev.fecha,
+          diasVencimientoPorTipo(nuevoTipo),
+        ),
+      }));
+    }
+  }
 
   const [enviando, setEnviando] = useState(false);
 
@@ -210,10 +307,12 @@ export function InspeccionForm({
   );
 
   const obsTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const obsGeneralTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const timers = obsTimers.current;
     return () => {
       Object.values(timers).forEach(clearTimeout);
+      if (obsGeneralTimer.current) clearTimeout(obsGeneralTimer.current);
     };
   }, []);
 
@@ -243,6 +342,19 @@ export function InspeccionForm({
   const patchResp = useCallback(
     (key: string, patch: Partial<RespuestaEditable>) => {
       setRespuestas((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+    },
+    [],
+  );
+
+  const patchFotoSlot = useCallback(
+    (key: string, orden: 1 | 2, patch: Partial<FotoSlot>) => {
+      setRespuestas((prev) => {
+        const actual = prev[key];
+        if (!actual) return prev;
+        const fotos = [...actual.fotos] as [FotoSlot, FotoSlot];
+        fotos[orden - 1] = { ...fotos[orden - 1], ...patch };
+        return { ...prev, [key]: { ...actual, fotos } };
+      });
     },
     [],
   );
@@ -284,18 +396,29 @@ export function InspeccionForm({
   }
 
   // §2.7: validación de cliente real — todos los campos deben estar completos.
-  const cabeceraCompleta = useMemo(
-    () => CAMPOS_CABECERA.every((c) => cabecera[c.key].trim() !== ""),
-    [cabecera],
-  );
+  // Fase "tipos de inspección": además, el tipo es obligatorio y los campos
+  // condicionales de su tipo (§3 de la fase) también.
+  const cabeceraCompleta = useMemo(() => {
+    if (modo !== "nueva") return true;
+    if (!tipoSeleccionado) return false;
+    if (!CAMPOS_CABECERA.every((c) => cabecera[c.key].trim() !== "")) return false;
+    if (tipoSeleccionado === "control_salida")
+      return nombreEncarpador.trim() !== "" && nombreGuardia.trim() !== "";
+    if (tipoSeleccionado === "exportacion_chimolsa")
+      return nroContenedor.trim() !== "";
+    return true;
+  }, [modo, tipoSeleccionado, cabecera, nombreEncarpador, nombreGuardia, nroContenedor]);
   const datosRevisionCompletos =
     conductorRevision.trim() !== "" && vencRevision.trim() !== "";
   const puedeAvanzar =
     modo === "nueva" ? cabeceraCompleta : datosRevisionCompletos;
 
   const noConformes = useMemo(
-    () => Object.values(respuestas).filter((r) => r.estado === "no_conforme"),
-    [respuestas],
+    () =>
+      itemsDelTipo.filter(
+        (i) => i.modo === "estado" && respuestas[i.key]?.estado === "no_conforme",
+      ),
+    [itemsDelTipo, respuestas],
   );
 
   function setCampoCabecera(key: keyof Cabecera, value: string) {
@@ -307,8 +430,9 @@ export function InspeccionForm({
     setIniciando(true);
     try {
       if (modo === "nueva") {
-        // §2.6/§2.8: crea la fila en `tickets`, la revisión #1 y siembra las 18
-        // respuestas — así numero_inspeccion existe y se puede guardar por ítem.
+        // §2.6/§2.8: crea la fila en `tickets`, la revisión #1 y siembra las
+        // respuestas del checklist del tipo elegido — así numero_inspeccion
+        // existe y se puede guardar por ítem.
         const res = await iniciarInspeccion({
           ticketId,
           cabecera: {
@@ -323,6 +447,13 @@ export function InspeccionForm({
           fechaVencimientoISO: new Date(
             cabecera.fechaVencimiento,
           ).toISOString(),
+          tipoInspeccion: tipoSeleccionado,
+          nombreEncarpador:
+            tipoSeleccionado === "control_salida" ? nombreEncarpador : null,
+          nombreGuardia:
+            tipoSeleccionado === "control_salida" ? nombreGuardia : null,
+          nroContenedor:
+            tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
         });
         setNumInsp(res.numeroInspeccion);
       } else {
@@ -344,6 +475,7 @@ export function InspeccionForm({
   }
 
   // §2.8: cada respuesta se guarda apenas se marca — no todas juntas al final.
+  // Solo para ítems de modo 'estado'.
   async function onEstadoItem(key: string, estado: ItemEstado) {
     patchResp(key, { estado });
     const actual = respuestasRef.current[key];
@@ -463,10 +595,96 @@ export function InspeccionForm({
     }
   }
 
+  // Fase "tipos de inspección" — parte 2/4. Fotos de un ítem modo 'fotos':
+  // misma lógica de subida inmediata que onFotoItem, pero contra
+  // ticket_checklist_fotos (orden 1 o 2), no contra foto_url directamente.
+  async function onFotoModoItem(key: string, orden: 1 | 2, file: File | null) {
+    if (!file) return;
+    if (file.type && !file.type.startsWith("image/")) {
+      toast.error("El archivo debe ser una imagen (JPG, PNG, WEBP o HEIC).");
+      return;
+    }
+    patchFotoSlot(key, orden, { subiendo: true });
+    try {
+      const { blob, ext } = await comprimirImagen(file);
+      const path = await subirArchivo(
+        "fallas",
+        `${ticketId}/${key}/${orden}-${nombreFoto(ext)}`,
+        blob,
+        blob.type || "image/jpeg",
+      );
+      const previewUrl = URL.createObjectURL(blob);
+      patchFotoSlot(key, orden, {
+        path,
+        nombre: file.name,
+        previewUrl,
+        subiendo: false,
+      });
+      await guardarFotoChecklistItem({
+        ticketId,
+        revisionNumero: rev,
+        itemKey: key,
+        orden,
+        path,
+      });
+    } catch (e) {
+      patchFotoSlot(key, orden, { subiendo: false });
+      toast.error(e instanceof Error ? e.message : "No se pudo subir la foto.");
+    }
+  }
+
+  async function onQuitarFotoModoItem(key: string, orden: 1 | 2) {
+    const slot = respuestasRef.current[key]?.fotos[orden - 1];
+    if (!slot) return;
+    if (slot.previewUrl) URL.revokeObjectURL(slot.previewUrl);
+    if (slot.path) {
+      const supabase = createClient();
+      await supabase.storage.from("fallas").remove([slot.path]).catch(() => {});
+    }
+    patchFotoSlot(key, orden, {
+      path: null,
+      nombre: null,
+      previewUrl: null,
+      subiendo: false,
+    });
+    try {
+      await guardarFotoChecklistItem({
+        ticketId,
+        revisionNumero: rev,
+        itemKey: key,
+        orden,
+        path: null,
+      });
+    } catch {
+      /* no bloquea: "Finalizar revisión" vuelve a validar */
+    }
+  }
+
+  // Fase "tipos de inspección" — §5/§7. Una sola observación para toda la
+  // revisión (checklists todo modo 'fotos') — se guarda debounced, igual que
+  // la observación por ítem.
+  function onObservacionGeneral(texto: string) {
+    setObservacionGeneral(texto);
+    if (obsGeneralTimer.current) clearTimeout(obsGeneralTimer.current);
+    obsGeneralTimer.current = setTimeout(async () => {
+      try {
+        await guardarObservacionGeneral({ ticketId, revisionNumero: rev, texto });
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? e.message : "No se pudo guardar la observación.",
+        );
+      }
+    }, 700);
+  }
+
   function validarChecklist(): string | null {
-    for (const item of items) {
+    for (const item of itemsDelTipo) {
       const r = respuestas[item.key];
-      if (r.estado === "no_conforme") {
+      if (!r) return `Falta completar "${item.nombre}".`;
+      if (item.modo === "fotos") {
+        if (!r.fotos[0].path || !r.fotos[1].path)
+          return `Faltan fotos en "${item.nombre}" (se requieren 2).`;
+      } else if (r.estado === "no_conforme") {
         if (!r.observacion.trim())
           return `Falta la observación en "${item.nombre}".`;
         if (!r.fotoPath) return `Falta la foto de la falla en "${item.nombre}".`;
@@ -541,6 +759,11 @@ export function InspeccionForm({
     }
   }
 
+  // Fase "tipos de inspección" — §2: el resto de los campos queda
+  // deshabilitado hasta elegir un tipo (solo aplica a modo "nueva").
+  const camposDeshabilitados =
+    paso === 2 || (modo === "nueva" && !tipoSeleccionado);
+
   return (
     <form ref={formRef} onSubmit={onSubmit} className="grid gap-6">
       <Card className={cn(paso === 2 && "hidden")}>
@@ -555,6 +778,26 @@ export function InspeccionForm({
               {/* §2.6: el "Nro de Inspección" NO se muestra en este paso — el
                   ticket todavía no existe. Aparece recién en el paso 2 (título
                   "Inspección Nro X"), en el detalle, el informe y la tabla. */}
+              {/* Fase "tipos de inspección": primer campo de esta sección,
+                  obligatorio, sin valor preseleccionado. */}
+              <div className="grid gap-1.5 sm:col-span-2">
+                <Label htmlFor="tipo-inspeccion">Tipo de inspección</Label>
+                <select
+                  id="tipo-inspeccion"
+                  required
+                  disabled={paso === 2}
+                  value={tipoSeleccionado}
+                  onChange={(e) => onCambiarTipo(e.target.value)}
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                >
+                  <option value="">Seleccionar…</option>
+                  {opcionesTipo.map((clave) => (
+                    <option key={clave} value={clave}>
+                      {ETIQUETA_TIPO_INSPECCION[clave]}
+                    </option>
+                  ))}
+                </select>
+              </div>
               {/* §1: la fecha/hora de inspección se registra sola, solo lectura. */}
               <div className="grid gap-1.5">
                 <Label htmlFor="fecha-inspeccion">
@@ -585,17 +828,56 @@ export function InspeccionForm({
                     id={c.key}
                     type={c.type ?? "text"}
                     required
-                    disabled={paso === 2}
+                    disabled={camposDeshabilitados}
                     value={cabecera[c.key]}
                     onChange={(e) => setCampoCabecera(c.key, e.target.value)}
                   />
                   {c.key === "fechaVencimiento" && (
                     <span className="text-xs text-muted-foreground">
-                      Se precarga como la fecha de inspección + 10 días. Editable.
+                      {tipoSeleccionado === "control_salida"
+                        ? "Se precarga como la fecha de inspección + 1 día. Editable."
+                        : "Se precarga como la fecha de inspección + 10 días. Editable."}
                     </span>
                   )}
                 </div>
               ))}
+              {/* Fase "tipos de inspección" — §3: campos condicionales por tipo. */}
+              {tipoSeleccionado === "control_salida" && (
+                <>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="nombre-encarpador">Nombre Encarpador</Label>
+                    <Input
+                      id="nombre-encarpador"
+                      required
+                      disabled={camposDeshabilitados}
+                      value={nombreEncarpador}
+                      onChange={(e) => setNombreEncarpador(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="nombre-guardia">Nombre Guardia</Label>
+                    <Input
+                      id="nombre-guardia"
+                      required
+                      disabled={camposDeshabilitados}
+                      value={nombreGuardia}
+                      onChange={(e) => setNombreGuardia(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+              {tipoSeleccionado === "exportacion_chimolsa" && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="nro-contenedor">Nro de Contenedor</Label>
+                  <Input
+                    id="nro-contenedor"
+                    required
+                    disabled={camposDeshabilitados}
+                    value={nroContenedor}
+                    onChange={(e) => setNroContenedor(e.target.value)}
+                  />
+                </div>
+              )}
             </>
           ) : (
             <>
@@ -607,6 +889,20 @@ export function InspeccionForm({
                     readOnly
                     disabled
                     value={String(numeroInspeccion)}
+                  />
+                </div>
+              )}
+              {tipoInspeccionInicial && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="tipo-inspeccion-re">Tipo de inspección</Label>
+                  <Input
+                    id="tipo-inspeccion-re"
+                    readOnly
+                    disabled
+                    value={
+                      ETIQUETA_TIPO_INSPECCION[tipoInspeccionInicial] ??
+                      tipoInspeccionInicial
+                    }
                   />
                 </div>
               )}
@@ -650,7 +946,9 @@ export function InspeccionForm({
             </Button>
             {!puedeAvanzar && (
               <p className="mt-1.5 text-xs text-muted-foreground">
-                Completar todos los campos para avanzar.
+                {modo === "nueva" && !tipoSeleccionado
+                  ? "Elegir un tipo de inspección para continuar."
+                  : "Completar todos los campos para avanzar."}
               </p>
             )}
           </div>
@@ -667,14 +965,18 @@ export function InspeccionForm({
               </CardTitle>
               {/* §2.13: el Nro de Inspección se conoce apenas se crea el ticket
                   ("Realizar revisión") — se muestra acá de inmediato. */}
-              {numInsp != null && (
-                <CardDescription>Inspección Nro {numInsp}</CardDescription>
+              {(numInsp != null || tipoInspeccion) && (
+                <CardDescription>
+                  {numInsp != null ? `Inspección Nro ${numInsp}` : ""}
+                  {numInsp != null && tipoInspeccion ? " — " : ""}
+                  {tipoInspeccion ? ETIQUETA_TIPO_INSPECCION[tipoInspeccion] : ""}
+                </CardDescription>
               )}
             </CardHeader>
             <CardContent>
               <div className="rounded-lg border">
                 <div className="px-3">
-                  {items.map((item, idx) => (
+                  {itemsDelTipo.map((item, idx) => (
                     <ChecklistItemRow
                       key={item.key}
                       indice={idx + 1}
@@ -684,15 +986,32 @@ export function InspeccionForm({
                       onObservacion={(t) => onObservacionItem(item.key, t)}
                       onFoto={(f) => onFotoItem(item.key, f)}
                       onQuitarFoto={() => onQuitarFotoItem(item.key)}
+                      onFotoModo={(orden, f) => onFotoModoItem(item.key, orden, f)}
+                      onQuitarFotoModo={(orden) =>
+                        onQuitarFotoModoItem(item.key, orden)
+                      }
                     />
                   ))}
                 </div>
               </div>
-              <p className="mt-3 text-sm text-muted-foreground">
-                {noConformes.length === 0
-                  ? "Sin elementos no conformes: la revisión finalizará sin observaciones."
-                  : `${noConformes.length} elemento(s) no conforme(s): la revisión finalizará con observaciones.`}
-              </p>
+
+              {esSoloFotos ? (
+                <div className="mt-4 grid gap-1.5">
+                  <Label htmlFor="observacion-general">Observaciones</Label>
+                  <Textarea
+                    id="observacion-general"
+                    value={observacionGeneral}
+                    onChange={(e) => onObservacionGeneral(e.target.value)}
+                    placeholder="Observaciones de la inspección (opcional)"
+                  />
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  {noConformes.length === 0
+                    ? "Sin elementos no conformes: la revisión finalizará sin observaciones."
+                    : `${noConformes.length} elemento(s) no conforme(s): la revisión finalizará con observaciones.`}
+                </p>
+              )}
               <p className="mt-1 text-xs text-muted-foreground">
                 Cada elemento se guarda apenas se marca — si algo falla al
                 finalizar, el checklist no se pierde.

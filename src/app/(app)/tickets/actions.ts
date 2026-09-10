@@ -7,6 +7,7 @@ import {
   estadoTrasChecklist,
   puedeReinspeccionar,
 } from "@/lib/ticket-state-machine";
+import { ORDEN_TIPOS_INSPECCION } from "@/lib/tipos";
 import type { ItemEstado, TicketEstado } from "@/lib/tipos";
 
 type SupabaseServer = Awaited<ReturnType<typeof createClient>>;
@@ -31,6 +32,13 @@ export type IniciarInspeccionInput = {
   cabecera: CabeceraInput;
   // §2.7: un solo vencimiento por revisión, tomado de "Datos de Inspección".
   fechaVencimientoISO: string;
+  // Fase "tipos de inspección" — parte 2/4. Obligatorio: el combo del
+  // formulario siempre manda uno de los 4 valores de tipos_inspeccion.
+  tipoInspeccion: string;
+  // Campos condicionales por tipo — ver validarCamposPorTipo() más abajo.
+  nombreEncarpador?: string | null;
+  nombreGuardia?: string | null;
+  nroContenedor?: string | null;
 };
 
 export type GuardarRespuestaItemInput = {
@@ -50,12 +58,42 @@ function validarCabecera(c: CabeceraInput) {
 }
 
 /**
+ * Campos de cabecera que solo aplican a algunos tipos de inspección — parte
+ * 2/4 de "tipos de inspección con checklist propio". El combo del cliente ya
+ * los deshabilita/oculta según corresponda, pero esto es la validación real
+ * (nunca confiar solo en el cliente, mismo criterio que validarCabecera).
+ */
+function validarCamposPorTipo(
+  tipo: string,
+  campos: {
+    nombreEncarpador?: string | null;
+    nombreGuardia?: string | null;
+    nroContenedor?: string | null;
+  },
+) {
+  if (tipo === "control_salida") {
+    if (!campos.nombreEncarpador?.trim())
+      throw new Error('Falta el "Nombre Encarpador".');
+    if (!campos.nombreGuardia?.trim())
+      throw new Error('Falta el "Nombre Guardia".');
+  }
+  if (tipo === "exportacion_chimolsa") {
+    if (!campos.nroContenedor?.trim())
+      throw new Error('Falta el "Nro de Contenedor".');
+  }
+}
+
+/**
  * Deja lista una revisión para que se pueda ir guardando por partes (§2.8):
  * garantiza la fila en `ticket_revisiones` (es el padre FK de las respuestas) y
- * siembra las 18 filas de `ticket_checklist_respuestas` en estado `conforme` —
- * así los ítems que el supervisor no toca igual quedan registrados y "Finalizar
+ * siembra las respuestas del checklist DEL TIPO de esta inspección — así los
+ * ítems que el supervisor no toca igual quedan registrados y "Finalizar
  * revisión" solo tiene que cerrar sobre datos ya guardados. Es idempotente: si
  * el supervisor vuelve atrás y reingresa, no pisa lo ya marcado.
+ *
+ * Los ítems de modo 'fotos' se siembran con `estado = null` — no tienen
+ * Conforme/No conforme/No aplica (§7 de la fase, el estado resultante de esas
+ * inspecciones lo define la observación general, no un estado por ítem).
  */
 async function prepararRevision(
   supabase: SupabaseServer,
@@ -65,6 +103,7 @@ async function prepararRevision(
     supervisorId: string;
     conductor: string;
     fechaVencimientoISO: string;
+    tipoInspeccion: string;
   },
 ) {
   const { data: revExistente } = await supabase
@@ -97,12 +136,15 @@ async function prepararRevision(
       throw new Error(`No se pudo iniciar la revisión: ${error.message}`);
   }
 
-  const { data: items } = await supabase.from("checklist_items").select("key");
+  const { data: items } = await supabase
+    .from("checklist_items")
+    .select("key, modo")
+    .eq("tipo", opts.tipoInspeccion);
   const filas = (items ?? []).map((i) => ({
     ticket_id: opts.ticketId,
     revision_numero: opts.numeroRevision,
     item_key: i.key,
-    estado: "conforme" as const,
+    estado: i.modo === "fotos" ? null : ("conforme" as const),
   }));
   if (filas.length > 0) {
     const { error } = await supabase
@@ -119,16 +161,28 @@ async function prepararRevision(
 }
 
 /**
- * Verifica que la revisión tenga las 18 respuestas guardadas (§2.8: se fueron
- * guardando por ítem) y ambas firmas, calcula el estado resultante (§2.3) y lo
- * escribe en `ticket_revisiones.estado_resultante`. Devuelve el estado para que
- * el llamador actualice el ticket. NO inserta respuestas: solo cierra sobre lo
- * ya guardado.
+ * Verifica que la revisión tenga todas las respuestas del checklist de SU
+ * TIPO guardadas (§2.8: se fueron guardando por ítem) y ambas firmas, calcula
+ * el estado resultante y lo escribe en `ticket_revisiones.estado_resultante`.
+ * Devuelve el estado para que el llamador actualice el ticket. NO inserta
+ * respuestas: solo cierra sobre lo ya guardado.
+ *
+ * Validación por modo de ítem: modo 'estado' exige observación+foto si quedó
+ * no_conforme (como siempre); modo 'fotos' exige 2 fotos en
+ * ticket_checklist_fotos (no en foto_url — esa columna solo espeja la
+ * primera, ver guardarFotoChecklistItem).
+ *
+ * Estado resultante: si el checklist de este tipo es TODO modo 'fotos' (hoy,
+ * únicamente exportacion_chimolsa — §7 de la fase), lo define si hay texto en
+ * la observación general (cualquier respuesta, todas comparten el mismo
+ * texto — ver guardarObservacionGeneral). Si no, la regla de siempre
+ * (no_conforme en algún ítem).
  */
 async function cerrarRevision(
   supabase: SupabaseServer,
   ticketId: string,
   numeroRevision: number,
+  tipoInspeccion: string,
 ): Promise<TicketEstado> {
   const { data: rev } = await supabase
     .from("ticket_revisiones")
@@ -143,14 +197,18 @@ async function cerrarRevision(
   if (!rev.firma_conductor_url || !rev.firma_fiscalizador_url)
     throw new Error("Faltan las firmas del conductor y/o del fiscalizador.");
 
-  const { data: items } = await supabase.from("checklist_items").select("key");
+  const { data: items } = await supabase
+    .from("checklist_items")
+    .select("key, modo")
+    .eq("tipo", tipoInspeccion);
   const { data: respuestas } = await supabase
     .from("ticket_checklist_respuestas")
-    .select("item_key, estado, observacion, foto_url")
+    .select("id, item_key, estado, observacion, foto_url")
     .eq("ticket_id", ticketId)
     .eq("revision_numero", numeroRevision);
 
   const claves = (items ?? []).map((i) => i.key);
+  const modoPorKey = new Map((items ?? []).map((i) => [i.key, i.modo]));
   const guardadas = respuestas ?? [];
   const respondidas = new Set(guardadas.map((r) => r.item_key));
   const faltan = claves.filter((k) => !respondidas.has(k));
@@ -160,14 +218,43 @@ async function cerrarRevision(
         faltan.length || claves.length
       } elemento(s) del checklist por completar (marcarlos, y adjuntar la foto en los no conformes).`,
     );
-  for (const r of guardadas) {
-    if (r.estado === "no_conforme" && (!r.observacion?.trim() || !r.foto_url))
-      throw new Error("Hay un elemento no conforme sin observación o sin foto.");
+
+  const idsRespuestasFotos = guardadas
+    .filter((r) => modoPorKey.get(r.item_key) === "fotos")
+    .map((r) => r.id);
+  const cantidadFotosPorRespuesta = new Map<string, number>();
+  if (idsRespuestasFotos.length > 0) {
+    const { data: fotos } = await supabase
+      .from("ticket_checklist_fotos")
+      .select("respuesta_id")
+      .in("respuesta_id", idsRespuestasFotos);
+    for (const f of fotos ?? []) {
+      cantidadFotosPorRespuesta.set(
+        f.respuesta_id,
+        (cantidadFotosPorRespuesta.get(f.respuesta_id) ?? 0) + 1,
+      );
+    }
   }
 
-  const estado = estadoTrasChecklist(
-    guardadas.some((r) => r.estado === "no_conforme"),
-  );
+  for (const r of guardadas) {
+    const modo = modoPorKey.get(r.item_key);
+    if (modo === "fotos") {
+      if ((cantidadFotosPorRespuesta.get(r.id) ?? 0) < 2)
+        throw new Error(
+          "Faltan fotos en algún elemento del checklist (se requieren 2 por ítem).",
+        );
+    } else if (r.estado === "no_conforme" && (!r.observacion?.trim() || !r.foto_url)) {
+      throw new Error("Hay un elemento no conforme sin observación o sin foto.");
+    }
+  }
+
+  const esSoloFotos = claves.length > 0 && claves.every((k) => modoPorKey.get(k) === "fotos");
+  const estado: TicketEstado = esSoloFotos
+    ? guardadas.some((r) => (r.observacion ?? "").trim() !== "")
+      ? "finalizada_con_observaciones"
+      : "finalizada_sin_observaciones"
+    : estadoTrasChecklist(guardadas.some((r) => r.estado === "no_conforme"));
+
   const { error } = await supabase
     .from("ticket_revisiones")
     .update({ estado_resultante: estado })
@@ -180,12 +267,13 @@ async function cerrarRevision(
  * §2.6: la fila en `tickets` se crea cuando el supervisor pasa de la cabecera al
  * checklist ("Realizar revisión"), no al finalizar — así `numero_inspeccion` ya
  * existe y §2.8 tiene un `ticket_id` real para subir firmas/fotos a Storage.
- * También deja lista la revisión #1 (fila en `ticket_revisiones` + las 18
- * respuestas sembradas) para poder guardar por ítem. El ticket nace en
- * `en_revision` (§2.3). Es un upsert idempotente: si el supervisor vuelve atrás,
- * edita la cabecera y avanza de nuevo, actualiza la misma fila sin perder lo ya
- * marcado. La unicidad de `numero_inspeccion` entre inspectores simultáneos la
- * garantiza el `generated always as identity` de Postgres.
+ * También deja lista la revisión #1 (fila en `ticket_revisiones` + las
+ * respuestas del tipo elegido sembradas) para poder guardar por ítem. El
+ * ticket nace en `en_revision` (§2.3). Es un upsert idempotente: si el
+ * supervisor vuelve atrás, edita la cabecera y avanza de nuevo, actualiza la
+ * misma fila sin perder lo ya marcado. La unicidad de `numero_inspeccion`
+ * entre inspectores simultáneos la garantiza el `generated always as
+ * identity` de Postgres.
  */
 export async function iniciarInspeccion(
   input: IniciarInspeccionInput,
@@ -198,6 +286,11 @@ export async function iniciarInspeccion(
   validarCabecera(input.cabecera);
   if (!input.fechaVencimientoISO)
     throw new Error("Falta la fecha de vencimiento de la corrección.");
+  if (!input.tipoInspeccion)
+    throw new Error("Falta el tipo de inspección.");
+  if (!(ORDEN_TIPOS_INSPECCION as readonly string[]).includes(input.tipoInspeccion))
+    throw new Error("Tipo de inspección inválido.");
+  validarCamposPorTipo(input.tipoInspeccion, input);
 
   const { data, error } = await supabase
     .from("tickets")
@@ -209,6 +302,10 @@ export async function iniciarInspeccion(
         revision_actual: 1,
         supervisor_id: perfil.id,
         fecha_vencimiento: input.fechaVencimientoISO,
+        tipo_inspeccion: input.tipoInspeccion,
+        nombre_encarpador: input.nombreEncarpador?.trim() || null,
+        nombre_guardia: input.nombreGuardia?.trim() || null,
+        nro_contenedor: input.nroContenedor?.trim() || null,
         // §3.1/§3.2: ciclo de vencimiento nuevo → aún no se avisó (WhatsApp al
         // supervisor y correos automáticos a administradores en 48h/24h/vencido).
         alerta_naranja_enviada: false,
@@ -232,6 +329,7 @@ export async function iniciarInspeccion(
     supervisorId: perfil.id,
     conductor: input.cabecera.conductor,
     fechaVencimientoISO: input.fechaVencimientoISO,
+    tipoInspeccion: input.tipoInspeccion,
   });
 
   revalidatePath("/dashboard");
@@ -275,6 +373,9 @@ async function autorizarRevisionEnCurso(
  * todas juntas al final. Un ítem `no_conforme` no se puede persistir hasta que
  * tenga foto (constraint `foto_obligatoria_si_no_conforme`); mientras no la
  * tenga se borra su fila para que "Finalizar revisión" no tome un estado viejo.
+ *
+ * Solo para ítems de modo 'estado' — los de modo 'fotos' usan
+ * `guardarFotoChecklistItem` y `guardarObservacionGeneral`, no esta función.
  */
 export async function guardarRespuestaItem(
   input: GuardarRespuestaItemInput,
@@ -315,6 +416,119 @@ export async function guardarRespuestaItem(
   );
   if (error)
     throw new Error(`No se pudo guardar la respuesta: ${error.message}`);
+  return { guardado: true };
+}
+
+/**
+ * Fase "tipos de inspección" — parte 2/4. Guarda (o quita) UNA de las dos
+ * fotos obligatorias de un ítem de modo 'fotos' — orden 1 o 2 en
+ * `ticket_checklist_fotos` (unique(respuesta_id, orden): el orden se manda
+ * siempre explícito, nunca se confía en el default). `foto_url` en
+ * `ticket_checklist_respuestas` se mantiene en espejo con la foto de orden 1
+ * — el trigger `chk_foto_obligatoria_si_no_conforme` (BEFORE INSERT/UPDATE
+ * sobre esa tabla) sigue validando contra esa columna vieja; para no
+ * romperlo, este PR escribe las dos cosas. `estado` de la respuesta NO se
+ * toca acá — queda en `null` (sembrado por prepararRevision), un ítem de
+ * modo 'fotos' nunca tiene Conforme/No conforme/No aplica.
+ *
+ * Deuda técnica (no se resuelve en este PR): `chk_foto_obligatoria_si_no_conforme`
+ * debería pasar a `AFTER ... DEFERRABLE INITIALLY DEFERRED` cuando se elimine
+ * `foto_url` — una validación que depende de filas hijas (`ticket_checklist_fotos`)
+ * no puede vivir en un BEFORE INSERT sobre el padre, porque esas filas
+ * todavía no existen en ese momento. Misma forma del problema de las
+ * migraciones 21/22 (INSERT ... RETURNING sobre una fila que la propia
+ * política/trigger todavía no ve).
+ */
+export async function guardarFotoChecklistItem(input: {
+  ticketId: string;
+  revisionNumero: number;
+  itemKey: string;
+  orden: 1 | 2;
+  /** null = quitar esa foto. */
+  path: string | null;
+}): Promise<{ guardado: boolean }> {
+  const { perfil } = await getSesion();
+  const supabase = await createClient();
+  await autorizarRevisionEnCurso(
+    supabase,
+    perfil.id,
+    input.ticketId,
+    input.revisionNumero,
+  );
+
+  const { data: respuesta, error: errResp } = await supabase
+    .from("ticket_checklist_respuestas")
+    .select("id")
+    .eq("ticket_id", input.ticketId)
+    .eq("revision_numero", input.revisionNumero)
+    .eq("item_key", input.itemKey)
+    .maybeSingle();
+  if (errResp || !respuesta)
+    throw new Error(
+      "No se encontró la respuesta de este ítem. Volver a 'Datos de Inspección' y presionar 'Realizar revisión'.",
+    );
+
+  if (input.path === null) {
+    const { error } = await supabase
+      .from("ticket_checklist_fotos")
+      .delete()
+      .eq("respuesta_id", respuesta.id)
+      .eq("orden", input.orden);
+    if (error) throw new Error(`No se pudo quitar la foto: ${error.message}`);
+  } else {
+    const { error } = await supabase.from("ticket_checklist_fotos").upsert(
+      { respuesta_id: respuesta.id, orden: input.orden, url: input.path },
+      { onConflict: "respuesta_id,orden" },
+    );
+    if (error) throw new Error(`No se pudo guardar la foto: ${error.message}`);
+  }
+
+  const { data: primera } = await supabase
+    .from("ticket_checklist_fotos")
+    .select("url")
+    .eq("respuesta_id", respuesta.id)
+    .eq("orden", 1)
+    .maybeSingle();
+  const { error: errFotoUrl } = await supabase
+    .from("ticket_checklist_respuestas")
+    .update({ foto_url: primera?.url ?? null })
+    .eq("id", respuesta.id);
+  if (errFotoUrl)
+    throw new Error(`No se pudo actualizar la respuesta: ${errFotoUrl.message}`);
+
+  return { guardado: true };
+}
+
+/**
+ * Fase "tipos de inspección" — parte 2/4, §7. Para checklists TODO modo
+ * 'fotos' (hoy, exportacion_chimolsa) no hay una observación por ítem — hay
+ * UNA sola para toda la revisión, que además define el estado resultante al
+ * cerrar (cerrarRevision). Se guarda en `ticket_checklist_respuestas.observacion`
+ * de LOS 4 ítems de la revisión (reutiliza la columna existente, no agrega
+ * ninguna nueva) — el llamador (InspeccionForm) solo invoca esto cuando el
+ * checklist actual es todo modo 'fotos'.
+ */
+export async function guardarObservacionGeneral(input: {
+  ticketId: string;
+  revisionNumero: number;
+  texto: string;
+}): Promise<{ guardado: boolean }> {
+  const { perfil } = await getSesion();
+  const supabase = await createClient();
+  await autorizarRevisionEnCurso(
+    supabase,
+    perfil.id,
+    input.ticketId,
+    input.revisionNumero,
+  );
+
+  const { error } = await supabase
+    .from("ticket_checklist_respuestas")
+    .update({ observacion: input.texto.trim() || null })
+    .eq("ticket_id", input.ticketId)
+    .eq("revision_numero", input.revisionNumero);
+  if (error)
+    throw new Error(`No se pudo guardar la observación: ${error.message}`);
   return { guardado: true };
 }
 
@@ -364,7 +578,7 @@ export async function finalizarInspeccion(input: {
 
   const { data: ticket } = await supabase
     .from("tickets")
-    .select("estado, supervisor_id, numero_inspeccion")
+    .select("estado, supervisor_id, numero_inspeccion, tipo_inspeccion")
     .eq("id", input.ticketId)
     .maybeSingle();
   if (!ticket)
@@ -375,8 +589,15 @@ export async function finalizarInspeccion(input: {
     throw new Error("Solo el supervisor a cargo puede finalizar la inspección.");
   if (ticket.estado !== "en_revision")
     throw new Error("Esta inspección ya fue finalizada.");
+  if (!ticket.tipo_inspeccion)
+    throw new Error("Falta el tipo de inspección del ticket.");
 
-  const estado = await cerrarRevision(supabase, input.ticketId, 1);
+  const estado = await cerrarRevision(
+    supabase,
+    input.ticketId,
+    1,
+    ticket.tipo_inspeccion,
+  );
 
   const { error: eUpd } = await supabase
     .from("tickets")
@@ -399,8 +620,11 @@ export async function finalizarInspeccion(input: {
  * la puede tomar CUALQUIER supervisor, no solo el que creó el ticket. Pasa el
  * ticket a `en_revision` con `revision_actual += 1`, deja lista la fila de
  * `ticket_revisiones` de la nueva revisión (con `supervisor_id` = quien hace
- * ESTA revisión) y siembra sus 18 respuestas. Idempotente si el mismo supervisor
+ * ESTA revisión) y siembra sus respuestas. Idempotente si el mismo supervisor
  * reingresa a la revisión en curso.
+ *
+ * El tipo de inspección NO se vuelve a pedir — es fijo desde que se creó el
+ * ticket (`tickets.tipo_inspeccion`), se re-lee de ahí.
  */
 export async function iniciarReinspeccion(input: {
   ticketId: string;
@@ -419,10 +643,12 @@ export async function iniciarReinspeccion(input: {
 
   const { data: ticket } = await supabase
     .from("tickets")
-    .select("estado, revision_actual, supervisor_id")
+    .select("estado, revision_actual, supervisor_id, tipo_inspeccion")
     .eq("id", input.ticketId)
     .maybeSingle();
   if (!ticket) throw new Error("Ticket no encontrado.");
+  if (!ticket.tipo_inspeccion)
+    throw new Error("Falta el tipo de inspección del ticket.");
 
   // Puede venir desde "finalizada_con_observaciones" (o el legado
   // "en_reparacion_de_observaciones") en el primer ingreso, o ya estar
@@ -462,6 +688,7 @@ export async function iniciarReinspeccion(input: {
     supervisorId: perfil.id,
     conductor,
     fechaVencimientoISO: input.fechaVencimientoISO,
+    tipoInspeccion: ticket.tipo_inspeccion,
   });
 
   if (!yaEnCurso) {
@@ -501,12 +728,14 @@ export async function finalizarReinspeccion(input: {
 
   const { data: ticket } = await supabase
     .from("tickets")
-    .select("estado, supervisor_id")
+    .select("estado, supervisor_id, tipo_inspeccion")
     .eq("id", input.ticketId)
     .maybeSingle();
   if (!ticket) throw new Error("Ticket no encontrado.");
   if (ticket.estado !== "en_revision")
     throw new Error("Esta re-inspección ya fue finalizada.");
+  if (!ticket.tipo_inspeccion)
+    throw new Error("Falta el tipo de inspección del ticket.");
 
   const { data: rev } = await supabase
     .from("ticket_revisiones")
@@ -525,6 +754,7 @@ export async function finalizarReinspeccion(input: {
     supabase,
     input.ticketId,
     input.revisionNumero,
+    ticket.tipo_inspeccion,
   );
 
   const cambios = {
