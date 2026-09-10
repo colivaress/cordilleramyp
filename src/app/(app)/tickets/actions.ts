@@ -168,9 +168,10 @@ async function prepararRevision(
  * respuestas: solo cierra sobre lo ya guardado.
  *
  * Validación por modo de ítem: modo 'estado' exige observación+foto si quedó
- * no_conforme (como siempre); modo 'fotos' exige 2 fotos en
- * ticket_checklist_fotos (no en foto_url — esa columna solo espeja la
- * primera, ver guardarFotoChecklistItem).
+ * no_conforme (como siempre); modo 'fotos' exige checklist_items.fotos_requeridas
+ * fotos en ticket_checklist_fotos (no en foto_url — esa columna solo espeja
+ * la primera, ver guardarFotoChecklistItem) — la cantidad varía por ítem,
+ * no es una constante.
  *
  * Estado resultante: si el checklist de este tipo es TODO modo 'fotos' (hoy,
  * únicamente exportacion_chimolsa — §7 de la fase), lo define si hay texto en
@@ -199,7 +200,7 @@ async function cerrarRevision(
 
   const { data: items } = await supabase
     .from("checklist_items")
-    .select("key, modo")
+    .select("key, modo, fotos_requeridas")
     .eq("tipo", tipoInspeccion);
   const { data: respuestas } = await supabase
     .from("ticket_checklist_respuestas")
@@ -209,6 +210,9 @@ async function cerrarRevision(
 
   const claves = (items ?? []).map((i) => i.key);
   const modoPorKey = new Map((items ?? []).map((i) => [i.key, i.modo]));
+  const fotosRequeridasPorKey = new Map(
+    (items ?? []).map((i) => [i.key, i.fotos_requeridas ?? 0]),
+  );
   const guardadas = respuestas ?? [];
   const respondidas = new Set(guardadas.map((r) => r.item_key));
   const faltan = claves.filter((k) => !respondidas.has(k));
@@ -239,9 +243,10 @@ async function cerrarRevision(
   for (const r of guardadas) {
     const modo = modoPorKey.get(r.item_key);
     if (modo === "fotos") {
-      if ((cantidadFotosPorRespuesta.get(r.id) ?? 0) < 2)
+      const requeridas = fotosRequeridasPorKey.get(r.item_key) ?? 0;
+      if ((cantidadFotosPorRespuesta.get(r.id) ?? 0) < requeridas)
         throw new Error(
-          "Faltan fotos en algún elemento del checklist (se requieren 2 por ítem).",
+          "Faltan fotos en algún elemento del checklist.",
         );
     } else if (r.estado === "no_conforme" && (!r.observacion?.trim() || !r.foto_url)) {
       throw new Error("Hay un elemento no conforme sin observación o sin foto.");
@@ -443,7 +448,10 @@ export async function guardarFotoChecklistItem(input: {
   ticketId: string;
   revisionNumero: number;
   itemKey: string;
-  orden: 1 | 2;
+  /** Explícito siempre (1..checklist_items.fotos_requeridas del ítem) — el
+   *  default de la columna (1) no alcanza para la segunda foto y siguientes,
+   *  por el unique(respuesta_id, orden). */
+  orden: number;
   /** null = quitar esa foto. */
   path: string | null;
 }): Promise<{ guardado: boolean }> {

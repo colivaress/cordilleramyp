@@ -41,12 +41,15 @@ export type RespuestaEditable = {
   subiendoFoto: boolean;
   // ¿la fila ya está persistida en ticket_checklist_respuestas?
   guardado: boolean;
-  // Solo modo 'fotos': dos fotos obligatorias por ítem (orden 1 y 2 en
-  // ticket_checklist_fotos — índice 0 = orden 1, índice 1 = orden 2).
-  fotos: [FotoSlot, FotoSlot];
+  // Solo modo 'fotos': una fila por foto obligatoria del ítem (cantidad =
+  // checklist_items.fotos_requeridas — ya no es una constante fija de 2;
+  // varía por ítem). Índice 0 = orden 1 en ticket_checklist_fotos, índice 1
+  // = orden 2, etc.
+  fotos: FotoSlot[];
 };
 
-export const respuestaVacia = (): RespuestaEditable => ({
+/** `cantidadFotos` = checklist_items.fotos_requeridas del ítem (0 si modo 'estado'). */
+export const respuestaVacia = (cantidadFotos = 0): RespuestaEditable => ({
   estado: "conforme",
   observacion: "",
   fotoPath: null,
@@ -54,7 +57,7 @@ export const respuestaVacia = (): RespuestaEditable => ({
   fotoPreviewUrl: null,
   subiendoFoto: false,
   guardado: false,
-  fotos: [slotVacio(), slotVacio()],
+  fotos: Array.from({ length: cantidadFotos }, slotVacio),
 });
 
 const OPCIONES: { value: ItemEstado; label: string }[] = [
@@ -85,10 +88,13 @@ export function ChecklistItemRow({
   onFoto: (file: File | null) => void;
   onQuitarFoto: () => void;
   /** Solo se usa (y solo hace falta pasarlo) para ítems de modo 'fotos'. */
-  onFotoModo?: (orden: 1 | 2, file: File | null) => void;
-  onQuitarFotoModo?: (orden: 1 | 2) => void;
+  onFotoModo?: (orden: number, file: File | null) => void;
+  onQuitarFotoModo?: (orden: number) => void;
 }) {
   if (item.modo === "fotos") {
+    // checklist_items.fotos_requeridas manda la cantidad de espacios de
+    // carga — un ítem de una sola foto muestra un solo espacio, no dos con
+    // uno opcional.
     return (
       <div className="grid gap-3 border-b py-3 last:border-b-0">
         <div className="flex flex-wrap items-center gap-2">
@@ -97,17 +103,26 @@ export function ChecklistItemRow({
           </span>
           <span className="text-sm font-medium">{item.nombre}</span>
           {/* Sin InfoPopover: los ítems de modo 'fotos' no tienen exigencia
-              (piden solo una foto, no una evaluación contra un criterio). */}
+              (piden solo foto(s), no una evaluación contra un criterio). */}
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {([0, 1] as const).map((idx) => (
+        <div
+          className={cn(
+            "grid gap-3",
+            valor.fotos.length > 1 && "sm:grid-cols-2",
+          )}
+        >
+          {valor.fotos.map((slot, idx) => (
             <FotoSlotInput
               key={idx}
-              label={`Foto ${idx + 1} (obligatoria)`}
-              slot={valor.fotos[idx]}
+              label={
+                valor.fotos.length > 1
+                  ? `Foto ${idx + 1} (obligatoria)`
+                  : "Foto (obligatoria)"
+              }
+              slot={slot}
               disabled={!onFotoModo}
-              onFoto={(f) => onFotoModo?.((idx + 1) as 1 | 2, f)}
-              onQuitar={() => onQuitarFotoModo?.((idx + 1) as 1 | 2)}
+              onFoto={(f) => onFotoModo?.(idx + 1, f)}
+              onQuitar={() => onQuitarFotoModo?.(idx + 1)}
               alt={`${item.nombre} — foto ${idx + 1}`}
             />
           ))}
