@@ -107,6 +107,15 @@ function diasVencimientoPorTipo(tipo: string): number {
   return tipo === "control_salida" ? 1 : 10;
 }
 
+/**
+ * Fase "tipos de inspección" — cantidad de fotos obligatorias de un ítem de
+ * modo 'fotos', leída de checklist_items.fotos_requeridas — ya no es una
+ * constante del código (algunos ítems piden 1, otros 2).
+ */
+function cantidadFotosItem(item: ChecklistItem): number {
+  return item.modo === "fotos" ? item.fotos_requeridas ?? 0 : 0;
+}
+
 async function subirArchivo(
   bucket: string,
   path: string,
@@ -259,7 +268,10 @@ export function InspeccionForm({
   );
 
   const [respuestas, setRespuestas] = useState<Record<string, RespuestaEditable>>(
-    () => Object.fromEntries(itemsDelTipo.map((i) => [i.key, respuestaVacia()])),
+    () =>
+      Object.fromEntries(
+        itemsDelTipo.map((i) => [i.key, respuestaVacia(cantidadFotosItem(i))]),
+      ),
   );
   // Espejo para leer el estado más reciente dentro de callbacks async.
   const respuestasRef = useRef(respuestas);
@@ -283,7 +295,9 @@ export function InspeccionForm({
           .sort((a, b) => a.orden - b.orden)
       : [];
     setRespuestas(
-      Object.fromEntries(nuevosItems.map((i) => [i.key, respuestaVacia()])),
+      Object.fromEntries(
+        nuevosItems.map((i) => [i.key, respuestaVacia(cantidadFotosItem(i))]),
+      ),
     );
     setObservacionGeneral("");
     if (nuevoTipo) {
@@ -347,11 +361,11 @@ export function InspeccionForm({
   );
 
   const patchFotoSlot = useCallback(
-    (key: string, orden: 1 | 2, patch: Partial<FotoSlot>) => {
+    (key: string, orden: number, patch: Partial<FotoSlot>) => {
       setRespuestas((prev) => {
         const actual = prev[key];
         if (!actual) return prev;
-        const fotos = [...actual.fotos] as [FotoSlot, FotoSlot];
+        const fotos = [...actual.fotos];
         fotos[orden - 1] = { ...fotos[orden - 1], ...patch };
         return { ...prev, [key]: { ...actual, fotos } };
       });
@@ -597,8 +611,9 @@ export function InspeccionForm({
 
   // Fase "tipos de inspección" — parte 2/4. Fotos de un ítem modo 'fotos':
   // misma lógica de subida inmediata que onFotoItem, pero contra
-  // ticket_checklist_fotos (orden 1 o 2), no contra foto_url directamente.
-  async function onFotoModoItem(key: string, orden: 1 | 2, file: File | null) {
+  // ticket_checklist_fotos (orden explícito, de 1 a fotos_requeridas del
+  // ítem), no contra foto_url directamente.
+  async function onFotoModoItem(key: string, orden: number, file: File | null) {
     if (!file) return;
     if (file.type && !file.type.startsWith("image/")) {
       toast.error("El archivo debe ser una imagen (JPG, PNG, WEBP o HEIC).");
@@ -633,7 +648,7 @@ export function InspeccionForm({
     }
   }
 
-  async function onQuitarFotoModoItem(key: string, orden: 1 | 2) {
+  async function onQuitarFotoModoItem(key: string, orden: number) {
     const slot = respuestasRef.current[key]?.fotos[orden - 1];
     if (!slot) return;
     if (slot.previewUrl) URL.revokeObjectURL(slot.previewUrl);
@@ -682,8 +697,9 @@ export function InspeccionForm({
       const r = respuestas[item.key];
       if (!r) return `Falta completar "${item.nombre}".`;
       if (item.modo === "fotos") {
-        if (!r.fotos[0].path || !r.fotos[1].path)
-          return `Faltan fotos en "${item.nombre}" (se requieren 2).`;
+        const requeridas = cantidadFotosItem(item);
+        if (r.fotos.length < requeridas || r.fotos.some((f) => !f.path))
+          return `Faltan fotos en "${item.nombre}" (se requiere${requeridas === 1 ? "" : "n"} ${requeridas}).`;
       } else if (r.estado === "no_conforme") {
         if (!r.observacion.trim())
           return `Falta la observación en "${item.nombre}".`;
