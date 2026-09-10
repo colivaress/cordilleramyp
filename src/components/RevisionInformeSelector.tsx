@@ -8,7 +8,7 @@ export type OpcionRevision = { valor: string; etiqueta: string };
  * §4 — selector para elegir qué revisión muestra el informe cuando el ticket
  * tiene 2 o más. Navega por el query param `?rev=` (número puntual o "todas");
  * la página se re-renderiza en el servidor con esa selección, y el PDF de
- * "Enviar por correo" / "Enviar por WhatsApp" usa el mismo valor.
+ * "Enviar por correo" usa el mismo valor.
  */
 export function RevisionInformeSelector({
   opciones,
