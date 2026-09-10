@@ -165,7 +165,10 @@ async function construirRevisionPDF(
       filas.map(async (r, i) => ({
         n: i + 1,
         nombre: r.item?.nombre ?? r.item_key,
-        estado: ETIQUETA_ITEM[r.estado],
+        // r.estado es nullable desde la migración de tipos de inspección
+        // (ítems de modo "fotos"); ningún ítem de ese modo se usa en ningún
+        // ticket real todavía, este fallback no cambia nada hoy.
+        estado: ETIQUETA_ITEM[r.estado ?? "conforme"],
         esNoConforme: r.estado === "no_conforme",
         observacion: r.observacion,
         fotoDataUri:

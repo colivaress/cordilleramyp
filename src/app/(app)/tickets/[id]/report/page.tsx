@@ -218,7 +218,13 @@ export default async function InformePage({
             supervisorNombre={supervisorNombre}
             respuestas={respuestas
               .filter((x) => x.revision_numero === r.numero_revision)
-              .sort((a, b) => (a.item?.orden ?? 0) - (b.item?.orden ?? 0))}
+              .sort((a, b) => (a.item?.orden ?? 0) - (b.item?.orden ?? 0))
+              // estado es nullable en la base desde la migración de tipos de
+              // inspección (ítems de modo "fotos") — ningún ítem de ese modo
+              // se usa todavía en ningún ticket real, así que este fallback
+              // nunca cambia nada hoy. Se resuelve como corresponde cuando
+              // el informe soporte tipos de modo "fotos" (fase siguiente).
+              .map((x) => ({ ...x, estado: x.estado ?? "conforme" }))}
             urlFotos={urlFotos}
             urlFirmas={urlFirmas}
             conSubtitulo={modoTodas}

@@ -73,7 +73,11 @@ export function ChecklistItemRow({
           {indice.toString().padStart(2, "0")}
         </span>
         <span className="text-sm font-medium">{item.nombre}</span>
-        <InfoPopover titulo={item.nombre} exigencia={item.exigencia} />
+        {/* exigencia es nullable desde la migración de tipos de inspección
+            (ítems de modo "fotos" no tienen texto de exigencia); este
+            componente solo renderiza ítems de encarpe hoy, que siempre lo
+            tienen — el fallback no cambia nada todavía. */}
+        <InfoPopover titulo={item.nombre} exigencia={item.exigencia ?? ""} />
         {valor.guardado && (
           <span className="text-xs text-success-700">✓ Guardado</span>
         )}
