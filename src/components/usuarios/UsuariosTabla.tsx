@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { PencilIcon, UserPlusIcon } from "lucide-react";
+import { PencilIcon, UserPlusIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -61,6 +61,90 @@ const formVacio: Form = {
   tiposInspeccion: [],
 };
 
+// Rango Unicode "Combining Diacritical Marks" (lo que separa NFD de un
+// carácter acentuado, p. ej. "e" + U+0301 para "é"). Se arma con
+// String.fromCharCode en vez de escribir el escape ̀-ͯ directo en
+// el regex literal, para no depender de cómo cada editor/terminal represente
+// esos dos puntos de código al guardar el archivo.
+const DIACRITICOS = new RegExp(
+  `[${String.fromCharCode(0x0300)}-${String.fromCharCode(0x036f)}]`,
+  "g",
+);
+
+/** Quita tildes/diacríticos y normaliza mayúsculas — para comparar sin que
+ *  "jose" deje de encontrar a "José". */
+function normalizar(s: string): string {
+  return s.normalize("NFD").replace(DIACRITICOS, "").toLowerCase();
+}
+
+/** Solo los dígitos — para que el formato guardado del teléfono no importe. */
+function soloDigitos(s: string): string {
+  return s.replace(/\D+/g, "");
+}
+
+/** ¿Este término (ya normalizado) es substring del nombre de alguno de los
+ *  4 tipos? Se usa para decidir si expandir una celda "Los 4 tipos" colapsada. */
+function terminoApuntaATipo(termino: string): boolean {
+  return ORDEN_TIPOS_INSPECCION.some((c) =>
+    normalizar(ETIQUETA_TIPO_INSPECCION[c]).includes(termino),
+  );
+}
+
+/**
+ * Envuelve en <mark> las partes de `texto` que calzan con algún término de
+ * `terminos` (ya normalizados) — comparando sobre la versión normalizada de
+ * `texto` pero recortando y mostrando el texto ORIGINAL (con sus tildes),
+ * para que buscar "jose" resalte «José» tal cual está escrito. Funciona
+ * porque quitar diacríticos preserva la posición de cada carácter base
+ * (una tilde española se saca como una marca combinante aparte, nunca cambia
+ * cuántos caracteres hay antes/después).
+ */
+function resaltar(texto: string, terminos: string[]): React.ReactNode {
+  if (!texto || terminos.length === 0) return texto;
+  const normalizado = normalizar(texto);
+  const rangos: [number, number][] = [];
+  for (const t of terminos) {
+    if (!t) continue;
+    let desde = 0;
+    for (;;) {
+      const pos = normalizado.indexOf(t, desde);
+      if (pos === -1) break;
+      rangos.push([pos, pos + t.length]);
+      desde = pos + 1;
+    }
+  }
+  if (rangos.length === 0) return texto;
+  rangos.sort((a, b) => a[0] - b[0]);
+  const fusionados: [number, number][] = [];
+  for (const r of rangos) {
+    const ultimo = fusionados[fusionados.length - 1];
+    if (ultimo && r[0] <= ultimo[1]) ultimo[1] = Math.max(ultimo[1], r[1]);
+    else fusionados.push([r[0], r[1]]);
+  }
+  const partes: React.ReactNode[] = [];
+  let cursor = 0;
+  fusionados.forEach(([ini, fin], i) => {
+    if (ini > cursor) partes.push(texto.slice(cursor, ini));
+    partes.push(
+      <mark key={i} className="rounded-sm bg-warning-200 text-inherit">
+        {texto.slice(ini, fin)}
+      </mark>,
+    );
+    cursor = fin;
+  });
+  if (cursor < texto.length) partes.push(texto.slice(cursor));
+  return partes;
+}
+
+type FilaBusqueda = {
+  usuario: Personal;
+  tiposClaves: string[];
+  rolTexto: string;
+  estadoTexto: string;
+  textoGeneral: string;
+  telefonoDigitos: string;
+};
+
 export function UsuariosTabla({
   usuarios,
   perfilId,
@@ -75,6 +159,7 @@ export function UsuariosTabla({
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [form, setForm] = useState<Form>(formVacio);
   const [pendiente, startTransition] = useTransition();
+  const [busqueda, setBusqueda] = useState("");
 
   const telObligatorio = form.rol === "supervisor";
   const formValido =
@@ -155,125 +240,228 @@ export function UsuariosTabla({
     });
   }
 
-  const filas = useMemo(
-    () =>
-      [...usuarios].sort((a, b) =>
-        `${a.nombre} ${a.apellido ?? ""}`.localeCompare(
-          `${b.nombre} ${b.apellido ?? ""}`,
-          "es",
-        ),
+  // Tipos de inspección: se arma el texto de búsqueda/estado una sola vez
+  // por usuario (no por render de fila) — tiposPorSupervisor ya viene
+  // calculado con UNA sola consulta para todos los usuarios (usuarios/page.tsx).
+  const filasBusqueda = useMemo<FilaBusqueda[]>(() => {
+    const ordenados = [...usuarios].sort((a, b) =>
+      `${a.nombre} ${a.apellido ?? ""}`.localeCompare(
+        `${b.nombre} ${b.apellido ?? ""}`,
+        "es",
       ),
-    [usuarios],
+    );
+    return ordenados.map((u) => {
+      const tiposClaves = u.rol === "supervisor" ? (tiposPorSupervisor[u.id] ?? []) : [];
+      const rolTexto = u.rol === "administrador" ? "Administrador" : "Supervisor";
+      const estadoTexto = !u.activo
+        ? "Inactivo"
+        : !u.user_id
+          ? "Invitación pendiente"
+          : "Activo";
+      const tiposTexto =
+        u.rol === "administrador"
+          ? "Todos por ser administrador"
+          : tiposClaves.length === 0
+            ? "Sin tipos"
+            : tiposClaves.length === 4
+              ? `Los 4 tipos ${ORDEN_TIPOS_INSPECCION.map((c) => ETIQUETA_TIPO_INSPECCION[c]).join(" ")}`
+              : tiposClaves.map((c) => ETIQUETA_TIPO_INSPECCION[c]).join(" ");
+      const textoGeneral = normalizar(
+        [u.nombre, u.apellido ?? "", u.email ?? "", u.telefono ?? "", rolTexto, estadoTexto, tiposTexto].join(" "),
+      );
+      return {
+        usuario: u,
+        tiposClaves,
+        rolTexto,
+        estadoTexto,
+        textoGeneral,
+        telefonoDigitos: soloDigitos(u.telefono ?? ""),
+      };
+    });
+  }, [usuarios, tiposPorSupervisor]);
+
+  // Búsqueda en cliente: varios términos, deben calzar TODOS (en cualquiera
+  // de los 6 campos), sin tildes/mayúsculas, sin ir a la base — con una
+  // docena de usuarios no hay razón para eso.
+  const terminos = useMemo(
+    () => normalizar(busqueda).split(/\s+/).map((t) => t.trim()).filter(Boolean),
+    [busqueda],
+  );
+
+  const filtradas = useMemo(() => {
+    if (terminos.length === 0) return filasBusqueda;
+    return filasBusqueda.filter((f) =>
+      terminos.every((t) => {
+        if (f.textoGeneral.includes(t)) return true;
+        const digitos = soloDigitos(t);
+        return digitos.length > 0 && f.telefonoDigitos.includes(digitos);
+      }),
+    );
+  }, [filasBusqueda, terminos]);
+
+  // Si algún término apunta a un tipo puntual, una celda "Los 4 tipos"
+  // colapsada se expande a sus 4 etiquetas — si no, no se ve por qué esa
+  // fila calzó la búsqueda.
+  const hayTerminoDeTipo = useMemo(
+    () => terminos.some(terminoApuntaATipo),
+    [terminos],
   );
 
   return (
     <div className="grid gap-4">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="grid gap-1">
+          <div className="relative w-full sm:w-[300px]">
+            <Input
+              id="buscador-usuarios"
+              type="text"
+              inputMode="search"
+              placeholder="Buscar por nombre, correo, teléfono, rol, tipos o estado…"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setBusqueda("");
+              }}
+              className="pr-8"
+            />
+            {busqueda && (
+              <button
+                type="button"
+                aria-label="Limpiar búsqueda"
+                onClick={() => setBusqueda("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <XIcon className="size-4" />
+              </button>
+            )}
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {busqueda
+              ? `Mostrando ${filtradas.length} de ${filasBusqueda.length} usuarios`
+              : `${filasBusqueda.length} usuarios`}
+          </span>
+        </div>
         <Button type="button" onClick={abrirAgregar}>
           <UserPlusIcon />
           Agregar usuario
         </Button>
       </div>
 
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Correo</TableHead>
-              <TableHead>Teléfono</TableHead>
-              <TableHead>Rol</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead className="text-right">Acciones</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filas.map((u) => {
-              const pendienteInvitacion = !u.user_id;
-              const esYo = u.id === perfilId;
-              return (
-                <TableRow key={u.id}>
-                  <TableCell className="font-medium">
-                    {u.nombre} {u.apellido ?? ""}
-                  </TableCell>
-                  <TableCell>{u.email ?? "—"}</TableCell>
-                  <TableCell>{u.telefono ?? "—"}</TableCell>
-                  <TableCell>
-                    <Badge variant={u.rol === "administrador" ? "default" : "secondary"}>
-                      {u.rol === "administrador" ? "Administrador" : "Supervisor"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {!u.activo ? (
-                      <Badge className="bg-danger-100 text-danger-700">
-                        Inactivo
+      {filtradas.length === 0 ? (
+        <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+          No se encontraron usuarios para «{busqueda}».
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Nombre</TableHead>
+                <TableHead>Correo</TableHead>
+                <TableHead>Teléfono</TableHead>
+                <TableHead>Rol</TableHead>
+                <TableHead>Tipos de inspección</TableHead>
+                <TableHead>Estado</TableHead>
+                <TableHead className="text-right">Acciones</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtradas.map((f) => {
+                const u = f.usuario;
+                const pendienteInvitacion = !u.user_id;
+                const esYo = u.id === perfilId;
+                return (
+                  <TableRow key={u.id}>
+                    <TableCell className="font-medium">
+                      {resaltar(`${u.nombre} ${u.apellido ?? ""}`.trim(), terminos)}
+                    </TableCell>
+                    <TableCell>{resaltar(u.email ?? "—", terminos)}</TableCell>
+                    <TableCell>{resaltar(u.telefono ?? "—", terminos)}</TableCell>
+                    <TableCell>
+                      <Badge variant={u.rol === "administrador" ? "default" : "secondary"}>
+                        {resaltar(f.rolTexto, terminos)}
                       </Badge>
-                    ) : pendienteInvitacion ? (
-                      <Badge className="bg-warning-100 text-warning-700">
-                        Invitación pendiente
-                      </Badge>
-                    ) : (
-                      <Badge className="bg-success-100 text-success-700">
-                        Activo
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="xs"
-                        disabled={pendiente}
-                        onClick={() => abrirEditar(u)}
-                      >
-                        <PencilIcon />
-                        Editar
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="xs"
-                        disabled={pendiente || (esYo && u.activo)}
-                        title={
-                          esYo && u.activo
-                            ? "No puedes desactivar tu propia cuenta"
-                            : undefined
-                        }
-                        onClick={() =>
-                          accion(
-                            () =>
-                              cambiarActivo({ id: u.id, activo: !u.activo }),
-                            u.activo ? "Usuario desactivado." : "Usuario activado.",
-                          )
-                        }
-                      >
-                        {u.activo ? "Desactivar" : "Activar"}
-                      </Button>
-                      {pendienteInvitacion && (
+                    </TableCell>
+                    <TableCell>
+                      <CeldaTipos
+                        rol={u.rol}
+                        tiposClaves={f.tiposClaves}
+                        terminos={terminos}
+                        expandirLos4={hayTerminoDeTipo}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      {!u.activo ? (
+                        <Badge className="bg-danger-100 text-danger-700">
+                          {resaltar(f.estadoTexto, terminos)}
+                        </Badge>
+                      ) : pendienteInvitacion ? (
+                        <Badge className="bg-warning-100 text-warning-700">
+                          {resaltar(f.estadoTexto, terminos)}
+                        </Badge>
+                      ) : (
+                        <Badge className="bg-success-100 text-success-700">
+                          {resaltar(f.estadoTexto, terminos)}
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
                         <Button
                           type="button"
                           variant="outline"
                           size="xs"
                           disabled={pendiente}
+                          onClick={() => abrirEditar(u)}
+                        >
+                          <PencilIcon />
+                          Editar
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="xs"
+                          disabled={pendiente || (esYo && u.activo)}
+                          title={
+                            esYo && u.activo
+                              ? "No puedes desactivar tu propia cuenta"
+                              : undefined
+                          }
                           onClick={() =>
                             accion(
-                              () => reenviarInvitacion({ id: u.id }),
-                              "Invitación reenviada.",
+                              () =>
+                                cambiarActivo({ id: u.id, activo: !u.activo }),
+                              u.activo ? "Usuario desactivado." : "Usuario activado.",
                             )
                           }
                         >
-                          Reenviar invitación
+                          {u.activo ? "Desactivar" : "Activar"}
                         </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+                        {pendienteInvitacion && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="xs"
+                            disabled={pendiente}
+                            onClick={() =>
+                              accion(
+                                () => reenviarInvitacion({ id: u.id }),
+                                "Invitación reenviada.",
+                              )
+                            }
+                          >
+                            Reenviar invitación
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
       <Dialog open={abierto} onOpenChange={setAbierto}>
         <DialogContent>
@@ -412,6 +600,63 @@ export function UsuariosTabla({
           </form>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * Celda "Tipos de inspección" — 4 formas visuales, a propósito distintas:
+ *  - Administrador: texto gris apagado, sin etiquetas — no es una asignación
+ *    suya, es consecuencia del rol. Si se viera igual que una asignación
+ *    real, alguien intentaría "editarla".
+ *  - Supervisor con los 4: UNA etiqueta gris colapsada — tras el backfill de
+ *    la parte 4/4 este es el caso más común; repetir las 4 en cada fila
+ *    ensancha la tabla sin decir nada. Se expande solo si la búsqueda apunta
+ *    a un tipo puntual (si no, no se ve por qué calzó la fila).
+ *  - Supervisor con 1 a 3: una etiqueta azul por tipo, nombre completo.
+ *  - Supervisor con ninguno: etiqueta ROJA "Sin tipos" — este supervisor está
+ *    BLOQUEADO (no puede realizar ni ver ninguna inspección). Es el error de
+ *    configuración que más duele y hasta ahora era invisible desde la lista.
+ */
+function CeldaTipos({
+  rol,
+  tiposClaves,
+  terminos,
+  expandirLos4,
+}: {
+  rol: RolUsuario;
+  tiposClaves: string[];
+  terminos: string[];
+  expandirLos4: boolean;
+}) {
+  if (rol === "administrador") {
+    return (
+      <span className="text-xs text-muted-foreground">
+        {resaltar("Todos (por ser administrador)", terminos)}
+      </span>
+    );
+  }
+  if (tiposClaves.length === 0) {
+    return (
+      <Badge className="bg-danger-100 text-danger-700">
+        {resaltar("Sin tipos", terminos)}
+      </Badge>
+    );
+  }
+  if (tiposClaves.length === 4 && !expandirLos4) {
+    return (
+      <Badge className="bg-neutral-100 text-neutral-700">
+        {resaltar("Los 4 tipos", terminos)}
+      </Badge>
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {ORDEN_TIPOS_INSPECCION.filter((c) => tiposClaves.includes(c)).map((c) => (
+        <Badge key={c} className="bg-brand-100 text-brand-700">
+          {resaltar(ETIQUETA_TIPO_INSPECCION[c], terminos)}
+        </Badge>
+      ))}
     </div>
   );
 }
