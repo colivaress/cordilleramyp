@@ -9,6 +9,7 @@ import { enviarInformePorCorreo } from "@/lib/email";
 import {
   construirAsuntoInforme,
   construirCuerpoInforme,
+  construirCuerpoInformeControlSalida,
   nombreCompleto,
 } from "@/lib/mensajes";
 
@@ -206,26 +207,56 @@ export async function POST(
   if (prep.error) return prep.error;
   const { informe, perfil } = prep;
 
-  const datosCorreo = {
+  const firmanteNombre = nombreCompleto(perfil.nombre, perfil.apellido);
+
+  const datosAsunto = {
     numeroInspeccion: informe.meta.numeroInspeccion,
     numeroRevision: informe.meta.numeroRevision,
     // §4: el asunto refleja si el PDF adjunto es una revisión o todo el historial.
     todasLasRevisiones: informe.meta.modo === "todas",
+    // Fase "tipos de inspección" §1: el título va en el asunto, no compuesto en código.
+    tituloInforme: informe.meta.tituloInforme,
     transporte: informe.meta.transporte,
     patenteCamion: informe.meta.patenteCamion,
     patenteRampla: informe.meta.patenteRampla,
     conductor: informe.meta.conductor,
-    // §4.1: firma = quien envía el correo ahora (usuario autenticado), no el
-    // dueño original del ticket.
-    firmanteNombre: nombreCompleto(perfil.nombre, perfil.apellido),
+    firmanteNombre,
     observaciones: informe.meta.observaciones,
   };
+
+  // Fase "tipos de inspección" §5: Control de Salida tiene un cuerpo de
+  // correo distinto EN LA FORMA (veredicto primero, después identificación,
+  // recién después los datos del camión) — lo abre un guardia de portería en
+  // el celular para autorizar o rechazar la salida. Los otros tres tipos
+  // conservan el cuerpo de siempre.
+  const cuerpoHtml =
+    informe.meta.tipoInspeccion === "control_salida"
+      ? construirCuerpoInformeControlSalida({
+          numeroInspeccion: informe.meta.numeroInspeccion,
+          fechaInspeccion: informe.meta.fechaInspeccion,
+          aprobado: informe.meta.estadoResultante === "finalizada_sin_observaciones",
+          transporte: informe.meta.transporte,
+          patenteCamion: informe.meta.patenteCamion,
+          patenteRampla: informe.meta.patenteRampla,
+          conductor: informe.meta.conductor,
+          firmanteNombre,
+          observaciones: informe.meta.observaciones,
+        })
+      : construirCuerpoInforme({
+          ...datosAsunto,
+          // §4/§7: solo los tipos 100% modo 'fotos' (hoy, Exportación
+          // Chimolsa) usan la observación general en vez de la lista de
+          // no_conformes — para los demás, queda `undefined` a propósito.
+          observacionGeneral: informe.meta.esSoloFotos
+            ? informe.meta.observacionGeneral
+            : undefined,
+        });
 
   try {
     await enviarInformePorCorreo({
       destinatarios,
-      asunto: construirAsuntoInforme(datosCorreo),
-      cuerpoHtml: construirCuerpoInforme(datosCorreo),
+      asunto: construirAsuntoInforme(datosAsunto),
+      cuerpoHtml,
       pdf: informe.pdf,
       nombreArchivo: nombreArchivoInforme(informe.meta),
     });
@@ -247,7 +278,7 @@ export async function POST(
       ticket_id: id,
       tipo: "email" as const,
       destinatario: email,
-      contenido: construirAsuntoInforme(datosCorreo),
+      contenido: construirAsuntoInforme(datosAsunto),
     })),
   );
 
