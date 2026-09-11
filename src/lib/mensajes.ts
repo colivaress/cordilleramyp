@@ -31,13 +31,18 @@ export type DatosInforme = {
   /** Ítems no_conforme de la revisión, en orden de checklist. */
   observaciones: { observacion: string | null }[];
   /**
-   * Fase "tipos de inspección" §4/§7 — SOLO presente (no `undefined`) cuando
-   * el checklist de este tipo es 100% modo 'fotos' (hoy, Exportación
-   * Chimolsa): en ese caso `observaciones` arriba está siempre vacío (esos
+   * ¿El checklist de este tipo es 100% modo 'fotos' (hoy, Exportación
+   * Chimolsa)? En ese caso `observaciones` arriba está siempre vacío (esos
    * ítems nunca son no_conforme) y NO significa "sin observaciones" — el
-   * cuerpo debe mostrar este texto en su lugar, no la lista de hallazgos.
+   * cuerpo omite por completo el bloque de hallazgos por ítem, que no aplica.
    */
-  observacionGeneral?: string | null;
+  esSoloFotos: boolean;
+  /**
+   * Observación general de la revisión — común a los 4 tipos, distinta de
+   * `observaciones` (por ítem). Se muestra bajo su propio encabezado,
+   * siempre, en todos los tipos; se omite del todo si viene vacía.
+   */
+  observacionGeneral: string | null;
 };
 
 /** Cargo fijo para todos los supervisores (§4.1), no se guarda en BD. */
@@ -109,23 +114,25 @@ export function construirCuerpoInforme(d: DatosInforme): string {
       valor,
     )}</td></tr>`;
 
-  // Fase "tipos de inspección" §4/§7: un checklist 100% modo 'fotos' (hoy,
-  // Exportación Chimolsa) no tiene ítems no_conforme — `d.observaciones`
-  // siempre viene vacío ahí y NO significa "sin observaciones". Cuando
-  // `observacionGeneral` viene definida (aunque sea null/""), se usa esa en
-  // vez de la lista de hallazgos.
-  const seccionObservaciones =
-    d.observacionGeneral !== undefined
-      ? d.observacionGeneral && d.observacionGeneral.trim()
-        ? `<p style="margin: 0 0 8px;">Tras la revisión, se registró la siguiente observación:</p>
-    <p style="margin: 0 0 20px;">${esc(d.observacionGeneral.trim())}</p>`
-        : `<p style="margin: 0 0 20px;">Tras la revisión, no se registraron observaciones.</p>`
-      : obs.length > 0
-        ? `<p style="margin: 0 0 8px;">Tras la revisión, se detectó el siguiente hallazgo en las observaciones:</p>
+  // Bloque de hallazgos POR ÍTEM. Un checklist 100% modo 'fotos' (hoy,
+  // Exportación Chimolsa) no tiene el concepto de no_conforme — `d.observaciones`
+  // siempre viene vacío ahí, y no significa "sin observaciones": el bloque se
+  // omite por completo en vez de mostrarlo vacío.
+  const seccionHallazgos = d.esSoloFotos
+    ? ""
+    : obs.length > 0
+      ? `<p style="margin: 0 0 8px;">Tras la revisión, se detectó el siguiente hallazgo en las observaciones:</p>
     <ol style="margin: 0 0 20px; padding-left: 20px;">
       ${obs.map((t) => `<li>${esc(t)}</li>`).join("\n      ")}
     </ol>`
-        : `<p style="margin: 0 0 20px;">Tras la revisión, no se detectaron observaciones. El camión cumple con todas las exigencias del Check List.</p>`;
+      : `<p style="margin: 0 0 20px;">Tras la revisión, no se detectaron observaciones. El camión cumple con todas las exigencias del Check List.</p>`;
+
+  // Observación general — nota libre, común a los 4 tipos, aparte de los
+  // hallazgos por ítem. Encabezado propio; se omite del todo si está vacía.
+  const seccionObservacionGeneral = d.observacionGeneral?.trim()
+    ? `<p style="margin: 0 0 4px; font-weight: bold;">Observación general:</p>
+    <p style="margin: 0 0 20px;">${esc(d.observacionGeneral.trim())}</p>`
+    : "";
 
   return `<div lang="es" style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
     <p style="margin: 0 0 16px;">Estimados,</p>
@@ -139,7 +146,8 @@ export function construirCuerpoInforme(d: DatosInforme): string {
       ${fila("Conductor", d.conductor)}
     </table>
 
-    ${seccionObservaciones}
+    ${seccionHallazgos}
+    ${seccionObservacionGeneral}
 
     <p style="margin: 0 0 20px;">Para mayor respaldo, se adjunta la lista de chequeo y el registro fotográfico que ilustra la condición actual del vehículo.</p>
 
@@ -168,6 +176,8 @@ export type DatosInformeControlSalida = {
   conductor: string;
   firmanteNombre: string;
   observaciones: { observacion: string | null }[];
+  /** Observación general de la revisión — ver DatosInforme.observacionGeneral. */
+  observacionGeneral: string | null;
 };
 
 /**
@@ -218,6 +228,13 @@ export function construirCuerpoInformeControlSalida(
     </ol>`
       : "";
 
+  // Observación general — nota libre, aparte de las observaciones por ítem
+  // de arriba. Encabezado propio; se omite del todo si está vacía.
+  const seccionObservacionGeneral = d.observacionGeneral?.trim()
+    ? `<p style="margin: 16px 0 4px; font-weight: bold;">Observación general:</p>
+    <p style="margin: 0 0 16px;">${esc(d.observacionGeneral.trim())}</p>`
+    : "";
+
   return `<div lang="es" style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 480px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin:0 0 16px 0;">
       <tr><td align="center" bgcolor="${veredicto.bg}" style="border:1px solid ${veredicto.borde}; border-radius:6px; padding:14px;">
@@ -235,6 +252,7 @@ export function construirCuerpoInformeControlSalida(
     </table>
 
     ${seccionObservaciones}
+    ${seccionObservacionGeneral}
 
     <p style="margin: 0 0 12px; font-size: 12px; color: #64748b;">Informe de Inspección Control de Salida — ${esc(d.firmanteNombre)}</p>
 

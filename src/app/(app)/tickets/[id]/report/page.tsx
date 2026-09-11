@@ -310,6 +310,7 @@ type RevisionRow = {
   fecha_vencimiento: string | null;
   firma_conductor_url: string | null;
   firma_fiscalizador_url: string | null;
+  observacion_general: string | null;
 };
 
 function BloqueRevision({
@@ -346,10 +347,6 @@ function BloqueRevision({
     tipoInspeccion === "control_salida" &&
     !esSoloFotos &&
     !itemsEstado.some((r) => r.estado === "no_conforme");
-
-  const observacionGeneral =
-    respuestas.find((r) => r.item?.modo === "fotos" && r.observacion)
-      ?.observacion ?? null;
 
   return (
     <section className="mb-8 last:mb-0">
@@ -399,12 +396,6 @@ function BloqueRevision({
               </div>
             );
           })}
-          <div>
-            <h4 className="mb-1 font-semibold">Observaciones</h4>
-            <p className="rounded border bg-muted/30 p-2 text-sm">
-              {observacionGeneral?.trim() || "Sin observaciones."}
-            </p>
-          </div>
         </div>
       ) : (
         <table className="w-full border-collapse text-left">
@@ -452,6 +443,17 @@ function BloqueRevision({
       {mostrarDeclaracion && (
         <div className="mt-3 rounded-lg border border-brand-200 bg-brand-50 p-3 text-sm italic">
           {DECLARACION_CONTROL_SALIDA}
+        </div>
+      )}
+
+      {/* Observación general — común a los 4 tipos, encabezado propio,
+          separada de las observaciones por ítem. Se omite si está vacía. */}
+      {revision.observacion_general?.trim() && (
+        <div className="mt-4">
+          <h4 className="mb-1 font-semibold">Observación general</h4>
+          <p className="rounded border bg-muted/30 p-2 text-sm">
+            {revision.observacion_general.trim()}
+          </p>
         </div>
       )}
 

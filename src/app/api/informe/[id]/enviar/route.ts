@@ -222,6 +222,8 @@ export async function POST(
     conductor: informe.meta.conductor,
     firmanteNombre,
     observaciones: informe.meta.observaciones,
+    esSoloFotos: informe.meta.esSoloFotos,
+    observacionGeneral: informe.meta.observacionGeneral,
   };
 
   // Fase "tipos de inspección" §5: Control de Salida tiene un cuerpo de
@@ -241,16 +243,9 @@ export async function POST(
           conductor: informe.meta.conductor,
           firmanteNombre,
           observaciones: informe.meta.observaciones,
+          observacionGeneral: informe.meta.observacionGeneral,
         })
-      : construirCuerpoInforme({
-          ...datosAsunto,
-          // §4/§7: solo los tipos 100% modo 'fotos' (hoy, Exportación
-          // Chimolsa) usan la observación general en vez de la lista de
-          // no_conformes — para los demás, queda `undefined` a propósito.
-          observacionGeneral: informe.meta.esSoloFotos
-            ? informe.meta.observacionGeneral
-            : undefined,
-        });
+      : construirCuerpoInforme(datosAsunto);
 
   try {
     await enviarInformePorCorreo({

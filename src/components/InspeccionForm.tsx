@@ -258,8 +258,11 @@ export function InspeccionForm({
   }, [items, modo, tipoSeleccionado]);
 
   // §7 de la fase: si TODO el checklist de este tipo es modo 'fotos' (hoy,
-  // solo exportacion_chimolsa), no hay Conforme/No conforme por ítem — hay
-  // una única observación general que define el estado resultante.
+  // solo exportacion_chimolsa), no hay Conforme/No conforme por ítem — la
+  // observación general (declarada más abajo, ahora común a los 4 tipos) es
+  // el único canal para señalar un problema, y por eso ahí sí define el
+  // estado resultante (ver cerrarRevision). En el resto de los tipos es solo
+  // una nota libre que no toca el estado.
   const esSoloFotos = useMemo(
     () =>
       itemsDelTipo.length > 0 &&
@@ -675,9 +678,8 @@ export function InspeccionForm({
     }
   }
 
-  // Fase "tipos de inspección" — §5/§7. Una sola observación para toda la
-  // revisión (checklists todo modo 'fotos') — se guarda debounced, igual que
-  // la observación por ítem.
+  // Observación general — una sola por revisión, para los 4 tipos. Se guarda
+  // debounced, igual que la observación por ítem.
   function onObservacionGeneral(texto: string) {
     setObservacionGeneral(texto);
     if (obsGeneralTimer.current) clearTimeout(obsGeneralTimer.current);
@@ -1018,17 +1020,7 @@ export function InspeccionForm({
                 </div>
               </div>
 
-              {esSoloFotos ? (
-                <div className="mt-4 grid gap-1.5">
-                  <Label htmlFor="observacion-general">Observaciones</Label>
-                  <Textarea
-                    id="observacion-general"
-                    value={observacionGeneral}
-                    onChange={(e) => onObservacionGeneral(e.target.value)}
-                    placeholder="Observaciones de la inspección (opcional)"
-                  />
-                </div>
-              ) : (
+              {!esSoloFotos && (
                 <p className="mt-3 text-sm text-muted-foreground">
                   {noConformes.length === 0
                     ? "Sin elementos no conformes: la revisión finalizará sin observaciones."
@@ -1039,6 +1031,28 @@ export function InspeccionForm({
                 Cada elemento se guarda apenas se marca — si algo falla al
                 finalizar, el checklist no se pierde.
               </p>
+
+              {/* Observación general — siempre visible, uno por inspección
+                  (no por ítem), opcional. Para lo que no encaja en ningún
+                  ítem del checklist: algo raro, un detalle del camión o del
+                  contenedor, una anotación para quien lea el informe
+                  después. NO es el resumen de las fallas — eso ya lo dan
+                  las observaciones por ítem (obligatorias en los
+                  no_conforme, arriba). Su efecto sobre el estado resultante
+                  es asimétrico entre tipos — ver guardarObservacionGeneral /
+                  cerrarRevision, no acá. */}
+              <div className="mt-4 grid gap-1.5">
+                <Label htmlFor="observacion-general">
+                  Observación general (opcional)
+                </Label>
+                <Textarea
+                  id="observacion-general"
+                  rows={3}
+                  value={observacionGeneral}
+                  onChange={(e) => onObservacionGeneral(e.target.value)}
+                  placeholder="Algo fuera del checklist: un detalle del camión, de la carga, una anotación para quien lea el informe. No es el resumen de las fallas."
+                />
+              </div>
             </CardContent>
           </Card>
 
