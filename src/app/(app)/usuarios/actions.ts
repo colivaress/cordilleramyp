@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireRol } from "@/lib/auth";
-import type { RolUsuario } from "@/lib/tipos";
+import { ORDEN_TIPOS_INSPECCION, type RolUsuario } from "@/lib/tipos";
 
 export type UsuarioInput = {
   nombre: string;
@@ -127,6 +127,44 @@ export async function editarUsuario(
     })
     .eq("id", input.id);
   if (error) throw new Error(`No se pudo guardar: ${error.message}`);
+
+  revalidatePath("/usuarios");
+  return { ok: true };
+}
+
+/**
+ * Fase "tipos de inspección" — parte 4/4. Reemplaza por completo el conjunto
+ * de tipos permitidos de un supervisor (borra y vuelve a insertar — la tabla
+ * es chica y esto es una acción de administrador, no un flujo de alto
+ * tráfico). `tipos = []` dejando la fila vacía es un estado VÁLIDO A
+ * PROPÓSITO — no "sin restricción": un supervisor sin ninguna fila no puede
+ * realizar ni ver NINGUNA inspección (la ausencia de permiso es ausencia de
+ * acceso, ver el comentario de la migración). Sirve para suspender a un
+ * supervisor sin desactivarle la cuenta.
+ */
+export async function actualizarTiposInspeccion(input: {
+  personalId: string;
+  tipos: string[];
+}): Promise<ResultadoUsuario> {
+  await requireRol("administrador");
+  const validos = new Set<string>(ORDEN_TIPOS_INSPECCION);
+  const tipos = [...new Set(input.tipos)].filter((t) => validos.has(t));
+
+  const supabase = await createClient();
+  const { error: errDelete } = await supabase
+    .from("personal_tipos_inspeccion")
+    .delete()
+    .eq("personal_id", input.personalId);
+  if (errDelete)
+    throw new Error(`No se pudieron actualizar los permisos: ${errDelete.message}`);
+
+  if (tipos.length > 0) {
+    const { error: errInsert } = await supabase
+      .from("personal_tipos_inspeccion")
+      .insert(tipos.map((tipo_inspeccion) => ({ personal_id: input.personalId, tipo_inspeccion })));
+    if (errInsert)
+      throw new Error(`No se pudieron guardar los permisos: ${errInsert.message}`);
+  }
 
   revalidatePath("/usuarios");
   return { ok: true };

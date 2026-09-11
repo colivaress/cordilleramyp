@@ -16,10 +16,16 @@ export default async function UsuariosPage() {
   const { perfil } = await requireRol("administrador");
   const supabase = await createClient();
 
-  const { data: usuarios } = await supabase
-    .from("personal")
-    .select("*")
-    .order("nombre");
+  // Fase "tipos de inspección" — parte 4/4: tipos permitidos por supervisor.
+  const [{ data: usuarios }, { data: permisos }] = await Promise.all([
+    supabase.from("personal").select("*").order("nombre"),
+    supabase.from("personal_tipos_inspeccion").select("personal_id, tipo_inspeccion"),
+  ]);
+
+  const tiposPorSupervisor: Record<string, string[]> = {};
+  for (const p of permisos ?? []) {
+    (tiposPorSupervisor[p.personal_id] ??= []).push(p.tipo_inspeccion);
+  }
 
   return (
     <div className="grid gap-6">
@@ -40,7 +46,11 @@ export default async function UsuariosPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <UsuariosTabla usuarios={usuarios ?? []} perfilId={perfil.id} />
+          <UsuariosTabla
+            usuarios={usuarios ?? []}
+            perfilId={perfil.id}
+            tiposPorSupervisor={tiposPorSupervisor}
+          />
         </CardContent>
       </Card>
     </div>
