@@ -1,23 +1,3 @@
-import { formatearTiempoRestante, horasRestantes } from "@/lib/vencimiento";
-
-export type FallaResumen = {
-  nombre: string;
-  observacion?: string | null;
-};
-
-type DatosVencimiento = {
-  // §2.6: identificación legible = par (Nro de Inspección, Nro de Revisión).
-  numeroInspeccion: number;
-  numeroRevision: number;
-  patenteCamion: string;
-  patenteRampla: string;
-  transporte?: string | null;
-  conductor?: string | null;
-  fallas: FallaResumen[];
-  fechaVencimiento: string | Date | null;
-  supervisorNombre?: string | null;
-};
-
 const fmtFecha = (v: string | Date | null | undefined) =>
   v
     ? new Date(v).toLocaleString("es-CL", {
@@ -25,58 +5,6 @@ const fmtFecha = (v: string | Date | null | undefined) =>
         timeStyle: "short",
       })
     : "—";
-
-/**
- * Plantilla de texto automatizada para el deep link de WhatsApp — §3 / §4.
- * Identifica al ticket por el par (Nro de Inspección, Nro de Revisión), nunca por
- * el UUID interno.
- */
-export function construirMensajeVencimiento(d: DatosVencimiento): string {
-  const horas = horasRestantes(d.fechaVencimiento);
-  const listaFallas =
-    d.fallas.length > 0
-      ? d.fallas
-          .map(
-            (f, i) =>
-              `  ${i + 1}. ${f.nombre}${
-                f.observacion ? ` — ${f.observacion}` : ""
-              }`,
-          )
-          .join("\n")
-      : "  (sin detalle de fallas)";
-
-  return [
-    "*Cordillera M&P — Alerta de vencimiento de corrección*",
-    "",
-    `N° de Inspección: ${d.numeroInspeccion}`,
-    `N° de Revisión: ${d.numeroRevision}`,
-    d.transporte ? `Transporte: ${d.transporte}` : null,
-    `Patente camión: ${d.patenteCamion}`,
-    `Patente rampla: ${d.patenteRampla}`,
-    d.conductor ? `Conductor: ${d.conductor}` : null,
-    "",
-    "Fallas pendientes de corrección:",
-    listaFallas,
-    "",
-    `Vence: ${fmtFecha(d.fechaVencimiento)} (${formatearTiempoRestante(horas)})`,
-    "",
-    "Por favor gestionar la corrección antes de la fecha límite.",
-  ]
-    .filter((l): l is string => l !== null)
-    .join("\n");
-}
-
-/** Normaliza un teléfono a solo dígitos, formato internacional para wa.me. */
-export function normalizarTelefono(telefono: string): string {
-  return telefono.replace(/\D+/g, "");
-}
-
-/** Deep link nativo de WhatsApp — §3. */
-export function enlaceWhatsApp(telefono: string, mensaje: string): string {
-  return `https://wa.me/${normalizarTelefono(telefono)}?text=${encodeURIComponent(
-    mensaje,
-  )}`;
-}
 
 export type DatosInforme = {
   /** Solo para el asunto del correo; no se repite en el cuerpo (va en el PDF). */

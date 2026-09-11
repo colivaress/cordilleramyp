@@ -8,7 +8,6 @@ import { firmarRutas } from "@/lib/storage";
 import { buttonVariants } from "@/components/ui/button";
 import { PrintButton } from "@/components/PrintButton";
 import { EmailRecipientsSelect } from "@/components/EmailRecipientsSelect";
-import { WhatsAppShareButton } from "@/components/WhatsAppShareButton";
 import { RevisionInformeSelector } from "@/components/RevisionInformeSelector";
 import { puedeReinspeccionar } from "@/lib/ticket-state-machine";
 import { ETIQUETA_ESTADO, ETIQUETA_ITEM } from "@/lib/tipos";
@@ -100,10 +99,6 @@ export default async function InformePage({
     "firmas",
     revsAMostrar.flatMap((r) => [r.firma_conductor_url, r.firma_fiscalizador_url]),
   );
-
-  const nombreArchivo = modoTodas
-    ? `informe-inspeccion-${ticket.numero_inspeccion}-todas-las-revisiones.pdf`
-    : `informe-inspeccion-${ticket.numero_inspeccion}-rev-${revSel.numero_revision}.pdf`;
 
   const supervisorNombre = ticket.supervisor?.nombre ?? "—";
 
@@ -236,14 +231,6 @@ export default async function InformePage({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm font-medium">Enviar el informe</p>
           <div className="flex flex-wrap items-center gap-3">
-            {/* §4 / §4.2: el PDF corresponde a lo seleccionado en pantalla. */}
-            <WhatsAppShareButton
-              ticketId={ticket.id}
-              rev={valorSelector}
-              transporte={ticket.transporte}
-              patenteCamion={ticket.patente_camion}
-              nombreArchivo={nombreArchivo}
-            />
             {/* §4.3: volver al listado — admin y supervisor van a /dashboard,
                 que se renderiza según el rol. */}
             <Link
@@ -269,8 +256,6 @@ export default async function InformePage({
             : `El PDF adjunto corresponde a la revisión ${revSel.numero_revision}.`}{" "}
           Por correo: se genera en el servidor y va adjunto en un solo envío
           (cuerpo HTML con el resumen de observaciones; las fotos van en el PDF).
-          Por WhatsApp: abre el panel de “Compartir” del dispositivo con el PDF
-          adjunto — funciona desde el celular.
         </p>
       </div>
     </div>
