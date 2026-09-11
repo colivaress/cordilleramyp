@@ -286,6 +286,7 @@ export type Database = {
           id: string
           nro_revision_global: number
           numero_revision: number
+          observacion_general: string | null
           supervisor_id: string | null
           ticket_id: string
         }
@@ -299,6 +300,7 @@ export type Database = {
           id?: string
           nro_revision_global?: never
           numero_revision: number
+          observacion_general?: string | null
           supervisor_id?: string | null
           ticket_id: string
         }
@@ -312,6 +314,7 @@ export type Database = {
           id?: string
           nro_revision_global?: never
           numero_revision?: number
+          observacion_general?: string | null
           supervisor_id?: string | null
           ticket_id?: string
         }

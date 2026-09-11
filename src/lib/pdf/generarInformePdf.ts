@@ -134,13 +134,19 @@ export type InformeGenerado = {
     /**
      * ¿El checklist de la revisión informada es 100% modo 'fotos' (hoy, solo
      * Exportación Chimolsa)? Derivado de los ítems, no de `tipoInspeccion` —
-     * el llamador lo usa para decidir si el correo debe mostrar
-     * `observacionGeneral` en vez de la lista de no_conformes (que en ese
-     * caso está siempre vacía y NO significa "sin observaciones").
+     * el llamador lo usa para saber si tiene sentido mostrar la lista de
+     * no_conformes (`observaciones`, abajo): en un checklist 100% 'fotos' esa
+     * lista está siempre vacía y NO significa "sin observaciones" (ahí no
+     * existe el concepto de no_conforme) — hay que omitir esa sección en vez
+     * de mostrarla vacía.
      */
     esSoloFotos: boolean;
-    /** Observación general de la revisión informada — solo tiene sentido
-     *  leerla cuando `esSoloFotos` es true. */
+    /**
+     * Observación general de la revisión informada — columna propia, común a
+     * los 4 tipos (ver guardarObservacionGeneral). Se muestra bajo su propio
+     * encabezado, separada de `observaciones`, y se omite por completo si
+     * viene vacía.
+     */
     observacionGeneral: string | null;
   };
 };
@@ -237,12 +243,9 @@ async function construirRevisionPDF(
       observacion: r.observacion,
     }));
 
-  // §5/§7 de la fase: en un checklist 100% modo 'fotos' todas las respuestas
-  // comparten la MISMA observación general (guardarObservacionGeneral la
-  // escribe en las 4 filas a la vez) — alcanza con la primera que la tenga.
-  const observacionGeneral =
-    filas.find((r) => r.item?.modo === "fotos" && r.observacion)
-      ?.observacion ?? null;
+  // Observación general de la revisión — columna propia en ticket_revisiones,
+  // común a los 4 tipos (ver guardarObservacionGeneral).
+  const observacionGeneral = rev.observacion_general;
 
   return {
     conductor,

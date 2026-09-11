@@ -48,9 +48,10 @@ export type RevisionPDF = {
   items: ItemPDF[];
   firmas: FirmasPDF;
   /**
-   * Fase "tipos de inspección" §5/§7 — solo relevante cuando TODOS los ítems
-   * de esta revisión son modo 'fotos' (hoy, Exportación Chimolsa): una única
-   * observación para toda la revisión, en vez de una por ítem.
+   * Observación general de la revisión — un campo por revisión, común a los
+   * 4 tipos, distinto de la observación por ítem. Se muestra bajo su propio
+   * encabezado ("Observación general"), separada del resto; se omite del
+   * todo si viene vacía.
    */
   observacionGeneral: string | null;
 };
@@ -307,16 +308,11 @@ function TablaChecklist({ items }: { items: ItemEstadoPDF[] }) {
 
 /**
  * Exportación Chimolsa — sin Conforme/No conforme: fotos agrupadas por ítem
- * (nombre del ítem encima, sus N fotos debajo) y, al final, la observación
- * general de la revisión (§4/§7 de la fase).
+ * (nombre del ítem encima, sus N fotos debajo). La observación general se
+ * muestra aparte, en su propia sección común a los 4 tipos — ver
+ * ObservacionGeneral más abajo.
  */
-function FotosPorItem({
-  items,
-  observacionGeneral,
-}: {
-  items: ItemFotosPDF[];
-  observacionGeneral: string | null;
-}) {
+function FotosPorItem({ items }: { items: ItemFotosPDF[] }) {
   return (
     <>
       {items.map((it) => (
@@ -335,10 +331,22 @@ function FotosPorItem({
           </View>
         </View>
       ))}
+    </>
+  );
+}
 
-      <Text style={s.seccion}>Observaciones</Text>
+/**
+ * Sección "Observación general" — común a los 4 tipos, bajo su propio
+ * encabezado y claramente separada de las observaciones por ítem (que van
+ * dentro de TablaChecklist). Se omite del todo si viene vacía.
+ */
+function ObservacionGeneral({ texto }: { texto: string | null }) {
+  if (!texto?.trim()) return null;
+  return (
+    <>
+      <Text style={s.seccion}>Observación general</Text>
       <View style={s.observacionGeneralBox}>
-        <Text>{observacionGeneral?.trim() || "Sin observaciones."}</Text>
+        <Text>{texto.trim()}</Text>
       </View>
     </>
   );
@@ -391,7 +399,6 @@ function BloqueRevision({
           items={r.items.filter(
             (it): it is ItemFotosPDF => it.modo === "fotos",
           )}
-          observacionGeneral={r.observacionGeneral}
         />
       ) : (
         <TablaChecklist items={itemsEstado} />
@@ -402,6 +409,8 @@ function BloqueRevision({
           <Text style={s.declaracionTexto}>{DECLARACION_CONTROL_SALIDA}</Text>
         </View>
       )}
+
+      <ObservacionGeneral texto={r.observacionGeneral} />
 
       <View style={s.firmasRow} wrap={false}>
         <View style={s.firmaBox}>

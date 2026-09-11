@@ -175,9 +175,19 @@ async function prepararRevision(
  *
  * Estado resultante: si el checklist de este tipo es TODO modo 'fotos' (hoy,
  * únicamente exportacion_chimolsa — §7 de la fase), lo define si hay texto en
- * la observación general (cualquier respuesta, todas comparten el mismo
- * texto — ver guardarObservacionGeneral). Si no, la regla de siempre
- * (no_conforme en algún ítem).
+ * `ticket_revisiones.observacion_general` (ver guardarObservacionGeneral). Si
+ * no, la regla de siempre (no_conforme en algún ítem).
+ *
+ * IMPORTANTE — esta asimetría es intencional, no un descuido: para los otros
+ * 3 tipos (Encarpe, Desencarpe, Control de Salida) `observacion_general` es
+ * SOLO una nota libre — nunca debe influir en el estado resultante. Si
+ * alguien "generaliza" esto para que cualquier tipo con observación general
+ * quede `finalizada_con_observaciones`, rompe la regla de negocio: un
+ * supervisor podría convertir una inspección impecable en "con
+ * observaciones" (y disparar el ciclo de alertas de vencimiento) solo por
+ * anotar algo como "el conductor llegó atrasado". Para Chimolsa, en cambio,
+ * el textarea es el ÚNICO canal para señalar un problema (no hay
+ * Conforme/No conforme por ítem), así que ahí sí debe pesar.
  */
 async function cerrarRevision(
   supabase: SupabaseServer,
@@ -187,7 +197,7 @@ async function cerrarRevision(
 ): Promise<TicketEstado> {
   const { data: rev } = await supabase
     .from("ticket_revisiones")
-    .select("id, firma_conductor_url, firma_fiscalizador_url")
+    .select("id, firma_conductor_url, firma_fiscalizador_url, observacion_general")
     .eq("ticket_id", ticketId)
     .eq("numero_revision", numeroRevision)
     .maybeSingle();
@@ -255,7 +265,7 @@ async function cerrarRevision(
 
   const esSoloFotos = claves.length > 0 && claves.every((k) => modoPorKey.get(k) === "fotos");
   const estado: TicketEstado = esSoloFotos
-    ? guardadas.some((r) => (r.observacion ?? "").trim() !== "")
+    ? (rev.observacion_general ?? "").trim() !== ""
       ? "finalizada_con_observaciones"
       : "finalizada_sin_observaciones"
     : estadoTrasChecklist(guardadas.some((r) => r.estado === "no_conforme"));
@@ -525,13 +535,19 @@ export async function guardarFotoChecklistItem(input: {
 }
 
 /**
- * Fase "tipos de inspección" — parte 2/4, §7. Para checklists TODO modo
- * 'fotos' (hoy, exportacion_chimolsa) no hay una observación por ítem — hay
- * UNA sola para toda la revisión, que además define el estado resultante al
- * cerrar (cerrarRevision). Se guarda en `ticket_checklist_respuestas.observacion`
- * de LOS 4 ítems de la revisión (reutiliza la columna existente, no agrega
- * ninguna nueva) — el llamador (InspeccionForm) solo invoca esto cuando el
- * checklist actual es todo modo 'fotos'.
+ * Observación general de la revisión — un textarea siempre visible, uno por
+ * inspección (no por ítem), opcional, para los 4 tipos de inspección. Vive en
+ * `ticket_revisiones.observacion_general`, una columna propia por revisión
+ * (nace vacía en cada revisión nueva, igual que las respuestas por ítem — ver
+ * prepararRevision). Se guarda debounced apenas se escribe, igual que el
+ * resto de §2.8.
+ *
+ * NO confundir con la observación por ítem (`ticket_checklist_respuestas.observacion`,
+ * solo visible cuando un ítem queda `no_conforme`) — son campos y propósitos
+ * distintos. Este es para lo que no encaja en ningún ítem del checklist.
+ *
+ * Su efecto sobre el estado resultante de la revisión es asimétrico entre
+ * tipos — ver el comentario en cerrarRevision, no lo repitas acá.
  */
 export async function guardarObservacionGeneral(input: {
   ticketId: string;
@@ -548,10 +564,10 @@ export async function guardarObservacionGeneral(input: {
   );
 
   const { error } = await supabase
-    .from("ticket_checklist_respuestas")
-    .update({ observacion: input.texto.trim() || null })
+    .from("ticket_revisiones")
+    .update({ observacion_general: input.texto.trim() || null })
     .eq("ticket_id", input.ticketId)
-    .eq("revision_numero", input.revisionNumero);
+    .eq("numero_revision", input.revisionNumero);
   if (error)
     throw new Error(`No se pudo guardar la observación: ${error.message}`);
   return { guardado: true };
