@@ -6,11 +6,12 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { firmarRutas } from "@/lib/storage";
-import { ETIQUETA_ESTADO, ETIQUETA_ITEM } from "@/lib/tipos";
+import { ETIQUETA_ESTADO, ETIQUETA_ITEM, type TicketEstado } from "@/lib/tipos";
 import { nombreCompleto } from "@/lib/mensajes";
 import {
   InformePDF,
   type InformePDFDatos,
+  type ItemPDF,
   type RevisionPDF,
 } from "@/lib/pdf/InformePDF";
 
@@ -113,13 +114,34 @@ export type InformeGenerado = {
     /** modo "una" -> nro de esa revisión; modo "todas" -> nro de la más reciente. */
     numeroRevision: number;
     modo: "una" | "todas";
+    /** Fase "tipos de inspección" — clave de tipos_inspeccion. */
+    tipoInspeccion: string;
+    /** tipos_inspeccion.titulo — usado en el asunto del correo (§1 de la parte 3/4). */
+    tituloInforme: string;
+    /** Fecha/hora de la inspección (tickets.fecha) — §5: el correo de Control
+     *  de Salida la muestra para que el documento se pueda verificar a sí mismo. */
+    fechaInspeccion: string;
     patenteCamion: string;
     patenteRampla: string;
     transporte: string;
     /** Conductor de la revisión informada (modo "todas" -> la más reciente). */
     conductor: string;
+    /** Resultado de la revisión informada (modo "todas" -> el del ticket) — el
+     *  correo de Control de Salida lo usa como veredicto (§5). */
+    estadoResultante: TicketEstado;
     /** No conformes de la revisión informada (modo "todas" -> la más reciente). */
     observaciones: { nombre: string; observacion: string | null }[];
+    /**
+     * ¿El checklist de la revisión informada es 100% modo 'fotos' (hoy, solo
+     * Exportación Chimolsa)? Derivado de los ítems, no de `tipoInspeccion` —
+     * el llamador lo usa para decidir si el correo debe mostrar
+     * `observacionGeneral` en vez de la lista de no_conformes (que en ese
+     * caso está siempre vacía y NO significa "sin observaciones").
+     */
+    esSoloFotos: boolean;
+    /** Observación general de la revisión informada — solo tiene sentido
+     *  leerla cuando `esSoloFotos` es true. */
+    observacionGeneral: string | null;
   };
 };
 
@@ -139,9 +161,14 @@ async function construirRevisionPDF(
   const conductor = rev.conductor ?? conductorFallback;
   const vencimiento = rev.fecha_vencimiento ?? vencimientoFallback;
 
+  // Fase "tipos de inspección" — parte 3/4: `item` trae modo/fotos_requeridas
+  // (para saber cómo renderizar cada ítem) y `fotos` trae las filas de
+  // ticket_checklist_fotos de esa respuesta (ítems modo 'fotos').
   const { data: respuestas } = await supabase
     .from("ticket_checklist_respuestas")
-    .select("*, item:checklist_items(nombre, orden)")
+    .select(
+      "*, item:checklist_items(nombre, orden, modo, fotos_requeridas), fotos:ticket_checklist_fotos(url, orden)",
+    )
     .eq("ticket_id", ticketId)
     .eq("revision_numero", rev.numero_revision);
 
@@ -149,11 +176,10 @@ async function construirRevisionPDF(
     (a, b) => (a.item?.orden ?? 0) - (b.item?.orden ?? 0),
   );
 
-  const urlFotos = await firmarRutas(
-    supabase,
-    "fallas",
-    filas.map((r) => r.foto_url),
-  );
+  const urlFotos = await firmarRutas(supabase, "fallas", [
+    ...filas.map((r) => r.foto_url),
+    ...filas.flatMap((r) => (r.fotos ?? []).map((f) => f.url)),
+  ]);
   const urlFirmas = await firmarRutas(supabase, "firmas", [
     rev.firma_conductor_url,
     rev.firma_fiscalizador_url,
@@ -162,20 +188,35 @@ async function construirRevisionPDF(
   // §4.1: todas las fotos + firmas de la revisión, EN PARALELO.
   const [items, [firmaConductorUri, firmaFiscalizadorUri]] = await Promise.all([
     Promise.all(
-      filas.map(async (r, i) => ({
-        n: i + 1,
-        nombre: r.item?.nombre ?? r.item_key,
-        // r.estado es nullable desde la migración de tipos de inspección
-        // (ítems de modo "fotos"); ningún ítem de ese modo se usa en ningún
-        // ticket real todavía, este fallback no cambia nada hoy.
-        estado: ETIQUETA_ITEM[r.estado ?? "conforme"],
-        esNoConforme: r.estado === "no_conforme",
-        observacion: r.observacion,
-        fotoDataUri:
-          r.estado === "no_conforme" && r.foto_url
-            ? await fotoDataUri(urlFotos[r.foto_url])
-            : null,
-      })),
+      filas.map(async (r, i): Promise<ItemPDF> => {
+        const nombre = r.item?.nombre ?? r.item_key;
+        if (r.item?.modo === "fotos") {
+          const fotosOrdenadas = (r.fotos ?? []).sort(
+            (a, b) => a.orden - b.orden,
+          );
+          const fotos = (
+            await Promise.all(
+              fotosOrdenadas.map((f) => fotoDataUri(urlFotos[f.url])),
+            )
+          ).filter((u): u is string => u !== null);
+          return { modo: "fotos", n: i + 1, nombre, fotos };
+        }
+        return {
+          modo: "estado",
+          n: i + 1,
+          nombre,
+          // r.estado es nullable desde la migración de tipos de inspección
+          // (solo lo usan los ítems modo 'fotos', ya cubiertos arriba) — acá
+          // siempre es un ItemEstado real.
+          estado: ETIQUETA_ITEM[r.estado ?? "conforme"],
+          esNoConforme: r.estado === "no_conforme",
+          observacion: r.observacion,
+          fotoDataUri:
+            r.estado === "no_conforme" && r.foto_url
+              ? await fotoDataUri(urlFotos[r.foto_url])
+              : null,
+        };
+      }),
     ),
     Promise.all([
       firmaDataUri(
@@ -196,6 +237,13 @@ async function construirRevisionPDF(
       observacion: r.observacion,
     }));
 
+  // §5/§7 de la fase: en un checklist 100% modo 'fotos' todas las respuestas
+  // comparten la MISMA observación general (guardarObservacionGeneral la
+  // escribe en las 4 filas a la vez) — alcanza con la primera que la tenga.
+  const observacionGeneral =
+    filas.find((r) => r.item?.modo === "fotos" && r.observacion)
+      ?.observacion ?? null;
+
   return {
     conductor,
     observaciones,
@@ -206,6 +254,7 @@ async function construirRevisionPDF(
       conductor,
       vencimiento: fmt(vencimiento),
       items,
+      observacionGeneral,
       firmas: {
         conductor: {
           nombre: conductor,
@@ -235,7 +284,9 @@ export async function generarInformePdf(
 ): Promise<InformeGenerado | null> {
   const { data: ticket } = await supabase
     .from("tickets")
-    .select("*, supervisor:personal!tickets_supervisor_id_fkey(nombre, apellido)")
+    .select(
+      "*, supervisor:personal!tickets_supervisor_id_fkey(nombre, apellido), tipo:tipos_inspeccion(titulo)",
+    )
     .eq("id", ticketId)
     .maybeSingle();
   if (!ticket) return null;
@@ -244,6 +295,14 @@ export async function generarInformePdf(
   const supervisorNombre = ticket.supervisor
     ? nombreCompleto(ticket.supervisor.nombre, ticket.supervisor.apellido)
     : "—";
+
+  // Fase "tipos de inspección" — parte 3/4, §1: título SEGÚN EL TIPO, tomado
+  // de tipos_inspeccion.titulo — nunca compuesto en código. `tipo_inspeccion`
+  // es NOT NULL en la base desde la parte 2/4; el tipo de la columna sigue
+  // nullable acá porque database.types.ts es mantenido a mano (no
+  // regenerado), no porque pueda venir vacío de verdad.
+  const tipoInspeccion = ticket.tipo_inspeccion ?? "encarpe";
+  const tituloInforme = ticket.tipo?.titulo ?? "Informe de Inspección";
 
   const { data: revisionesData } = await supabase
     .from("ticket_revisiones")
@@ -291,7 +350,13 @@ export async function generarInformePdf(
     ),
   ]);
   const nFotos = construidas.reduce(
-    (acc, c) => acc + c.revisionPDF.items.filter((i) => i.fotoDataUri).length,
+    (acc, c) =>
+      acc +
+      c.revisionPDF.items.reduce(
+        (n, i) =>
+          n + (i.modo === "fotos" ? i.fotos.length : i.fotoDataUri ? 1 : 0),
+        0,
+      ),
     0,
   );
   console.log(
@@ -318,6 +383,8 @@ export async function generarInformePdf(
     logoDataUri: logo,
     emitidoEl: fmt(new Date().toISOString()),
     modo,
+    tipoInspeccion,
+    tituloInforme,
     cabecera: {
       transporte: ticket.transporte,
       fecha: fmt(ticket.fecha),
@@ -326,6 +393,10 @@ export async function generarInformePdf(
       patenteCamion: ticket.patente_camion,
       patenteRampla: ticket.patente_rampla,
       supervisor: supervisorNombre,
+      // §3 de la fase: campos condicionales por tipo.
+      nombreEncarpador: ticket.nombre_encarpador,
+      nombreGuardia: ticket.nombre_guardia,
+      nroContenedor: ticket.nro_contenedor,
     },
     revisiones: construidas.map((c) => c.revisionPDF),
   };
@@ -351,11 +422,20 @@ export async function generarInformePdf(
           ? ultima.numero_revision
           : objetivo[0].numero_revision,
       modo,
+      tipoInspeccion,
+      tituloInforme,
+      fechaInspeccion: ticket.fecha,
       patenteCamion: ticket.patente_camion,
       patenteRampla: ticket.patente_rampla,
       transporte: ticket.transporte,
       conductor: refParaCorreo.conductor,
+      estadoResultante:
+        modo === "todas" ? ticket.estado : objetivo[0].estado_resultante,
       observaciones: refParaCorreo.observaciones,
+      esSoloFotos:
+        refParaCorreo.revisionPDF.items.length > 0 &&
+        refParaCorreo.revisionPDF.items.every((i) => i.modo === "fotos"),
+      observacionGeneral: refParaCorreo.revisionPDF.observacionGeneral,
     },
   };
 }

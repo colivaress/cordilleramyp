@@ -12,6 +12,11 @@ export type DatosInforme = {
   numeroRevision: number;
   /** §4: el PDF adjunto trae todo el historial de revisiones, no una sola. */
   todasLasRevisiones?: boolean;
+  /**
+   * tipos_inspeccion.titulo — fase "tipos de inspección" §1: nunca se
+   * compone en código, va tal cual en el asunto del correo.
+   */
+  tituloInforme: string;
   transporte: string;
   patenteCamion: string;
   patenteRampla: string;
@@ -25,6 +30,14 @@ export type DatosInforme = {
   firmanteNombre: string;
   /** Ítems no_conforme de la revisión, en orden de checklist. */
   observaciones: { observacion: string | null }[];
+  /**
+   * Fase "tipos de inspección" §4/§7 — SOLO presente (no `undefined`) cuando
+   * el checklist de este tipo es 100% modo 'fotos' (hoy, Exportación
+   * Chimolsa): en ese caso `observaciones` arriba está siempre vacío (esos
+   * ítems nunca son no_conforme) y NO significa "sin observaciones" — el
+   * cuerpo debe mostrar este texto en su lugar, no la lista de hallazgos.
+   */
+  observacionGeneral?: string | null;
 };
 
 /** Cargo fijo para todos los supervisores (§4.1), no se guarda en BD. */
@@ -63,16 +76,18 @@ function esc(v: string): string {
 const sinSaltosDeLinea = (v: string) => v.replace(/[\r\n]/g, " ");
 
 export function construirAsuntoInforme(d: DatosInforme): string {
-  // §4.1: misma redacción que el cuerpo ("Check List camión de transportes …"),
-  // con el par (N° Inspección, N° Revisión) para diferenciar el correo en la
-  // bandeja del destinatario. §4: si el PDF trae todo el historial, se indica.
+  // Fase "tipos de inspección" §1: el asunto usa tipos_inspeccion.titulo —
+  // nunca un texto compuesto en código — seguido del par (N° Inspección,
+  // N° Revisión) para diferenciar el correo en la bandeja del destinatario.
+  // §4: si el PDF trae todo el historial, se indica.
   const detalle = d.todasLasRevisiones
     ? `N° Inspección ${d.numeroInspeccion} · todas las revisiones`
     : `N° Inspección ${d.numeroInspeccion} · Rev. ${d.numeroRevision}`;
+  const titulo = sinSaltosDeLinea(d.tituloInforme);
   const transporte = sinSaltosDeLinea(d.transporte);
   const patenteCamion = sinSaltosDeLinea(d.patenteCamion.toUpperCase());
   const patenteRampla = sinSaltosDeLinea(d.patenteRampla.toUpperCase());
-  return `Check List camión de transportes ${transporte} — ${patenteCamion} / ${patenteRampla} (${detalle})`;
+  return `${titulo} — ${transporte} — ${patenteCamion} / ${patenteRampla} (${detalle})`;
 }
 
 /**
@@ -94,13 +109,23 @@ export function construirCuerpoInforme(d: DatosInforme): string {
       valor,
     )}</td></tr>`;
 
+  // Fase "tipos de inspección" §4/§7: un checklist 100% modo 'fotos' (hoy,
+  // Exportación Chimolsa) no tiene ítems no_conforme — `d.observaciones`
+  // siempre viene vacío ahí y NO significa "sin observaciones". Cuando
+  // `observacionGeneral` viene definida (aunque sea null/""), se usa esa en
+  // vez de la lista de hallazgos.
   const seccionObservaciones =
-    obs.length > 0
-      ? `<p style="margin: 0 0 8px;">Tras la revisión, se detectó el siguiente hallazgo en las observaciones:</p>
+    d.observacionGeneral !== undefined
+      ? d.observacionGeneral && d.observacionGeneral.trim()
+        ? `<p style="margin: 0 0 8px;">Tras la revisión, se registró la siguiente observación:</p>
+    <p style="margin: 0 0 20px;">${esc(d.observacionGeneral.trim())}</p>`
+        : `<p style="margin: 0 0 20px;">Tras la revisión, no se registraron observaciones.</p>`
+      : obs.length > 0
+        ? `<p style="margin: 0 0 8px;">Tras la revisión, se detectó el siguiente hallazgo en las observaciones:</p>
     <ol style="margin: 0 0 20px; padding-left: 20px;">
       ${obs.map((t) => `<li>${esc(t)}</li>`).join("\n      ")}
     </ol>`
-      : `<p style="margin: 0 0 20px;">Tras la revisión, no se detectaron observaciones. El camión cumple con todas las exigencias del Check List.</p>`;
+        : `<p style="margin: 0 0 20px;">Tras la revisión, no se detectaron observaciones. El camión cumple con todas las exigencias del Check List.</p>`;
 
   return `<div lang="es" style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
     <p style="margin: 0 0 16px;">Estimados,</p>
@@ -124,6 +149,99 @@ export function construirCuerpoInforme(d: DatosInforme): string {
       <tr>
         <td align="left" style="text-align:left; padding:0;">
           <img src="cid:logo-cordillera-mp" alt="Cordillera M&amp;P" width="150" style="display:block; margin:0; border:0; outline:none; text-decoration:none; width:150px; max-width:150px; height:auto;" />
+        </td>
+      </tr>
+    </table>
+  </div>`;
+}
+
+export type DatosInformeControlSalida = {
+  numeroInspeccion: number;
+  /** tickets.fecha — fecha/hora de LA INSPECCIÓN, no del envío del correo ni
+   *  del vencimiento. Sin esto el correo no se puede verificar a sí mismo. */
+  fechaInspeccion: string | Date | null;
+  /** true = finalizada_sin_observaciones; false = con observaciones/en reparación. */
+  aprobado: boolean;
+  transporte: string;
+  patenteCamion: string;
+  patenteRampla: string;
+  conductor: string;
+  firmanteNombre: string;
+  observaciones: { observacion: string | null }[];
+};
+
+/**
+ * Cuerpo del correo — SOLO Control de Salida (fase "tipos de inspección" §5).
+ * Cambio de FORMA, no solo de contenido: lo abre un guardia de portería en el
+ * teléfono, con el camión delante, para autorizar o rechazar la salida — tiene
+ * que resolverse en 30 segundos. Por eso el veredicto va primero (grande,
+ * arriba de todo), seguido de inmediato por N° de Inspección y fecha/hora de
+ * la inspección (sin la fecha, un correo de días atrás es indistinguible de
+ * uno de hoy — el documento no se puede verificar a sí mismo) y recién
+ * después los datos del camión. Sin el saludo "Estimados, junto con
+ * saludar..." del cuerpo genérico: acá no hay tiempo para eso.
+ */
+export function construirCuerpoInformeControlSalida(
+  d: DatosInformeControlSalida,
+): string {
+  const obs = d.observaciones
+    .map((o) => (o.observacion ?? "").trim())
+    .filter(Boolean);
+
+  const veredicto = d.aprobado
+    ? {
+        texto: "APROBADO — Traslado autorizado",
+        bg: "#ecfdf5",
+        fg: "#047857",
+        borde: "#a7f3d0",
+      }
+    : {
+        texto: "CON OBSERVACIONES — Revisar antes de autorizar",
+        bg: "#fffbeb",
+        fg: "#b45309",
+        borde: "#fde68a",
+      };
+
+  const celdaEtiqueta =
+    "background:#eef1f6; font-weight:bold; padding:8px 12px; border:1px solid #dde3ee; width:160px;";
+  const celdaValor = "padding:8px 12px; border:1px solid #dde3ee;";
+  const fila = (etiqueta: string, valor: string) =>
+    `<tr><td style="${celdaEtiqueta}">${etiqueta}</td><td style="${celdaValor}">${esc(
+      valor,
+    )}</td></tr>`;
+
+  const seccionObservaciones =
+    obs.length > 0
+      ? `<p style="margin: 16px 0 8px;">Observaciones:</p>
+    <ol style="margin: 0 0 16px; padding-left: 20px;">
+      ${obs.map((t) => `<li>${esc(t)}</li>`).join("\n      ")}
+    </ol>`
+      : "";
+
+  return `<div lang="es" style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 480px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin:0 0 16px 0;">
+      <tr><td align="center" bgcolor="${veredicto.bg}" style="border:1px solid ${veredicto.borde}; border-radius:6px; padding:14px;">
+        <span style="font-size:18px; font-weight:bold; color:${veredicto.fg};">${veredicto.texto}</span>
+      </td></tr>
+    </table>
+
+    <table style="border-collapse: collapse; width: 100%; margin: 0 0 16px;">
+      ${fila("N° de Inspección", String(d.numeroInspeccion))}
+      ${fila("Fecha y hora", fmtFecha(d.fechaInspeccion))}
+      ${fila("Empresa", d.transporte)}
+      ${fila("Matrícula", d.patenteCamion.toUpperCase())}
+      ${fila("Rampla", d.patenteRampla.toUpperCase())}
+      ${fila("Conductor", d.conductor)}
+    </table>
+
+    ${seccionObservaciones}
+
+    <p style="margin: 0 0 12px; font-size: 12px; color: #64748b;">Informe de Inspección Control de Salida — ${esc(d.firmanteNombre)}</p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin:12px 0 0 0;">
+      <tr>
+        <td align="left" style="text-align:left; padding:0;">
+          <img src="cid:logo-cordillera-mp" alt="Cordillera M&amp;P" width="120" style="display:block; margin:0; border:0; outline:none; text-decoration:none; width:120px; max-width:120px; height:auto;" />
         </td>
       </tr>
     </table>
