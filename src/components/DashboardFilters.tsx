@@ -1,6 +1,8 @@
 "use client";
 
+import { useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { IndicadorGuardado } from "@/components/ui/estado-accion";
 
 type Opcion = { valor: string; etiqueta: string };
 
@@ -21,6 +23,10 @@ export function DashboardFilters({
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
+  // Retroalimentación visual — antes cambiar un filtro no mostraba nada
+  // mientras el servidor re-renderizaba la tabla: la pantalla quedaba
+  // idéntica por un momento, el caso más puro de "apreté y no pasó nada".
+  const [pendiente, startTransition] = useTransition();
 
   function setParam(clave: string, valor: string) {
     const next = new URLSearchParams(sp.toString());
@@ -28,7 +34,9 @@ export function DashboardFilters({
     else next.delete(clave);
     next.delete("page"); // cambiar un filtro reinicia la paginación (§2.6)
     const qs = next.toString();
-    router.push(qs ? `${pathname}?${qs}` : pathname);
+    startTransition(() => {
+      router.push(qs ? `${pathname}?${qs}` : pathname);
+    });
   }
 
   return (
@@ -38,6 +46,7 @@ export function DashboardFilters({
           id="filtro-mes"
           etiqueta="Mes"
           valor={sp.get("mes") ?? ""}
+          disabled={pendiente}
           onChange={(v) => setParam("mes", v)}
           todos="Todos los meses"
           opciones={meses}
@@ -47,6 +56,7 @@ export function DashboardFilters({
         id="filtro-estado"
         etiqueta="Estado"
         valor={sp.get("estado") ?? ""}
+        disabled={pendiente}
         onChange={(v) => setParam("estado", v)}
         todos="Todos los estados"
         opciones={estados}
@@ -56,11 +66,17 @@ export function DashboardFilters({
           id="filtro-supervisor"
           etiqueta="Supervisor"
           valor={sp.get("supervisor") ?? ""}
+          disabled={pendiente}
           onChange={(v) => setParam("supervisor", v)}
           todos="Todos los supervisores"
           opciones={supervisores}
         />
       )}
+      <IndicadorGuardado
+        estado={pendiente ? "guardando" : "idle"}
+        textoGuardando="Actualizando…"
+        className="mb-1.5"
+      />
     </div>
   );
 }
@@ -72,6 +88,7 @@ function Campo({
   onChange,
   todos,
   opciones,
+  disabled,
 }: {
   id: string;
   etiqueta: string;
@@ -79,6 +96,7 @@ function Campo({
   onChange: (v: string) => void;
   todos: string;
   opciones: Opcion[];
+  disabled?: boolean;
 }) {
   return (
     <div className="grid gap-1">
@@ -88,8 +106,9 @@ function Campo({
       <select
         id={id}
         value={valor}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <option value="">{todos}</option>
         {opciones.map((o) => (

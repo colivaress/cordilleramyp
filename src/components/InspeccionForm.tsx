@@ -22,6 +22,13 @@ import {
   type RespuestaEditable,
 } from "@/components/ChecklistItemRow";
 import { SignaturePad } from "@/components/SignaturePad";
+import { ContenidoBoton, IndicadorGuardado } from "@/components/ui/estado-accion";
+import { OverlayBloqueante } from "@/components/ui/overlay-bloqueante";
+import {
+  useEstadoGuardado,
+  useEstadoGuardadoPorClave,
+} from "@/hooks/use-estado-guardado";
+import { useAccionLarga } from "@/hooks/use-accion-larga";
 import { createClient } from "@/lib/supabase/client";
 import {
   iniciarInspeccion,
@@ -217,7 +224,8 @@ export function InspeccionForm({
   // El paso 2 se monta una sola vez y NO se desmonta al volver atrás (§2.8) — se
   // oculta con CSS para que el <canvas> de las firmas conserve su contenido.
   const [pasoMaxVisto, setPasoMaxVisto] = useState<1 | 2>(1);
-  const [iniciando, setIniciando] = useState(false);
+  // Nivel 1 — "Realizar revisión" es rápido (una fila), no necesita overlay.
+  const guardadoIniciar = useEstadoGuardado();
   // §2.6: en inspección nueva el numero_inspeccion se conoce recién al crear el
   // ticket (al pasar de la cabecera al checklist). En re-inspección viene por prop.
   const [numInsp, setNumInsp] = useState<number | null>(numeroInspeccion);
@@ -284,6 +292,16 @@ export function InspeccionForm({
 
   const [observacionGeneral, setObservacionGeneral] = useState("");
 
+  // Retroalimentación visual — nivel 1. Una sola pieza reutilizable
+  // (useEstadoGuardado/useEstadoGuardadoPorClave, ver src/hooks): `guardadoItems`
+  // cubre los 18 ítems del checklist (una clave por ítem para el select +
+  // observación + foto única de modo 'estado'; clave compuesta `key:orden`
+  // para cada foto de un ítem modo 'fotos'), y `guardadoObsGeneral` cubre el
+  // textarea de observación general — antes no tenía NINGUNA retroalimentación.
+  const guardadoItems = useEstadoGuardadoPorClave();
+  const guardadoObsGeneral = useEstadoGuardado();
+  const claveFotoModo = (key: string, orden: number) => `${key}:${orden}`;
+
   // El checklist a mostrar depende del tipo elegido — mientras el supervisor
   // no haya avanzado al paso 2, cambiar el tipo reinicia las respuestas
   // locales (nada se persistió todavía) y vuelve a precargar el vencimiento
@@ -314,7 +332,12 @@ export function InspeccionForm({
     }
   }
 
-  const [enviando, setEnviando] = useState(false);
+  // Nivel 1 (botón) + nivel 2 (overlay bloqueante, no descartable): "Finalizar
+  // revisión" puede tardar en el teléfono con mala señal — el overlay evita
+  // que el supervisor toque cualquier otra cosa mientras tanto. Un segundo
+  // envío acá cerraría la inspección dos veces, no solo un correo de más.
+  const guardadoFinalizar = useEstadoGuardado();
+  const overlayFinalizar = useAccionLarga();
 
   // §2.8: firmas persistidas en el estado del formulario (sobreviven a navegar
   // entre pasos) + subidas a Storage y a ticket_revisiones apenas se capturan.
@@ -443,71 +466,72 @@ export function InspeccionForm({
   }
 
   async function irAlChecklist() {
-    if (!puedeAvanzar || iniciando) return;
-    setIniciando(true);
+    if (!puedeAvanzar || guardadoIniciar.pendiente) return;
     try {
-      if (modo === "nueva") {
-        // §2.6/§2.8: crea la fila en `tickets`, la revisión #1 y siembra las
-        // respuestas del checklist del tipo elegido — así numero_inspeccion
-        // existe y se puede guardar por ítem.
-        const res = await iniciarInspeccion({
-          ticketId,
-          cabecera: {
-            transporte: cabecera.transporte,
-            conductor: cabecera.conductor,
-            fecha: new Date(cabecera.fecha).toISOString(),
-            procedencia: cabecera.procedencia,
-            tipo_camion: cabecera.tipo_camion,
-            patente_camion: cabecera.patente_camion,
-            patente_rampla: cabecera.patente_rampla,
-          },
-          fechaVencimientoISO: new Date(
-            cabecera.fechaVencimiento,
-          ).toISOString(),
-          tipoInspeccion: tipoSeleccionado,
-          nombreEncarpador:
-            tipoSeleccionado === "control_salida" ? nombreEncarpador : null,
-          nombreGuardia:
-            tipoSeleccionado === "control_salida" ? nombreGuardia : null,
-          nroContenedor:
-            tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
-        });
-        setNumInsp(res.numeroInspeccion);
-      } else {
-        await iniciarReinspeccion({
-          ticketId,
-          conductor: conductorRevision.trim(),
-          fechaVencimientoISO: new Date(vencRevision).toISOString(),
-        });
-      }
-      setPaso(2);
-      setPasoMaxVisto(2);
+      await guardadoIniciar.ejecutar(async () => {
+        if (modo === "nueva") {
+          // §2.6/§2.8: crea la fila en `tickets`, la revisión #1 y siembra las
+          // respuestas del checklist del tipo elegido — así numero_inspeccion
+          // existe y se puede guardar por ítem.
+          const res = await iniciarInspeccion({
+            ticketId,
+            cabecera: {
+              transporte: cabecera.transporte,
+              conductor: cabecera.conductor,
+              fecha: new Date(cabecera.fecha).toISOString(),
+              procedencia: cabecera.procedencia,
+              tipo_camion: cabecera.tipo_camion,
+              patente_camion: cabecera.patente_camion,
+              patente_rampla: cabecera.patente_rampla,
+            },
+            fechaVencimientoISO: new Date(
+              cabecera.fechaVencimiento,
+            ).toISOString(),
+            tipoInspeccion: tipoSeleccionado,
+            nombreEncarpador:
+              tipoSeleccionado === "control_salida" ? nombreEncarpador : null,
+            nombreGuardia:
+              tipoSeleccionado === "control_salida" ? nombreGuardia : null,
+            nroContenedor:
+              tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
+          });
+          setNumInsp(res.numeroInspeccion);
+        } else {
+          await iniciarReinspeccion({
+            ticketId,
+            conductor: conductorRevision.trim(),
+            fechaVencimientoISO: new Date(vencRevision).toISOString(),
+          });
+        }
+        setPaso(2);
+        setPasoMaxVisto(2);
+      });
     } catch (e) {
       toast.error(
         e instanceof Error ? e.message : "No se pudo iniciar la revisión.",
       );
-    } finally {
-      setIniciando(false);
     }
   }
 
   // §2.8: cada respuesta se guarda apenas se marca — no todas juntas al final.
-  // Solo para ítems de modo 'estado'.
+  // Solo para ítems de modo 'estado'. Retroalimentación visual: el select es
+  // un control sin debounce, así que arranca directo en "guardando" — no
+  // hace falta pasar por marcarCambio().
   async function onEstadoItem(key: string, estado: ItemEstado) {
     patchResp(key, { estado });
     const actual = respuestasRef.current[key];
     try {
-      const res = await guardarRespuestaItem({
-        ticketId,
-        revisionNumero: rev,
-        itemKey: key,
-        estado,
-        observacion: actual.observacion,
-        fotoPath: actual.fotoPath,
-      });
-      patchResp(key, { guardado: res.guardado });
+      await guardadoItems.ejecutar(key, () =>
+        guardarRespuestaItem({
+          ticketId,
+          revisionNumero: rev,
+          itemKey: key,
+          estado,
+          observacion: actual.observacion,
+          fotoPath: actual.fotoPath,
+        }),
+      );
     } catch (e) {
-      patchResp(key, { guardado: false });
       toast.error(
         e instanceof Error ? e.message : "No se pudo guardar el elemento.",
       );
@@ -515,22 +539,31 @@ export function InspeccionForm({
   }
 
   function onObservacionItem(key: string, texto: string) {
-    patchResp(key, { observacion: texto, guardado: false });
+    // Instantáneo: responde "registré tu toque" antes de programar el
+    // debounce, no cuando la request sale (esa es la queja que originó esto).
+    guardadoItems.marcarCambio(key);
+    patchResp(key, { observacion: texto });
     clearTimeout(obsTimers.current[key]);
     obsTimers.current[key] = setTimeout(async () => {
       const r = respuestasRef.current[key];
       // Solo se persiste si el ítem es no_conforme y ya tiene foto (constraint).
-      if (r.estado !== "no_conforme" || !r.fotoPath) return;
+      // Si no, no hay nada que guardar todavía — limpiar el indicador en vez
+      // de dejarlo pegado en "cambiando" para siempre.
+      if (r.estado !== "no_conforme" || !r.fotoPath) {
+        guardadoItems.limpiar(key);
+        return;
+      }
       try {
-        await guardarRespuestaItem({
-          ticketId,
-          revisionNumero: rev,
-          itemKey: key,
-          estado: r.estado,
-          observacion: texto,
-          fotoPath: r.fotoPath,
-        });
-        patchResp(key, { guardado: true });
+        await guardadoItems.ejecutar(key, () =>
+          guardarRespuestaItem({
+            ticketId,
+            revisionNumero: rev,
+            itemKey: key,
+            estado: r.estado,
+            observacion: texto,
+            fotoPath: r.fotoPath,
+          }),
+        );
       } catch (e) {
         toast.error(
           e instanceof Error ? e.message : "No se pudo guardar la observación.",
@@ -546,35 +579,33 @@ export function InspeccionForm({
       toast.error("El archivo debe ser una imagen (JPG, PNG, WEBP o HEIC).");
       return;
     }
-    patchResp(key, { subiendoFoto: true });
     try {
-      const { blob, ext } = await comprimirImagen(file);
-      const path = await subirArchivo(
-        "fallas",
-        `${ticketId}/${key}/${nombreFoto(ext)}`,
-        blob,
-        blob.type || "image/jpeg",
-      );
-      const previewUrl = URL.createObjectURL(blob);
-      patchResp(key, {
-        fotoPath: path,
-        fotoNombre: file.name,
-        fotoPreviewUrl: previewUrl,
-        subiendoFoto: false,
+      await guardadoItems.ejecutar(key, async () => {
+        const { blob, ext } = await comprimirImagen(file);
+        const path = await subirArchivo(
+          "fallas",
+          `${ticketId}/${key}/${nombreFoto(ext)}`,
+          blob,
+          blob.type || "image/jpeg",
+        );
+        const previewUrl = URL.createObjectURL(blob);
+        patchResp(key, {
+          fotoPath: path,
+          fotoNombre: file.name,
+          fotoPreviewUrl: previewUrl,
+        });
+        // Ya con foto, la fila no_conforme completa se puede persistir.
+        const r = respuestasRef.current[key];
+        await guardarRespuestaItem({
+          ticketId,
+          revisionNumero: rev,
+          itemKey: key,
+          estado: "no_conforme",
+          observacion: r.observacion,
+          fotoPath: path,
+        });
       });
-      // Ya con foto, la fila no_conforme completa se puede persistir.
-      const r = respuestasRef.current[key];
-      await guardarRespuestaItem({
-        ticketId,
-        revisionNumero: rev,
-        itemKey: key,
-        estado: "no_conforme",
-        observacion: r.observacion,
-        fotoPath: path,
-      });
-      patchResp(key, { guardado: true });
     } catch (e) {
-      patchResp(key, { subiendoFoto: false });
       toast.error(
         e instanceof Error ? e.message : "No se pudo subir la foto.",
       );
@@ -584,28 +615,29 @@ export function InspeccionForm({
   async function onQuitarFotoItem(key: string) {
     const r = respuestasRef.current[key];
     if (r.fotoPreviewUrl) URL.revokeObjectURL(r.fotoPreviewUrl);
-    if (r.fotoPath) {
-      const supabase = createClient();
-      await supabase.storage
-        .from("fallas")
-        .remove([r.fotoPath])
-        .catch(() => {});
-    }
-    patchResp(key, {
-      fotoPath: null,
-      fotoNombre: null,
-      fotoPreviewUrl: null,
-      guardado: false,
-    });
-    // Sin foto, la fila no_conforme deja de ser válida: se borra en la BD.
     try {
-      await guardarRespuestaItem({
-        ticketId,
-        revisionNumero: rev,
-        itemKey: key,
-        estado: "no_conforme",
-        observacion: r.observacion,
-        fotoPath: null,
+      await guardadoItems.ejecutar(key, async () => {
+        if (r.fotoPath) {
+          const supabase = createClient();
+          await supabase.storage
+            .from("fallas")
+            .remove([r.fotoPath])
+            .catch(() => {});
+        }
+        patchResp(key, {
+          fotoPath: null,
+          fotoNombre: null,
+          fotoPreviewUrl: null,
+        });
+        // Sin foto, la fila no_conforme deja de ser válida: se borra en la BD.
+        await guardarRespuestaItem({
+          ticketId,
+          revisionNumero: rev,
+          itemKey: key,
+          estado: "no_conforme",
+          observacion: r.observacion,
+          fotoPath: null,
+        });
       });
     } catch {
       /* no bloquea: "Finalizar revisión" vuelve a validar */
@@ -622,31 +654,27 @@ export function InspeccionForm({
       toast.error("El archivo debe ser una imagen (JPG, PNG, WEBP o HEIC).");
       return;
     }
-    patchFotoSlot(key, orden, { subiendo: true });
+    const clave = claveFotoModo(key, orden);
     try {
-      const { blob, ext } = await comprimirImagen(file);
-      const path = await subirArchivo(
-        "fallas",
-        `${ticketId}/${key}/${orden}-${nombreFoto(ext)}`,
-        blob,
-        blob.type || "image/jpeg",
-      );
-      const previewUrl = URL.createObjectURL(blob);
-      patchFotoSlot(key, orden, {
-        path,
-        nombre: file.name,
-        previewUrl,
-        subiendo: false,
-      });
-      await guardarFotoChecklistItem({
-        ticketId,
-        revisionNumero: rev,
-        itemKey: key,
-        orden,
-        path,
+      await guardadoItems.ejecutar(clave, async () => {
+        const { blob, ext } = await comprimirImagen(file);
+        const path = await subirArchivo(
+          "fallas",
+          `${ticketId}/${key}/${orden}-${nombreFoto(ext)}`,
+          blob,
+          blob.type || "image/jpeg",
+        );
+        const previewUrl = URL.createObjectURL(blob);
+        patchFotoSlot(key, orden, { path, nombre: file.name, previewUrl });
+        await guardarFotoChecklistItem({
+          ticketId,
+          revisionNumero: rev,
+          itemKey: key,
+          orden,
+          path,
+        });
       });
     } catch (e) {
-      patchFotoSlot(key, orden, { subiendo: false });
       toast.error(e instanceof Error ? e.message : "No se pudo subir la foto.");
     }
   }
@@ -655,37 +683,42 @@ export function InspeccionForm({
     const slot = respuestasRef.current[key]?.fotos[orden - 1];
     if (!slot) return;
     if (slot.previewUrl) URL.revokeObjectURL(slot.previewUrl);
-    if (slot.path) {
-      const supabase = createClient();
-      await supabase.storage.from("fallas").remove([slot.path]).catch(() => {});
-    }
-    patchFotoSlot(key, orden, {
-      path: null,
-      nombre: null,
-      previewUrl: null,
-      subiendo: false,
-    });
+    const clave = claveFotoModo(key, orden);
     try {
-      await guardarFotoChecklistItem({
-        ticketId,
-        revisionNumero: rev,
-        itemKey: key,
-        orden,
-        path: null,
+      await guardadoItems.ejecutar(clave, async () => {
+        if (slot.path) {
+          const supabase = createClient();
+          await supabase.storage
+            .from("fallas")
+            .remove([slot.path])
+            .catch(() => {});
+        }
+        patchFotoSlot(key, orden, { path: null, nombre: null, previewUrl: null });
+        await guardarFotoChecklistItem({
+          ticketId,
+          revisionNumero: rev,
+          itemKey: key,
+          orden,
+          path: null,
+        });
       });
     } catch {
       /* no bloquea: "Finalizar revisión" vuelve a validar */
     }
   }
 
-  // Observación general — una sola por revisión, para los 4 tipos. Se guarda
-  // debounced, igual que la observación por ítem.
+  // Observación general — una sola por revisión, para los 4 tipos. Mismo
+  // patrón cambiando→guardando→guardado que el checklist por ítem — antes
+  // este campo no tenía ninguna retroalimentación, ni durante ni después.
   function onObservacionGeneral(texto: string) {
+    guardadoObsGeneral.marcarCambio();
     setObservacionGeneral(texto);
     if (obsGeneralTimer.current) clearTimeout(obsGeneralTimer.current);
     obsGeneralTimer.current = setTimeout(async () => {
       try {
-        await guardarObservacionGeneral({ ticketId, revisionNumero: rev, texto });
+        await guardadoObsGeneral.ejecutar(() =>
+          guardarObservacionGeneral({ ticketId, revisionNumero: rev, texto }),
+        );
       } catch (e) {
         toast.error(
           e instanceof Error ? e.message : "No se pudo guardar la observación.",
@@ -721,54 +754,56 @@ export function InspeccionForm({
       toast.error(err);
       return;
     }
-    setEnviando(true);
     try {
-      // §2.8: las firmas ya se subieron al capturarse; acá se re-suben con el
-      // trazo actual y se re-guarda la ruta, para dejar todo consistente sí o sí
-      // antes de cerrar.
-      const firmaConductorPath = await subirArchivo(
-        "firmas",
-        rutaFirma("conductor"),
-        await dataUrlABlob(firmaConductorUrl as string),
-        "image/png",
-      );
-      const firmaFiscalizadorPath = await subirArchivo(
-        "firmas",
-        rutaFirma("fiscalizador"),
-        await dataUrlABlob(firmaFiscalizadorUrl as string),
-        "image/png",
-      );
-      await guardarFirmaRevision({
-        ticketId,
-        revisionNumero: rev,
-        quien: "conductor",
-        path: firmaConductorPath,
-      });
-      await guardarFirmaRevision({
-        ticketId,
-        revisionNumero: rev,
-        quien: "fiscalizador",
-        path: firmaFiscalizadorPath,
-      });
+      await guardadoFinalizar.ejecutar(() =>
+        overlayFinalizar.ejecutar(async () => {
+          // §2.8: las firmas ya se subieron al capturarse; acá se re-suben con
+          // el trazo actual y se re-guarda la ruta, para dejar todo
+          // consistente sí o sí antes de cerrar.
+          const firmaConductorPath = await subirArchivo(
+            "firmas",
+            rutaFirma("conductor"),
+            await dataUrlABlob(firmaConductorUrl as string),
+            "image/png",
+          );
+          const firmaFiscalizadorPath = await subirArchivo(
+            "firmas",
+            rutaFirma("fiscalizador"),
+            await dataUrlABlob(firmaFiscalizadorUrl as string),
+            "image/png",
+          );
+          await guardarFirmaRevision({
+            ticketId,
+            revisionNumero: rev,
+            quien: "conductor",
+            path: firmaConductorPath,
+          });
+          await guardarFirmaRevision({
+            ticketId,
+            revisionNumero: rev,
+            quien: "fiscalizador",
+            path: firmaFiscalizadorPath,
+          });
 
-      // §2.8: "Finalizar revisión" solo CIERRA sobre datos ya guardados.
-      if (modo === "nueva") {
-        const res = await finalizarInspeccion({ ticketId });
-        toast.success(
-          `Inspección guardada (Nro ${res.numeroInspeccion}). Generar y enviar el informe.`,
-        );
-        router.push(`/tickets/${res.ticketId}/report`);
-      } else {
-        const res = await finalizarReinspeccion({
-          ticketId,
-          revisionNumero: rev,
-        });
-        toast.success("Revisión guardada. Generar y enviar el informe.");
-        router.push(`/tickets/${res.ticketId}/report`);
-      }
-      router.refresh();
+          // §2.8: "Finalizar revisión" solo CIERRA sobre datos ya guardados.
+          if (modo === "nueva") {
+            const res = await finalizarInspeccion({ ticketId });
+            toast.success(
+              `Inspección guardada (Nro ${res.numeroInspeccion}). Generar y enviar el informe.`,
+            );
+            router.push(`/tickets/${res.ticketId}/report`);
+          } else {
+            const res = await finalizarReinspeccion({
+              ticketId,
+              revisionNumero: rev,
+            });
+            toast.success("Revisión guardada. Generar y enviar el informe.");
+            router.push(`/tickets/${res.ticketId}/report`);
+          }
+          router.refresh();
+        }, "Finalizando inspección…"),
+      );
     } catch (error) {
-      setEnviando(false);
       toast.error(
         error instanceof Error
           ? error.message
@@ -964,10 +999,14 @@ export function InspeccionForm({
           <div className="sm:col-span-2">
             <Button
               type="button"
-              disabled={!puedeAvanzar || iniciando}
+              disabled={!puedeAvanzar || guardadoIniciar.pendiente}
               onClick={irAlChecklist}
             >
-              {iniciando ? "Preparando revisión…" : "Realizar revisión"}
+              <ContenidoBoton
+                pendiente={guardadoIniciar.pendiente}
+                texto="Realizar revisión"
+                textoPendiente="Preparando revisión…"
+              />
             </Button>
             {!puedeAvanzar && (
               <p className="mt-1.5 text-xs text-muted-foreground">
@@ -1007,6 +1046,7 @@ export function InspeccionForm({
                       indice={idx + 1}
                       item={item}
                       valor={respuestas[item.key]}
+                      estadoGuardado={guardadoItems.estadoDe(item.key)}
                       onEstado={(v) => onEstadoItem(item.key, v)}
                       onObservacion={(t) => onObservacionItem(item.key, t)}
                       onFoto={(f) => onFotoItem(item.key, f)}
@@ -1014,6 +1054,9 @@ export function InspeccionForm({
                       onFotoModo={(orden, f) => onFotoModoItem(item.key, orden, f)}
                       onQuitarFotoModo={(orden) =>
                         onQuitarFotoModoItem(item.key, orden)
+                      }
+                      estadoGuardadoFoto={(orden) =>
+                        guardadoItems.estadoDe(claveFotoModo(item.key, orden))
                       }
                     />
                   ))}
@@ -1042,9 +1085,12 @@ export function InspeccionForm({
                   es asimétrico entre tipos — ver guardarObservacionGeneral /
                   cerrarRevision, no acá. */}
               <div className="mt-4 grid gap-1.5">
-                <Label htmlFor="observacion-general">
-                  Observación general (opcional)
-                </Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label htmlFor="observacion-general">
+                    Observación general (opcional)
+                  </Label>
+                  <IndicadorGuardado estado={guardadoObsGeneral.estado} />
+                </div>
                 <Textarea
                   id="observacion-general"
                   rows={3}
@@ -1077,13 +1123,17 @@ export function InspeccionForm({
           </Card>
 
           <div className="flex gap-2">
-            <Button type="submit" disabled={enviando}>
-              {enviando ? "Guardando…" : "Finalizar revisión"}
+            <Button type="submit" disabled={guardadoFinalizar.pendiente}>
+              <ContenidoBoton
+                pendiente={guardadoFinalizar.pendiente}
+                texto="Finalizar revisión"
+                textoPendiente="Guardando…"
+              />
             </Button>
             <Button
               type="button"
               variant="ghost"
-              disabled={enviando}
+              disabled={guardadoFinalizar.pendiente}
               onClick={() => setPaso(1)}
             >
               Volver a los datos
@@ -1091,6 +1141,10 @@ export function InspeccionForm({
           </div>
         </div>
       )}
+      <OverlayBloqueante
+        visible={overlayFinalizar.visible}
+        mensaje={overlayFinalizar.mensaje}
+      />
     </form>
   );
 }

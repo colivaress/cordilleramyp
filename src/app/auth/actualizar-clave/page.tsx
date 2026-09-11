@@ -14,6 +14,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ContenidoBoton } from "@/components/ui/estado-accion";
+import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
 import { mensajeErrorAuth } from "@/lib/auth-errores";
 
 export default function ActualizarClavePage() {
@@ -24,7 +26,7 @@ export default function ActualizarClavePage() {
   const [password, setPassword] = useState("");
   const [confirmar, setConfirmar] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [cargando, setCargando] = useState(false);
+  const guardado = useEstadoGuardado();
 
   // §8.1: se llega acá desde el enlace del correo, que pasa por /auth/callback y
   // deja una sesión de recuperación activa. Si no hay sesión, el enlace venció.
@@ -51,22 +53,17 @@ export default function ActualizarClavePage() {
       setError("Las contraseñas no coinciden.");
       return;
     }
-    setCargando(true);
     try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) {
-        console.error("updateUser falló:", error);
-        setError(mensajeErrorAuth(error));
-        return;
-      }
-      await supabase.auth.signOut();
-      router.replace("/login?mensaje=clave_actualizada");
+      await guardado.ejecutar(async () => {
+        const supabase = createClient();
+        const { error } = await supabase.auth.updateUser({ password });
+        if (error) throw error;
+        await supabase.auth.signOut();
+        router.replace("/login?mensaje=clave_actualizada");
+      });
     } catch (err) {
       console.error("updateUser falló (excepción):", err);
       setError(mensajeErrorAuth(err));
-    } finally {
-      setCargando(false);
     }
   }
 
@@ -132,8 +129,12 @@ export default function ActualizarClavePage() {
                   {error}
                 </p>
               )}
-              <Button type="submit" disabled={cargando}>
-                {cargando ? "Guardando…" : "Guardar contraseña"}
+              <Button type="submit" disabled={guardado.pendiente}>
+                <ContenidoBoton
+                  pendiente={guardado.pendiente}
+                  texto="Guardar contraseña"
+                  textoPendiente="Guardando…"
+                />
               </Button>
             </form>
           )}
