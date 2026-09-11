@@ -297,6 +297,23 @@ export async function iniciarInspeccion(
     throw new Error("Tipo de inspección inválido.");
   validarCamposPorTipo(input.tipoInspeccion, input);
 
+  // Fase "tipos de inspección" — parte 4/4: mensaje amigable ANTES del
+  // INSERT, respaldado por la política RLS de tickets_insert (que rechazaría
+  // igual, pero con un error crudo de Postgres). Sin ninguna fila en
+  // personal_tipos_inspeccion, el supervisor no tiene permiso para NINGÚN
+  // tipo — no es "sin restricción" (la pantalla de "Nueva inspección" ya
+  // filtra el combo a los tipos permitidos, así que llegar acá sin permiso
+  // solo pasa si algo bypasea la UI).
+  const { data: permitidos } = await supabase
+    .from("personal_tipos_inspeccion")
+    .select("tipo_inspeccion")
+    .eq("personal_id", perfil.id);
+  const clavesPermitidas = new Set((permitidos ?? []).map((p) => p.tipo_inspeccion));
+  if (!clavesPermitidas.has(input.tipoInspeccion))
+    throw new Error(
+      "No tenés permiso para realizar este tipo de inspección. Pedile a un administrador que te lo asigne en Usuarios.",
+    );
+
   const { data, error } = await supabase
     .from("tickets")
     .upsert(

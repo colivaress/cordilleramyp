@@ -24,11 +24,17 @@ import {
 } from "@/components/ui/table";
 import {
   agregarUsuario,
+  actualizarTiposInspeccion,
   cambiarActivo,
   editarUsuario,
   reenviarInvitacion,
 } from "@/app/(app)/usuarios/actions";
-import type { Personal, RolUsuario } from "@/lib/tipos";
+import {
+  ETIQUETA_TIPO_INSPECCION,
+  ORDEN_TIPOS_INSPECCION,
+  type Personal,
+  type RolUsuario,
+} from "@/lib/tipos";
 
 type Form = {
   nombre: string;
@@ -37,6 +43,12 @@ type Form = {
   telefono: string;
   fechaNacimiento: string;
   rol: RolUsuario;
+  /**
+   * Fase "tipos de inspección" §1/§4 — vacío = SIN acceso (ni realizar ni
+   * ver ninguna inspección), no "los 4 tipos". Es un estado válido a
+   * propósito: sirve para suspender a un supervisor sin desactivar su cuenta.
+   */
+  tiposInspeccion: string[];
 };
 
 const formVacio: Form = {
@@ -46,14 +58,18 @@ const formVacio: Form = {
   telefono: "",
   fechaNacimiento: "",
   rol: "supervisor",
+  tiposInspeccion: [],
 };
 
 export function UsuariosTabla({
   usuarios,
   perfilId,
+  tiposPorSupervisor,
 }: {
   usuarios: Personal[];
   perfilId: string;
+  /** personal.id -> claves de tipos_inspeccion permitidos (vacío/ausente = SIN acceso a ninguno). */
+  tiposPorSupervisor: Record<string, string[]>;
 }) {
   const [abierto, setAbierto] = useState(false);
   const [editandoId, setEditandoId] = useState<string | null>(null);
@@ -83,6 +99,7 @@ export function UsuariosTabla({
       telefono: u.telefono ?? "",
       fechaNacimiento: u.fecha_nacimiento ?? "",
       rol: u.rol,
+      tiposInspeccion: tiposPorSupervisor[u.id] ?? [],
     });
     setAbierto(true);
   }
@@ -103,6 +120,16 @@ export function UsuariosTabla({
         const res = editandoId
           ? await editarUsuario({ ...base, id: editandoId })
           : await agregarUsuario(base);
+        // Fase "tipos de inspección" §1: los permisos se editan solo desde
+        // "Editar" — un supervisor recién creado parte SIN ningún tipo
+        // asignado, o sea sin poder realizar ni ver ninguna inspección,
+        // hasta que un administrador entre a "Editar" y le asigne alguno.
+        if (editandoId && form.rol === "supervisor") {
+          await actualizarTiposInspeccion({
+            personalId: editandoId,
+            tipos: form.tiposInspeccion,
+          });
+        }
         setAbierto(false);
         toast.success(
           editandoId ? "Usuario actualizado." : "Usuario creado e invitado.",
@@ -323,6 +350,51 @@ export function UsuariosTabla({
               placeholder="569XXXXXXXX"
               onChange={(v) => setForm((f) => ({ ...f, telefono: v }))}
             />
+
+            {/* Fase "tipos de inspección" §1: solo administrador, solo al
+                editar un supervisor ya existente. */}
+            {editandoId && form.rol === "supervisor" && (
+              <div className="grid gap-1.5">
+                <Label>Tipos de inspección permitidos</Label>
+                <div className="grid gap-1.5 rounded-md border p-3 sm:grid-cols-2">
+                  {ORDEN_TIPOS_INSPECCION.map((clave) => {
+                    const marcado = form.tiposInspeccion.includes(clave);
+                    return (
+                      <label
+                        key={clave}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={marcado}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              tiposInspeccion: e.target.checked
+                                ? [...f.tiposInspeccion, clave]
+                                : f.tiposInspeccion.filter((t) => t !== clave),
+                            }))
+                          }
+                        />
+                        {ETIQUETA_TIPO_INSPECCION[clave]}
+                      </label>
+                    );
+                  })}
+                </div>
+                {form.tiposInspeccion.length === 0 ? (
+                  <span className="text-xs font-medium text-warning-700">
+                    Sin ningún tipo marcado, este supervisor no podrá
+                    realizar ni ver ninguna inspección. Es una forma válida
+                    de suspenderlo sin desactivar su cuenta.
+                  </span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    Solo va a poder realizar y ver inspecciones de los tipos
+                    marcados.
+                  </span>
+                )}
+              </div>
+            )}
 
             <div className="flex justify-end gap-2">
               <Button
