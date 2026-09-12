@@ -1,6 +1,8 @@
 "use client";
 
+import { useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { IndicadorGuardado } from "@/components/ui/estado-accion";
 
 export type OpcionRevision = { valor: string; etiqueta: string };
 
@@ -20,11 +22,14 @@ export function RevisionInformeSelector({
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
+  const [pendiente, startTransition] = useTransition();
 
   function cambiar(valor: string) {
     const next = new URLSearchParams(sp.toString());
     next.set("rev", valor);
-    router.push(`${pathname}?${next.toString()}`);
+    startTransition(() => {
+      router.push(`${pathname}?${next.toString()}`);
+    });
   }
 
   return (
@@ -35,18 +40,25 @@ export function RevisionInformeSelector({
       >
         Revisión a mostrar
       </label>
-      <select
-        id="informe-revision"
-        value={valorActual}
-        onChange={(e) => cambiar(e.target.value)}
-        className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-      >
-        {opciones.map((o) => (
-          <option key={o.valor} value={o.valor}>
-            {o.etiqueta}
-          </option>
-        ))}
-      </select>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          id="informe-revision"
+          value={valorActual}
+          disabled={pendiente}
+          onChange={(e) => cambiar(e.target.value)}
+          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {opciones.map((o) => (
+            <option key={o.valor} value={o.valor}>
+              {o.etiqueta}
+            </option>
+          ))}
+        </select>
+        <IndicadorGuardado
+          estado={pendiente ? "guardando" : "idle"}
+          textoGuardando="Actualizando…"
+        />
+      </div>
     </div>
   );
 }

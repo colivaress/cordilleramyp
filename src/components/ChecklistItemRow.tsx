@@ -7,21 +7,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { IndicadorGuardado } from "@/components/ui/estado-accion";
 import { cn } from "@/lib/utils";
 import type { ChecklistItem, ItemEstado } from "@/lib/tipos";
+import type { EstadoGuardado } from "@/hooks/use-estado-guardado";
 
 export type FotoSlot = {
   path: string | null;
   nombre: string | null;
   previewUrl: string | null;
-  subiendo: boolean;
 };
 
 const slotVacio = (): FotoSlot => ({
   path: null,
   nombre: null,
   previewUrl: null,
-  subiendo: false,
 });
 
 export type RespuestaEditable = {
@@ -38,9 +38,6 @@ export type RespuestaEditable = {
   fotoPath: string | null;
   fotoNombre: string | null;
   fotoPreviewUrl: string | null;
-  subiendoFoto: boolean;
-  // ¿la fila ya está persistida en ticket_checklist_respuestas?
-  guardado: boolean;
   // Solo modo 'fotos': una fila por foto obligatoria del ítem (cantidad =
   // checklist_items.fotos_requeridas — ya no es una constante fija de 2;
   // varía por ítem). Índice 0 = orden 1 en ticket_checklist_fotos, índice 1
@@ -55,8 +52,6 @@ export const respuestaVacia = (cantidadFotos = 0): RespuestaEditable => ({
   fotoPath: null,
   fotoNombre: null,
   fotoPreviewUrl: null,
-  subiendoFoto: false,
-  guardado: false,
   fotos: Array.from({ length: cantidadFotos }, slotVacio),
 });
 
@@ -73,16 +68,22 @@ export function ChecklistItemRow({
   indice,
   item,
   valor,
+  estadoGuardado,
   onEstado,
   onObservacion,
   onFoto,
   onQuitarFoto,
   onFotoModo,
   onQuitarFotoModo,
+  estadoGuardadoFoto,
 }: {
   indice: number;
   item: ChecklistItem;
   valor: RespuestaEditable;
+  /** Nivel 1 (retroalimentación visual) — cubre el select de estado, la
+   *  observación y (modo 'estado') su única foto: un solo indicador por
+   *  fila, igual granularidad que antes. */
+  estadoGuardado: EstadoGuardado;
   onEstado: (estado: ItemEstado) => void;
   onObservacion: (texto: string) => void;
   onFoto: (file: File | null) => void;
@@ -90,6 +91,8 @@ export function ChecklistItemRow({
   /** Solo se usa (y solo hace falta pasarlo) para ítems de modo 'fotos'. */
   onFotoModo?: (orden: number, file: File | null) => void;
   onQuitarFotoModo?: (orden: number) => void;
+  /** Solo modo 'fotos': un indicador independiente por cada foto obligatoria. */
+  estadoGuardadoFoto?: (orden: number) => EstadoGuardado;
 }) {
   if (item.modo === "fotos") {
     // checklist_items.fotos_requeridas manda la cantidad de espacios de
@@ -121,6 +124,7 @@ export function ChecklistItemRow({
               }
               slot={slot}
               disabled={!onFotoModo}
+              estadoGuardado={estadoGuardadoFoto?.(idx + 1) ?? "idle"}
               onFoto={(f) => onFotoModo?.(idx + 1, f)}
               onQuitar={() => onQuitarFotoModo?.(idx + 1)}
               alt={`${item.nombre} — foto ${idx + 1}`}
@@ -146,9 +150,7 @@ export function ChecklistItemRow({
         </span>
         <span className="text-sm font-medium">{item.nombre}</span>
         <InfoPopover titulo={item.nombre} exigencia={item.exigencia ?? ""} />
-        {valor.guardado && (
-          <span className="text-xs text-success-700">✓ Guardado</span>
-        )}
+        <IndicadorGuardado estado={estadoGuardado} />
         <select
           aria-label={`Estado de ${item.nombre}`}
           value={valor.estado}
@@ -215,14 +217,20 @@ export function ChecklistItemRow({
                   type="file"
                   accept={FORMATOS_FOTO}
                   capture="environment"
-                  disabled={valor.subiendoFoto}
+                  disabled={estadoGuardado === "guardando"}
                   onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
                 />
-                <span className="text-xs text-muted-foreground">
-                  {valor.subiendoFoto
-                    ? "Subiendo foto…"
-                    : "Elegir una imagen o tomarla con la cámara. Se guarda al instante."}
-                </span>
+                {estadoGuardado === "guardando" ? (
+                  <IndicadorGuardado
+                    estado={estadoGuardado}
+                    textoGuardando="Subiendo foto…"
+                  />
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    Elegir una imagen o tomarla con la cámara. Se guarda al
+                    instante.
+                  </span>
+                )}
               </>
             )}
           </div>
@@ -237,6 +245,7 @@ function FotoSlotInput({
   label,
   slot,
   disabled,
+  estadoGuardado,
   onFoto,
   onQuitar,
   alt,
@@ -244,6 +253,7 @@ function FotoSlotInput({
   label: string;
   slot: FotoSlot;
   disabled: boolean;
+  estadoGuardado: EstadoGuardado;
   onFoto: (file: File | null) => void;
   onQuitar: () => void;
   alt: string;
@@ -285,14 +295,20 @@ function FotoSlotInput({
             type="file"
             accept={FORMATOS_FOTO}
             capture="environment"
-            disabled={disabled || slot.subiendo}
+            disabled={disabled || estadoGuardado === "guardando"}
             onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
           />
-          <span className="text-xs text-muted-foreground">
-            {slot.subiendo
-              ? "Subiendo foto…"
-              : "Elegir una imagen o tomarla con la cámara. Se guarda al instante."}
-          </span>
+          {estadoGuardado === "guardando" ? (
+            <IndicadorGuardado
+              estado={estadoGuardado}
+              textoGuardando="Subiendo foto…"
+            />
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              Elegir una imagen o tomarla con la cámara. Se guarda al
+              instante.
+            </span>
+          )}
         </>
       )}
     </div>

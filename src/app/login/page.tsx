@@ -14,6 +14,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Logo } from "@/components/Logo";
+import { ContenidoBoton } from "@/components/ui/estado-accion";
+import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
 import { mensajeErrorAuth, mensajeErrorParam } from "@/lib/auth-errores";
 
 function LoginForm() {
@@ -29,7 +31,7 @@ function LoginForm() {
       ? "Contraseña actualizada. Ya puedes iniciar sesión."
       : null,
   );
-  const [cargando, setCargando] = useState(false);
+  const guardado = useEstadoGuardado();
   // Cuenta de intentos fallidos consecutivos en ESTA pantalla (se resetea al
   // entrar bien). `mensajeErrorAuth` la usa para distinguir un error de red
   // real de un throttling de Supabase Auth, indistinguibles por el texto del
@@ -88,49 +90,44 @@ function LoginForm() {
     e.preventDefault();
     setError(null);
     setAviso(null);
-    setCargando(true);
     try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        console.error("Login falló:", error);
-        registrarFallo(error);
-        return;
-      }
-      setIntentosFallidos(0);
-      limpiarBloqueo();
-      router.replace(redirectTo);
-      router.refresh();
+      await guardado.ejecutar(async () => {
+        const supabase = createClient();
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        setIntentosFallidos(0);
+        limpiarBloqueo();
+        router.replace(redirectTo);
+        router.refresh();
+      });
     } catch (err) {
-      console.error("Login falló (excepción):", err);
+      console.error("Login falló:", err);
       registrarFallo(err);
-    } finally {
-      setCargando(false);
     }
   }
 
   async function onRecuperar(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setCargando(true);
     try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.resetPasswordForEmail(recuperarEmail, {
-        // Pasa por /auth/callback para canjear el code (PKCE) y dejar la sesión
-        // de recuperación lista antes de mostrar el formulario de nueva clave.
-        redirectTo:
-          typeof window !== "undefined"
-            ? `${window.location.origin}/auth/callback?next=/auth/actualizar-clave`
-            : undefined,
+      await guardado.ejecutar(async () => {
+        const supabase = createClient();
+        const { error } = await supabase.auth.resetPasswordForEmail(recuperarEmail, {
+          // Pasa por /auth/callback para canjear el code (PKCE) y dejar la
+          // sesión de recuperación lista antes de mostrar el formulario de
+          // nueva clave.
+          redirectTo:
+            typeof window !== "undefined"
+              ? `${window.location.origin}/auth/callback?next=/auth/actualizar-clave`
+              : undefined,
+        });
+        // §8.1: mensaje genérico — no revelamos si el correo existe o no.
+        if (error) console.error("resetPasswordForEmail falló:", error);
+        setRecuperarEnviado(true);
       });
-      // §8.1: mensaje genérico — no revelamos si el correo existe o no.
-      if (error) console.error("resetPasswordForEmail falló:", error);
-      setRecuperarEnviado(true);
     } catch (err) {
       console.error("resetPasswordForEmail falló (excepción):", err);
       setRecuperarEnviado(true);
-    } finally {
-      setCargando(false);
     }
   }
 
@@ -182,8 +179,12 @@ function LoginForm() {
                   {error}
                 </p>
               )}
-              <Button type="submit" disabled={cargando}>
-                {cargando ? "Enviando…" : "Enviar correo de recuperación"}
+              <Button type="submit" disabled={guardado.pendiente}>
+                <ContenidoBoton
+                  pendiente={guardado.pendiente}
+                  texto="Enviar correo de recuperación"
+                  textoPendiente="Enviando…"
+                />
               </Button>
               <button
                 type="button"
@@ -247,12 +248,19 @@ function LoginForm() {
               {error}
             </p>
           )}
-          <Button type="submit" disabled={cargando || segundosRestantes > 0}>
-            {cargando
-              ? "Ingresando…"
-              : segundosRestantes > 0
-                ? `Espera ${segundosRestantes} s…`
-                : "Ingresar"}
+          <Button
+            type="submit"
+            disabled={guardado.pendiente || segundosRestantes > 0}
+          >
+            {segundosRestantes > 0 ? (
+              `Espera ${segundosRestantes} s…`
+            ) : (
+              <ContenidoBoton
+                pendiente={guardado.pendiente}
+                texto="Ingresar"
+                textoPendiente="Ingresando…"
+              />
+            )}
           </Button>
           <button
             type="button"

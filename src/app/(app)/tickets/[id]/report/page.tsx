@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { firmarRutas } from "@/lib/storage";
 import { buttonVariants } from "@/components/ui/button";
 import { PrintButton } from "@/components/PrintButton";
+import { VerPdfButton } from "@/components/VerPdfButton";
 import { EmailRecipientsSelect } from "@/components/EmailRecipientsSelect";
 import { RevisionInformeSelector } from "@/components/RevisionInformeSelector";
 import { puedeReinspeccionar } from "@/lib/ticket-state-machine";
@@ -260,14 +261,7 @@ export default async function InformePage({
             >
               Volver a las inspecciones
             </Link>
-            <a
-              href={`/api/informe/${ticket.id}/enviar?rev=${valorSelector}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-primary underline"
-            >
-              Ver / descargar PDF
-            </a>
+            <VerPdfButton ticketId={ticket.id} rev={valorSelector} />
           </div>
         </div>
         <EmailRecipientsSelect ticketId={ticket.id} rev={valorSelector} />

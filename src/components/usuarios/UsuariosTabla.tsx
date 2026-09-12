@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { PencilIcon, UserPlusIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ContenidoBoton, IndicadorGuardado } from "@/components/ui/estado-accion";
+import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
 import {
   agregarUsuario,
   actualizarTiposInspeccion,
@@ -158,7 +160,13 @@ export function UsuariosTabla({
   const [abierto, setAbierto] = useState(false);
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [form, setForm] = useState<Form>(formVacio);
-  const [pendiente, startTransition] = useTransition();
+  // Retroalimentación visual — nivel 1, pieza única (useEstadoGuardado). Solo
+  // para el formulario del diálogo — las filas de la tabla tienen cada una
+  // su propia instancia en FilaUsuario, más abajo: antes compartían un único
+  // `pendiente` de useTransition para TODA la tabla (bug real, no solo
+  // prolijidad — apretar "Desactivar" en una fila apagaba las nueve).
+  const guardadoDialogo = useEstadoGuardado();
+  const pendiente = guardadoDialogo.pendiente;
   const [busqueda, setBusqueda] = useState("");
 
   const telObligatorio = form.rol === "supervisor";
@@ -189,11 +197,11 @@ export function UsuariosTabla({
     setAbierto(true);
   }
 
-  function guardar(e: React.FormEvent) {
+  async function guardar(e: React.FormEvent) {
     e.preventDefault();
     if (!formValido || pendiente) return;
-    startTransition(async () => {
-      try {
+    try {
+      await guardadoDialogo.ejecutar(async () => {
         const base = {
           nombre: form.nombre,
           apellido: form.apellido,
@@ -220,24 +228,12 @@ export function UsuariosTabla({
           editandoId ? "Usuario actualizado." : "Usuario creado e invitado.",
         );
         if (res.aviso) toast.warning(res.aviso, { duration: 8000 });
-      } catch (err) {
-        toast.error(
-          err instanceof Error ? err.message : "No se pudo guardar el usuario.",
-        );
-      }
-    });
-  }
-
-  function accion(fn: () => Promise<unknown>, exito: string) {
-    startTransition(async () => {
-      try {
-        const r = (await fn()) as { aviso?: string } | undefined;
-        toast.success(exito);
-        if (r?.aviso) toast.warning(r.aviso, { duration: 8000 });
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "No se pudo completar.");
-      }
-    });
+      });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "No se pudo guardar el usuario.",
+      );
+    }
   }
 
   // Tipos de inspección: se arma el texto de búsqueda/estado una sola vez
@@ -366,98 +362,16 @@ export function UsuariosTabla({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtradas.map((f) => {
-                const u = f.usuario;
-                const pendienteInvitacion = !u.user_id;
-                const esYo = u.id === perfilId;
-                return (
-                  <TableRow key={u.id}>
-                    <TableCell className="font-medium">
-                      {resaltar(`${u.nombre} ${u.apellido ?? ""}`.trim(), terminos)}
-                    </TableCell>
-                    <TableCell>{resaltar(u.email ?? "—", terminos)}</TableCell>
-                    <TableCell>{resaltar(u.telefono ?? "—", terminos)}</TableCell>
-                    <TableCell>
-                      <Badge variant={u.rol === "administrador" ? "default" : "secondary"}>
-                        {resaltar(f.rolTexto, terminos)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <CeldaTipos
-                        rol={u.rol}
-                        tiposClaves={f.tiposClaves}
-                        terminos={terminos}
-                        expandirLos4={hayTerminoDeTipo}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {!u.activo ? (
-                        <Badge className="bg-danger-100 text-danger-700">
-                          {resaltar(f.estadoTexto, terminos)}
-                        </Badge>
-                      ) : pendienteInvitacion ? (
-                        <Badge className="bg-warning-100 text-warning-700">
-                          {resaltar(f.estadoTexto, terminos)}
-                        </Badge>
-                      ) : (
-                        <Badge className="bg-success-100 text-success-700">
-                          {resaltar(f.estadoTexto, terminos)}
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap items-center justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="xs"
-                          disabled={pendiente}
-                          onClick={() => abrirEditar(u)}
-                        >
-                          <PencilIcon />
-                          Editar
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="xs"
-                          disabled={pendiente || (esYo && u.activo)}
-                          title={
-                            esYo && u.activo
-                              ? "No puedes desactivar tu propia cuenta"
-                              : undefined
-                          }
-                          onClick={() =>
-                            accion(
-                              () =>
-                                cambiarActivo({ id: u.id, activo: !u.activo }),
-                              u.activo ? "Usuario desactivado." : "Usuario activado.",
-                            )
-                          }
-                        >
-                          {u.activo ? "Desactivar" : "Activar"}
-                        </Button>
-                        {pendienteInvitacion && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="xs"
-                            disabled={pendiente}
-                            onClick={() =>
-                              accion(
-                                () => reenviarInvitacion({ id: u.id }),
-                                "Invitación reenviada.",
-                              )
-                            }
-                          >
-                            Reenviar invitación
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+              {filtradas.map((f) => (
+                <FilaUsuario
+                  key={f.usuario.id}
+                  fila={f}
+                  perfilId={perfilId}
+                  terminos={terminos}
+                  hayTerminoDeTipo={hayTerminoDeTipo}
+                  onEditar={abrirEditar}
+                />
+              ))}
             </TableBody>
           </Table>
         </div>
@@ -594,13 +508,153 @@ export function UsuariosTabla({
                 Cancelar
               </Button>
               <Button type="submit" disabled={!formValido || pendiente}>
-                {pendiente ? "Guardando…" : editandoId ? "Guardar" : "Crear e invitar"}
+                <ContenidoBoton
+                  pendiente={pendiente}
+                  texto={editandoId ? "Guardar" : "Crear e invitar"}
+                  textoPendiente="Guardando…"
+                />
               </Button>
             </div>
           </form>
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/**
+ * Una fila de la tabla, con su PROPIA instancia de useEstadoGuardado — antes
+ * las tres acciones de fila (Editar/Activar-Desactivar/Reenviar invitación)
+ * compartían un único `pendiente` de useTransition para toda la tabla:
+ * apretar "Desactivar" en una fila apagaba los botones de las otras nueve,
+ * sin decir cuál estaba trabajando. Acá cada fila es su propio componente,
+ * así que cada una tiene su propio hook — solo ESTA fila se deshabilita.
+ */
+function FilaUsuario({
+  fila: f,
+  perfilId,
+  terminos,
+  hayTerminoDeTipo,
+  onEditar,
+}: {
+  fila: FilaBusqueda;
+  perfilId: string;
+  terminos: string[];
+  hayTerminoDeTipo: boolean;
+  onEditar: (u: Personal) => void;
+}) {
+  const u = f.usuario;
+  const pendienteInvitacion = !u.user_id;
+  const esYo = u.id === perfilId;
+  const guardado = useEstadoGuardado();
+
+  async function accion(
+    fn: () => Promise<{ aviso?: string } | undefined>,
+    exito: string,
+  ) {
+    try {
+      const r = await guardado.ejecutar(fn);
+      toast.success(exito);
+      if (r?.aviso) toast.warning(r.aviso, { duration: 8000 });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo completar.");
+    }
+  }
+
+  return (
+    <TableRow>
+      <TableCell className="font-medium">
+        {resaltar(`${u.nombre} ${u.apellido ?? ""}`.trim(), terminos)}
+      </TableCell>
+      <TableCell>{resaltar(u.email ?? "—", terminos)}</TableCell>
+      <TableCell>{resaltar(u.telefono ?? "—", terminos)}</TableCell>
+      <TableCell>
+        <Badge variant={u.rol === "administrador" ? "default" : "secondary"}>
+          {resaltar(f.rolTexto, terminos)}
+        </Badge>
+      </TableCell>
+      <TableCell>
+        <CeldaTipos
+          rol={u.rol}
+          tiposClaves={f.tiposClaves}
+          terminos={terminos}
+          expandirLos4={hayTerminoDeTipo}
+        />
+      </TableCell>
+      <TableCell>
+        {!u.activo ? (
+          <Badge className="bg-danger-100 text-danger-700">
+            {resaltar(f.estadoTexto, terminos)}
+          </Badge>
+        ) : pendienteInvitacion ? (
+          <Badge className="bg-warning-100 text-warning-700">
+            {resaltar(f.estadoTexto, terminos)}
+          </Badge>
+        ) : (
+          <Badge className="bg-success-100 text-success-700">
+            {resaltar(f.estadoTexto, terminos)}
+          </Badge>
+        )}
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <IndicadorGuardado estado={guardado.estado} />
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            disabled={guardado.pendiente}
+            onClick={() => onEditar(u)}
+          >
+            <PencilIcon />
+            Editar
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            disabled={guardado.pendiente || (esYo && u.activo)}
+            title={
+              esYo && u.activo
+                ? "No puedes desactivar tu propia cuenta"
+                : undefined
+            }
+            onClick={() =>
+              accion(
+                () => cambiarActivo({ id: u.id, activo: !u.activo }),
+                u.activo ? "Usuario desactivado." : "Usuario activado.",
+              )
+            }
+          >
+            <ContenidoBoton
+              pendiente={guardado.pendiente}
+              texto={u.activo ? "Desactivar" : "Activar"}
+              textoPendiente={u.activo ? "Desactivando…" : "Activando…"}
+            />
+          </Button>
+          {pendienteInvitacion && (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              disabled={guardado.pendiente}
+              onClick={() =>
+                accion(
+                  () => reenviarInvitacion({ id: u.id }),
+                  "Invitación reenviada.",
+                )
+              }
+            >
+              <ContenidoBoton
+                pendiente={guardado.pendiente}
+                texto="Reenviar invitación"
+                textoPendiente="Reenviando…"
+              />
+            </Button>
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
   );
 }
 
