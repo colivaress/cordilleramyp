@@ -14,22 +14,20 @@ import { cn } from "@/lib/utils";
  * ocupar más de una pantalla por sí solo (flex-wrap con varios botones);
  * un segundo elemento fijo grande se come demasiado.
  *
- * Cuenta ítems TOCADOS, no "ítem actual": cada ítem parte en "Conforme"
- * (§2.4), así que "cuántos cambié" no sirve — la mayoría de las veces no se
- * cambia nada porque todo está bien. "Cuántos ya pasé la vista" (se enfocó
- * su select, ver ChecklistItemRow) es la pregunta que el supervisor
- * realmente quiere responder: si va por la mitad o le queda todo. Si se
- * salta un ítem sin tocarlo, el contador no avanza y se nota.
+ * Cuenta ítems RESPONDIDOS, no "ítem actual" ni una heurística de foco: cada
+ * ítem del checklist arranca sin valor (§2.7 — mismo criterio que el combo
+ * "Tipo de inspección"), así que "tiene un estado guardado" es un hecho, no
+ * una inferencia. Si se salta un ítem, el contador no avanza y se nota.
  *
  * El `top` se mide del header real en vez de asumir un alto fijo — el
  * header usa flex-wrap y su altura cambia según el rol (admin ve 3 links
  * de nav, supervisor 1) y el ancho de pantalla.
  */
 export function ChecklistProgreso({
-  tocados,
+  respondidos,
   total,
 }: {
-  tocados: number;
+  respondidos: number;
   total: number;
 }) {
   const [top, setTop] = useState(0);
@@ -47,7 +45,7 @@ export function ChecklistProgreso({
     return () => observerRef.current?.disconnect();
   }, []);
 
-  const porcentaje = total > 0 ? Math.round((tocados / total) * 100) : 0;
+  const porcentaje = total > 0 ? Math.round((respondidos / total) * 100) : 0;
 
   return (
     <div
@@ -58,7 +56,7 @@ export function ChecklistProgreso({
           que quede alineado con él en pantallas anchas. */}
       <div className="mx-auto flex h-full w-full max-w-6xl items-center gap-3 px-4 text-xs">
         <span className="shrink-0 tabular-nums text-muted-foreground">
-          {tocados} de {total} revisados
+          {respondidos} de {total} respondidos
         </span>
         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
           <div

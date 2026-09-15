@@ -296,14 +296,21 @@ export function InspeccionForm({
     respuestasRef.current = respuestas;
   }, [respuestas]);
 
-  const [observacionGeneral, setObservacionGeneral] = useState("");
+  // Para ChecklistProgreso y la validación de "Finalizar revisión" — cuenta
+  // ítems modo 'estado' con `estado` real (no null), no una heurística de
+  // foco. Con el valor preseleccionado eliminado (§2.7), esto es un hecho:
+  // "respondido" significa que hay un valor guardado. Los ítems modo 'fotos'
+  // no tienen este campo (se validan por cantidad de fotos, no por estado) —
+  // se excluyen acá para no contarlos como "pendientes" para siempre.
+  const itemsPendientes = useMemo(
+    () =>
+      itemsDelTipo.filter(
+        (i) => i.modo !== "fotos" && respuestas[i.key]?.estado == null,
+      ),
+    [itemsDelTipo, respuestas],
+  );
 
-  // Para ChecklistProgreso — ver el comentario de ese componente. Claves de
-  // itemsDelTipo cuyo select ya recibió foco al menos una vez.
-  const [tocados, setTocados] = useState<Set<string>>(new Set());
-  const marcarTocado = useCallback((key: string) => {
-    setTocados((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
-  }, []);
+  const [observacionGeneral, setObservacionGeneral] = useState("");
 
   // Retroalimentación visual — nivel 1. Una sola pieza reutilizable
   // (useEstadoGuardado/useEstadoGuardadoPorClave, ver src/hooks): `guardadoItems`
@@ -313,6 +320,7 @@ export function InspeccionForm({
   // textarea de observación general — antes no tenía NINGUNA retroalimentación.
   const guardadoItems = useEstadoGuardadoPorClave();
   const guardadoObsGeneral = useEstadoGuardado();
+  const guardadoPendientes = useEstadoGuardado();
   const claveFotoModo = (key: string, orden: number) => `${key}:${orden}`;
 
   // El checklist a mostrar depende del tipo elegido — mientras el supervisor
@@ -334,7 +342,6 @@ export function InspeccionForm({
       ),
     );
     setObservacionGeneral("");
-    setTocados(new Set());
     if (nuevoTipo) {
       setCabecera((prev) => ({
         ...prev,
@@ -553,6 +560,21 @@ export function InspeccionForm({
     }
   }
 
+  /**
+   * Para no obligar a 18 toques cuando lo normal es que todo esté bien.
+   * 🔴 Solo rellena los que están SIN responder (itemsPendientes) — nunca
+   * toca un ítem que ya tiene valor, así sea "no conforme". Que este botón
+   * pudiera pisar un hallazgo ya registrado sería peor que el problema que
+   * viene a resolver (§2.7 de la fase).
+   */
+  async function marcarPendientesConforme() {
+    const claves = itemsPendientes.map((i) => i.key);
+    if (claves.length === 0) return;
+    await guardadoPendientes.ejecutar(() =>
+      Promise.all(claves.map((key) => onEstadoItem(key, "conforme"))),
+    );
+  }
+
   function onObservacionItem(key: string, texto: string) {
     // Instantáneo: responde "registré tu toque" antes de programar el
     // debounce, no cuando la request sale (esa es la queja que originó esto).
@@ -574,7 +596,10 @@ export function InspeccionForm({
             ticketId,
             revisionNumero: rev,
             itemKey: key,
-            estado: r.estado,
+            // El guard de arriba ya garantiza no_conforme — literal en vez
+            // de r.estado para no depender de que el narrowing sobreviva el
+            // cierre de la arrow function pasada a ejecutar().
+            estado: "no_conforme",
             observacion: texto,
             fotoPath: r.fotoPath,
           }),
@@ -742,31 +767,69 @@ export function InspeccionForm({
     }, 700);
   }
 
-  function validarChecklist(): string | null {
+  /**
+   * Devuelve el mensaje de error Y la clave del ítem que lo causó (cuando
+   * aplica), para que onSubmit pueda desplazar hasta ahí — con 18 ítems en
+   * ~4,5 pantallas, decir "falta uno" no alcanza si el supervisor tiene que
+   * buscarlo bajando a mano (ver §9 de la fase).
+   */
+  function validarChecklist(): { mensaje: string; itemKey?: string } | null {
+    // Primero: ¿queda algún ítem modo 'estado' sin responder? Antes esto no
+    // existía como caso — todo ítem arrancaba en "Conforme" (§2.7). Se
+    // revisa antes que el resto porque lógicamente precede: no tiene sentido
+    // validar la observación de un no_conforme si ni siquiera se respondió.
+    if (itemsPendientes.length > 0) {
+      const primero = itemsPendientes[0];
+      return {
+        mensaje:
+          itemsPendientes.length === 1
+            ? `Falta responder "${primero.nombre}".`
+            : `Faltan ${itemsPendientes.length} elementos por responder — te llevamos al primero.`,
+        itemKey: primero.key,
+      };
+    }
     for (const item of itemsDelTipo) {
       const r = respuestas[item.key];
-      if (!r) return `Falta completar "${item.nombre}".`;
+      if (!r) return { mensaje: `Falta completar "${item.nombre}".`, itemKey: item.key };
       if (item.modo === "fotos") {
         const requeridas = cantidadFotosItem(item);
         if (r.fotos.length < requeridas || r.fotos.some((f) => !f.path))
-          return `Faltan fotos en "${item.nombre}" (se requiere${requeridas === 1 ? "" : "n"} ${requeridas}).`;
+          return {
+            mensaje: `Faltan fotos en "${item.nombre}" (se requiere${requeridas === 1 ? "" : "n"} ${requeridas}).`,
+            itemKey: item.key,
+          };
       } else if (r.estado === "no_conforme") {
         if (!r.observacion.trim())
-          return `Falta la observación en "${item.nombre}".`;
-        if (!r.fotoPath) return `Falta la foto de la falla en "${item.nombre}".`;
+          return { mensaje: `Falta la observación en "${item.nombre}".`, itemKey: item.key };
+        if (!r.fotoPath)
+          return { mensaje: `Falta la foto de la falla en "${item.nombre}".`, itemKey: item.key };
       }
     }
-    if (!firmaConductorUrl) return "Falta la firma del conductor.";
+    if (!firmaConductorUrl) return { mensaje: "Falta la firma del conductor." };
     if (!firmaFiscalizadorUrl)
-      return "Falta la firma del fiscalizador/supervisor.";
+      return { mensaje: "Falta la firma del fiscalizador/supervisor." };
     return null;
+  }
+
+  /** Baja hasta el ítem y enfoca su select — ver validarChecklist. */
+  function irAlItemPendiente(itemKey: string) {
+    const fila = document.getElementById(`checklist-item-${itemKey}`);
+    if (!fila) return;
+    fila.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "center",
+    });
+    fila.querySelector("select")?.focus();
   }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const err = validarChecklist();
     if (err) {
-      toast.error(err);
+      toast.error(err.mensaje);
+      if (err.itemKey) irAlItemPendiente(err.itemKey);
       return;
     }
     try {
@@ -1059,7 +1122,10 @@ export function InspeccionForm({
       </Card>
 
       {paso === 2 && !esSoloFotos && itemsDelTipo.length > 0 && (
-        <ChecklistProgreso tocados={tocados.size} total={itemsDelTipo.length} />
+        <ChecklistProgreso
+          respondidos={itemsDelTipo.length - itemsPendientes.length}
+          total={itemsDelTipo.length}
+        />
       )}
 
       {pasoMaxVisto === 2 && (
@@ -1078,6 +1144,21 @@ export function InspeccionForm({
                   {numInsp != null && tipoInspeccion ? " — " : ""}
                   {tipoInspeccion ? ETIQUETA_TIPO_INSPECCION[tipoInspeccion] : ""}
                 </CardDescription>
+              )}
+              {itemsPendientes.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-2 w-fit"
+                  disabled={guardadoPendientes.pendiente}
+                  onClick={marcarPendientesConforme}
+                >
+                  <ContenidoBoton
+                    pendiente={guardadoPendientes.pendiente}
+                    texto="Marcar los pendientes como conforme"
+                    textoPendiente="Marcando…"
+                  />
+                </Button>
               )}
             </CardHeader>
             <CardContent>
@@ -1101,7 +1182,6 @@ export function InspeccionForm({
                       estadoGuardadoFoto={(orden) =>
                         guardadoItems.estadoDe(claveFotoModo(item.key, orden))
                       }
-                      onTocado={() => marcarTocado(item.key)}
                     />
                   ))}
                 </div>

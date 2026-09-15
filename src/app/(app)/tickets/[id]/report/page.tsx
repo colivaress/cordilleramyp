@@ -407,7 +407,12 @@ function BloqueRevision({
                 <td className="py-1.5 pr-2 tabular-nums">{i + 1}</td>
                 <td className="py-1.5 pr-2">{r.item?.nombre}</td>
                 <td className="py-1.5 pr-2">
-                  {ETIQUETA_ITEM[r.estado ?? "conforme"]}
+                  {/* cerrarRevision ya no permite cerrar una revisión con
+                      ítems sin responder (§2.7/§9 de la fase) — r.estado
+                      null acá sería un dato viejo o un caso no debería
+                      pasar. Si aparece, mejor decir la verdad que asumir
+                      "Conforme" sin que nadie lo haya confirmado. */}
+                  {r.estado ? ETIQUETA_ITEM[r.estado] : "Sin responder"}
                 </td>
                 <td className="py-1.5">
                   {r.estado === "no_conforme" ? (

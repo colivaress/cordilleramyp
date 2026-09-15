@@ -28,7 +28,12 @@ const slotVacio = (): FotoSlot => ({
 export type RespuestaEditable = {
   // Solo relevante para ítems de modo 'estado' — un ítem de modo 'fotos'
   // nunca tiene Conforme/No conforme/No aplica, este campo queda sin usar.
-  estado: ItemEstado;
+  // `null` = todavía sin responder. Antes arrancaba en "conforme" — eso
+  // hacía que un ítem nunca tocado quedara igual, en los datos, a uno que
+  // el supervisor sí revisó y confirmó: el informe afirmaba algo que nadie
+  // miró. Ahora el supervisor elige, ítem por ítem (o de una con "Marcar
+  // los pendientes como conforme" — ver InspeccionForm).
+  estado: ItemEstado | null;
   // Observación POR ÍTEM — solo modo 'estado'. Los ítems de modo 'fotos'
   // comparten una única observación general para toda la revisión, aparte
   // (ver InspeccionForm, sección "Observaciones" debajo del checklist).
@@ -48,7 +53,7 @@ export type RespuestaEditable = {
 
 /** `cantidadFotos` = checklist_items.fotos_requeridas del ítem (0 si modo 'estado'). */
 export const respuestaVacia = (cantidadFotos = 0): RespuestaEditable => ({
-  estado: "conforme",
+  estado: null,
   observacion: "",
   fotoPath: null,
   fotoNombre: null,
@@ -77,7 +82,6 @@ export function ChecklistItemRow({
   onFotoModo,
   onQuitarFotoModo,
   estadoGuardadoFoto,
-  onTocado,
 }: {
   indice: number;
   item: ChecklistItem;
@@ -95,15 +99,6 @@ export function ChecklistItemRow({
   onQuitarFotoModo?: (orden: number) => void;
   /** Solo modo 'fotos': un indicador independiente por cada foto obligatoria. */
   estadoGuardadoFoto?: (orden: number) => EstadoGuardado;
-  /**
-   * Para el contador de progreso del checklist (ChecklistProgreso). Se
-   * dispara al enfocar el select de estado — no al cambiar su valor: cada
-   * ítem parte en "Conforme" (§2.4), así que exigir un cambio de valor
-   * dejaría sin contar cualquier ítem correctamente revisado y dejado tal
-   * cual. Tocar el select (abrirlo para confirmar o para cambiarlo) es la
-   * señal de que el supervisor pasó por ese ítem.
-   */
-  onTocado?: () => void;
 }) {
   if (item.modo === "fotos") {
     // checklist_items.fotos_requeridas manda la cantidad de espacios de
@@ -147,12 +142,15 @@ export function ChecklistItemRow({
   }
 
   const noConforme = valor.estado === "no_conforme";
+  const sinResponder = valor.estado == null;
 
   return (
     <div
+      id={`checklist-item-${item.key}`}
       className={cn(
         "grid gap-3 border-b py-3 last:border-b-0",
         noConforme && "rounded-lg bg-danger-50 px-3",
+        sinResponder && "rounded-lg bg-warning-50 px-3",
       )}
     >
       {/*
@@ -176,14 +174,21 @@ export function ChecklistItemRow({
         </div>
         <select
           aria-label={`Estado de ${item.nombre}`}
-          value={valor.estado}
-          onChange={(e) => {
-            onEstado(e.target.value as ItemEstado);
-            onTocado?.();
-          }}
-          onFocus={onTocado}
-          className={cn(nativeSelectClassName, "w-full")}
+          value={valor.estado ?? ""}
+          onChange={(e) => onEstado(e.target.value as ItemEstado)}
+          className={cn(
+            nativeSelectClassName,
+            "w-full",
+            sinResponder && "border-warning-400 text-muted-foreground",
+          )}
         >
+          {/* Sin valor preseleccionado (§2.7, mismo criterio que "Tipo de
+              inspección") — el supervisor elige. Esta opción solo existe
+              para representar "sin responder"; no es un valor real, por eso
+              el select no puede quedarse en ella una vez elegido algo. */}
+          <option value="" disabled>
+            Sin responder
+          </option>
           {OPCIONES.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
