@@ -137,22 +137,7 @@ export const SignaturePad = forwardRef<
 
   return (
     <div className="grid gap-2">
-      <div className="flex items-center justify-between">
-        <Label>{label}</Label>
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          onClick={() => {
-            padRef.current?.clear();
-            dataUrlRef.current = null;
-            setVacio(true);
-            onChange?.(null);
-          }}
-        >
-          Limpiar
-        </Button>
-      </div>
+      <Label>{label}</Label>
       <canvas
         ref={canvasRef}
         className="h-[180px] w-full touch-none rounded-lg border border-input bg-white"
@@ -162,6 +147,21 @@ export const SignaturePad = forwardRef<
       ) : (
         <p className="text-xs text-success-700">Firma capturada y guardada.</p>
       )}
+      {/* Fila propia, debajo del canvas y del texto de estado — no debe
+          quedar al lado de donde el dedo firma (ver §9). */}
+      <Button
+        type="button"
+        variant="outline"
+        className="mt-1 w-fit"
+        onClick={() => {
+          padRef.current?.clear();
+          dataUrlRef.current = null;
+          setVacio(true);
+          onChange?.(null);
+        }}
+      >
+        Limpiar
+      </Button>
     </div>
   );
 });

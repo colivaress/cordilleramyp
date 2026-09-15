@@ -211,10 +211,10 @@ async function construirRevisionPDF(
           modo: "estado",
           n: i + 1,
           nombre,
-          // r.estado es nullable desde la migración de tipos de inspección
-          // (solo lo usan los ítems modo 'fotos', ya cubiertos arriba) — acá
-          // siempre es un ItemEstado real.
-          estado: ETIQUETA_ITEM[r.estado ?? "conforme"],
+          // cerrarRevision no permite cerrar con ítems modo 'estado' sin
+          // responder (§2.7/§9 de la fase) — r.estado null acá sería un dato
+          // viejo o un caso que no debería pasar. Nunca asumir "Conforme".
+          estado: r.estado ? ETIQUETA_ITEM[r.estado] : "Sin responder",
           esNoConforme: r.estado === "no_conforme",
           observacion: r.observacion,
           fotoDataUri:

@@ -38,13 +38,13 @@ export function Paginacion({
     return qs ? `${pathname}?${qs}` : pathname;
   };
 
-  const btn = buttonVariants({ variant: "outline", size: "xs" });
+  const btn = buttonVariants({ variant: "outline" });
   const inactivo = "pointer-events-none opacity-50";
 
   return (
     <nav
       aria-label="Paginación"
-      className="mt-4 flex flex-wrap items-center justify-center gap-1"
+      className="mt-4 flex flex-wrap items-center justify-center gap-2"
     >
       <Link
         href={href(page - 1)}
@@ -65,7 +65,6 @@ export function Paginacion({
             aria-current={n === page ? "page" : undefined}
             className={buttonVariants({
               variant: n === page ? "default" : "outline",
-              size: "xs",
             })}
           >
             {n}

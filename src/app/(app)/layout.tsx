@@ -15,7 +15,10 @@ export default async function AppLayout({
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <header className="no-print sticky top-0 z-20 border-b bg-card/95 backdrop-blur">
+      <header
+        id="app-header"
+        className="no-print sticky top-0 z-20 border-b bg-card/95 backdrop-blur"
+      >
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2">
           {/* §8: el logo (sin texto al lado) lleva al inicio del rol (admin y
               supervisor: /dashboard, que se renderiza distinto según el rol). */}
@@ -26,26 +29,26 @@ export default async function AppLayout({
           >
             <Logo />
           </Link>
-          <nav className="flex items-center gap-1 text-sm">
+          <nav className="flex items-center gap-2 text-sm">
             {/* §2.11: "Dashboard" = analítica; "Inspecciones" = el listado.
                 §2.6: el supervisor no ve ninguno de los dos. */}
             {esAdmin && (
               <>
                 <Link
                   href="/dashboard/analitica"
-                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                  className={buttonVariants({ variant: "ghost" })}
                 >
                   Dashboard
                 </Link>
                 <Link
                   href="/dashboard"
-                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                  className={buttonVariants({ variant: "ghost" })}
                 >
                   Inspecciones
                 </Link>
                 <Link
                   href="/usuarios"
-                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                  className={buttonVariants({ variant: "ghost" })}
                 >
                   Usuarios
                 </Link>
@@ -55,7 +58,7 @@ export default async function AppLayout({
             {esSupervisor && (
               <Link
                 href="/tickets/new"
-                className={buttonVariants({ variant: "ghost", size: "sm" })}
+                className={buttonVariants({ variant: "ghost" })}
               >
                 Nueva inspección
               </Link>
@@ -71,7 +74,7 @@ export default async function AppLayout({
               {esAdmin ? "Administrador" : "Supervisor"}
             </Badge>
             <form action="/auth/signout" method="post">
-              <Button type="submit" variant="outline" size="sm">
+              <Button type="submit" variant="outline">
                 Salir
               </Button>
             </form>
