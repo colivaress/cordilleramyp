@@ -7,6 +7,7 @@ import { ContenidoBoton } from "@/components/ui/estado-accion";
 import { OverlayBloqueante } from "@/components/ui/overlay-bloqueante";
 import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
 import { useAccionLarga } from "@/hooks/use-accion-larga";
+import { useEsperaNavegacion } from "@/hooks/use-espera-navegacion";
 import {
   finalizarInspeccion,
   finalizarReinspeccion,
@@ -31,16 +32,22 @@ export function BotonFinalizarPendiente({
   const router = useRouter();
   const guardado = useEstadoGuardado();
   const overlay = useAccionLarga();
+  const esperarNavegacionInforme = useEsperaNavegacion();
 
   async function finalizar() {
     try {
       await guardado.ejecutar(() =>
         overlay.ejecutar(async () => {
+          // finalizarInspeccion/finalizarReinspeccion ya revalidan /dashboard y
+          // /tickets/[id] en el servidor — un router.refresh() acá duplicaría
+          // la carga completa de /report sin invalidar nada más.
           if (revisionNumero <= 1) await finalizarInspeccion({ ticketId });
           else await finalizarReinspeccion({ ticketId, revisionNumero });
           toast.success("Revisión finalizada. Generar y enviar el informe.");
           router.push(`/tickets/${ticketId}/report`);
-          router.refresh();
+          // Mismo patrón que InspeccionForm: el overlay se queda hasta que
+          // el informe esté en pantalla, no hasta acá — ver useEsperaNavegacion.
+          await esperarNavegacionInforme();
         }, "Finalizando inspección…"),
       );
     } catch (e) {

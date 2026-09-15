@@ -29,6 +29,7 @@ import {
   useEstadoGuardadoPorClave,
 } from "@/hooks/use-estado-guardado";
 import { useAccionLarga } from "@/hooks/use-accion-larga";
+import { useEsperaNavegacion } from "@/hooks/use-espera-navegacion";
 import { createClient } from "@/lib/supabase/client";
 import {
   iniciarInspeccion,
@@ -338,6 +339,7 @@ export function InspeccionForm({
   // envío acá cerraría la inspección dos veces, no solo un correo de más.
   const guardadoFinalizar = useEstadoGuardado();
   const overlayFinalizar = useAccionLarga();
+  const esperarNavegacionInforme = useEsperaNavegacion();
 
   // §2.8: firmas persistidas en el estado del formulario (sobreviven a navegar
   // entre pasos) + subidas a Storage y a ticket_revisiones apenas se capturan.
@@ -786,21 +788,33 @@ export function InspeccionForm({
           });
 
           // §2.8: "Finalizar revisión" solo CIERRA sobre datos ya guardados.
+          // finalizarInspeccion/finalizarReinspeccion ya llaman revalidatePath
+          // en el servidor sobre /dashboard y /tickets/[id] — un router.refresh()
+          // acá duplicaría la carga completa de /report (dos requests a la
+          // misma ruta, cada una con su propia revalidación de sesión) sin
+          // invalidar nada que no esté invalidado ya.
+          let ticketIdInforme: string;
           if (modo === "nueva") {
             const res = await finalizarInspeccion({ ticketId });
             toast.success(
               `Inspección guardada (Nro ${res.numeroInspeccion}). Generar y enviar el informe.`,
             );
-            router.push(`/tickets/${res.ticketId}/report`);
+            ticketIdInforme = res.ticketId;
           } else {
             const res = await finalizarReinspeccion({
               ticketId,
               revisionNumero: rev,
             });
             toast.success("Revisión guardada. Generar y enviar el informe.");
-            router.push(`/tickets/${res.ticketId}/report`);
+            ticketIdInforme = res.ticketId;
           }
-          router.refresh();
+          router.push(`/tickets/${ticketIdInforme}/report`);
+          // El overlay se queda visible hasta que el informe esté en
+          // pantalla, no hasta acá — ver useEsperaNavegacion: esta promesa
+          // no se resuelve sola, la abandona el desmontaje de este
+          // componente cuando la navegación real se confirma. Si nunca se
+          // confirma, el timeout de adentro se encarga de rendirse.
+          await esperarNavegacionInforme();
         }, "Finalizando inspección…"),
       );
     } catch (error) {
