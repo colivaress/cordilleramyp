@@ -512,6 +512,7 @@ function Firma({
           width={280}
           height={110}
           unoptimized
+          loading="eager"
           className="h-24 w-full rounded border bg-white object-contain"
         />
       ) : (
