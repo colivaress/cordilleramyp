@@ -22,6 +22,7 @@ import {
   type RespuestaEditable,
 } from "@/components/ChecklistItemRow";
 import { SignaturePad } from "@/components/SignaturePad";
+import { ChecklistProgreso } from "@/components/ChecklistProgreso";
 import { ContenidoBoton, IndicadorGuardado } from "@/components/ui/estado-accion";
 import { OverlayBloqueante } from "@/components/ui/overlay-bloqueante";
 import { nativeSelectClassName } from "@/components/ui/native-select";
@@ -297,6 +298,13 @@ export function InspeccionForm({
 
   const [observacionGeneral, setObservacionGeneral] = useState("");
 
+  // Para ChecklistProgreso — ver el comentario de ese componente. Claves de
+  // itemsDelTipo cuyo select ya recibió foco al menos una vez.
+  const [tocados, setTocados] = useState<Set<string>>(new Set());
+  const marcarTocado = useCallback((key: string) => {
+    setTocados((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+  }, []);
+
   // Retroalimentación visual — nivel 1. Una sola pieza reutilizable
   // (useEstadoGuardado/useEstadoGuardadoPorClave, ver src/hooks): `guardadoItems`
   // cubre los 18 ítems del checklist (una clave por ítem para el select +
@@ -326,6 +334,7 @@ export function InspeccionForm({
       ),
     );
     setObservacionGeneral("");
+    setTocados(new Set());
     if (nuevoTipo) {
       setCabecera((prev) => ({
         ...prev,
@@ -1049,6 +1058,10 @@ export function InspeccionForm({
         </CardContent>
       </Card>
 
+      {paso === 2 && !esSoloFotos && itemsDelTipo.length > 0 && (
+        <ChecklistProgreso tocados={tocados.size} total={itemsDelTipo.length} />
+      )}
+
       {pasoMaxVisto === 2 && (
         <div className={cn("grid gap-6", paso === 1 && "hidden")}>
           <Card>
@@ -1088,6 +1101,7 @@ export function InspeccionForm({
                       estadoGuardadoFoto={(orden) =>
                         guardadoItems.estadoDe(claveFotoModo(item.key, orden))
                       }
+                      onTocado={() => marcarTocado(item.key)}
                     />
                   ))}
                 </div>

@@ -77,6 +77,7 @@ export function ChecklistItemRow({
   onFotoModo,
   onQuitarFotoModo,
   estadoGuardadoFoto,
+  onTocado,
 }: {
   indice: number;
   item: ChecklistItem;
@@ -94,6 +95,15 @@ export function ChecklistItemRow({
   onQuitarFotoModo?: (orden: number) => void;
   /** Solo modo 'fotos': un indicador independiente por cada foto obligatoria. */
   estadoGuardadoFoto?: (orden: number) => EstadoGuardado;
+  /**
+   * Para el contador de progreso del checklist (ChecklistProgreso). Se
+   * dispara al enfocar el select de estado — no al cambiar su valor: cada
+   * ítem parte en "Conforme" (§2.4), así que exigir un cambio de valor
+   * dejaría sin contar cualquier ítem correctamente revisado y dejado tal
+   * cual. Tocar el select (abrirlo para confirmar o para cambiarlo) es la
+   * señal de que el supervisor pasó por ese ítem.
+   */
+  onTocado?: () => void;
 }) {
   if (item.modo === "fotos") {
     // checklist_items.fotos_requeridas manda la cantidad de espacios de
@@ -167,7 +177,11 @@ export function ChecklistItemRow({
         <select
           aria-label={`Estado de ${item.nombre}`}
           value={valor.estado}
-          onChange={(e) => onEstado(e.target.value as ItemEstado)}
+          onChange={(e) => {
+            onEstado(e.target.value as ItemEstado);
+            onTocado?.();
+          }}
+          onFocus={onTocado}
           className={cn(nativeSelectClassName, "w-full")}
         >
           {OPCIONES.map((o) => (
