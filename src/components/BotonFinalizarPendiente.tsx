@@ -7,7 +7,10 @@ import { ContenidoBoton } from "@/components/ui/estado-accion";
 import { OverlayBloqueante } from "@/components/ui/overlay-bloqueante";
 import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
 import { useAccionLarga } from "@/hooks/use-accion-larga";
-import { useEsperaNavegacion } from "@/hooks/use-espera-navegacion";
+import {
+  NavegacionNoConfirmadaError,
+  useEsperaNavegacion,
+} from "@/hooks/use-espera-navegacion";
 import {
   finalizarInspeccion,
   finalizarReinspeccion,
@@ -51,9 +54,17 @@ export function BotonFinalizarPendiente({
         }, "Finalizando inspección…"),
       );
     } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : "No se pudo finalizar la revisión.",
-      );
+      // Mismo criterio que InspeccionForm: si esto es
+      // NavegacionNoConfirmadaError, la revisión SÍ se cerró bien — solo
+      // falló mostrar el informe. No usar lenguaje de "falló" acá, o el
+      // supervisor reintenta y el servidor lo rechaza con "ya fue finalizada".
+      if (e instanceof NavegacionNoConfirmadaError) {
+        toast.warning(e.message, { duration: 10000 });
+      } else {
+        toast.error(
+          e instanceof Error ? e.message : "No se pudo finalizar la revisión.",
+        );
+      }
     }
   }
 

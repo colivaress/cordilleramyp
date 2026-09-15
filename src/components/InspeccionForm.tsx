@@ -29,7 +29,10 @@ import {
   useEstadoGuardadoPorClave,
 } from "@/hooks/use-estado-guardado";
 import { useAccionLarga } from "@/hooks/use-accion-larga";
-import { useEsperaNavegacion } from "@/hooks/use-espera-navegacion";
+import {
+  NavegacionNoConfirmadaError,
+  useEsperaNavegacion,
+} from "@/hooks/use-espera-navegacion";
 import { createClient } from "@/lib/supabase/client";
 import {
   iniciarInspeccion,
@@ -818,11 +821,20 @@ export function InspeccionForm({
         }, "Finalizando inspección…"),
       );
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Error al cerrar la revisión. El checklist ya quedó guardado; se puede reintentar desde el ticket.",
-      );
+      // NavegacionNoConfirmadaError: la inspección SÍ se cerró bien — solo
+      // falló mostrar el informe. Un toast.error con lenguaje de "falló"
+      // acá haría que el supervisor reintente "Finalizar revisión", y el
+      // guard del servidor lo rechazaría con "ya fue finalizada" — dos
+      // avisos seguidos por algo que en realidad salió bien.
+      if (error instanceof NavegacionNoConfirmadaError) {
+        toast.warning(error.message, { duration: 10000 });
+      } else {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Error al cerrar la revisión. El checklist ya quedó guardado; se puede reintentar desde el ticket.",
+        );
+      }
     }
   }
 

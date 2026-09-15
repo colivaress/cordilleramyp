@@ -5,6 +5,21 @@ import { useEffect, useRef } from "react";
 const TIMEOUT_NAVEGACION_MS = 15000;
 
 /**
+ * Se lanza SOLO cuando la guardia anti-deadlock se rinde — es decir, cuando
+ * la acción del servidor (finalizarInspeccion/finalizarReinspeccion) YA
+ * TERMINÓ BIEN y lo único que no se pudo confirmar es la navegación al
+ * informe. Es un tipo de error distinto a propósito: si el mensaje dijera
+ * "error" o "falló", el supervisor cree que perdió el trabajo y vuelve a
+ * apretar "Finalizar revisión" — ahí la guardia del servidor lo rechaza con
+ * "ya fue finalizada" y queda con dos avisos seguidos pensando que se perdió
+ * todo. El llamador debe mostrar esto con un toast NO alarmante (warning,
+ * no error) y nunca reformular el texto — distinguir "la acción falló" de
+ * "la acción salió bien pero no pude mostrarte el resultado" es lo único que
+ * separa esas dos experiencias.
+ */
+export class NavegacionNoConfirmadaError extends Error {}
+
+/**
  * "Esperar a que la navegación esté confirmada" — Next.js no da una promesa
  * que indique cuándo router.push() terminó de mostrar la página nueva. El
  * overlay bloqueante de "Finalizar revisión" tiene que seguir visible hasta
@@ -42,8 +57,8 @@ export function useEsperaNavegacion() {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => {
         reject(
-          new Error(
-            "La inspección ya quedó guardada, pero abrir el informe está tardando más de lo esperado. Volvé a Inspecciones para buscarlo.",
+          new NavegacionNoConfirmadaError(
+            "La inspección se finalizó correctamente, pero no pudimos mostrarte el informe. Búscalo en el listado de inspecciones.",
           ),
         );
       }, timeoutMs);
