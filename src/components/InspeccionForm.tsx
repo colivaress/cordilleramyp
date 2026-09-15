@@ -426,12 +426,13 @@ export function InspeccionForm({
       }
       // §2.8: la ruta queda en ticket_revisiones al instante — sobrevive a una
       // falla de "Finalizar revisión".
-      await guardarFirmaRevision({
+      const res = await guardarFirmaRevision({
         ticketId,
         revisionNumero: rev,
         quien,
         path,
       });
+      if (!res.ok) throw new Error(res.mensaje);
     } catch {
       // Subida diferida: se reintenta sí o sí en onSubmit antes de cerrar.
       toast.warning(
@@ -500,13 +501,15 @@ export function InspeccionForm({
             nroContenedor:
               tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
           });
+          if (!res.ok) throw new Error(res.mensaje);
           setNumInsp(res.numeroInspeccion);
         } else {
-          await iniciarReinspeccion({
+          const res = await iniciarReinspeccion({
             ticketId,
             conductor: conductorRevision.trim(),
             fechaVencimientoISO: new Date(vencRevision).toISOString(),
           });
+          if (!res.ok) throw new Error(res.mensaje);
         }
         setPaso(2);
         setPasoMaxVisto(2);
@@ -526,16 +529,17 @@ export function InspeccionForm({
     patchResp(key, { estado });
     const actual = respuestasRef.current[key];
     try {
-      await guardadoItems.ejecutar(key, () =>
-        guardarRespuestaItem({
+      await guardadoItems.ejecutar(key, async () => {
+        const res = await guardarRespuestaItem({
           ticketId,
           revisionNumero: rev,
           itemKey: key,
           estado,
           observacion: actual.observacion,
           fotoPath: actual.fotoPath,
-        }),
-      );
+        });
+        if (!res.ok) throw new Error(res.mensaje);
+      });
     } catch (e) {
       toast.error(
         e instanceof Error ? e.message : "No se pudo guardar el elemento.",
@@ -559,16 +563,17 @@ export function InspeccionForm({
         return;
       }
       try {
-        await guardadoItems.ejecutar(key, () =>
-          guardarRespuestaItem({
+        await guardadoItems.ejecutar(key, async () => {
+          const res = await guardarRespuestaItem({
             ticketId,
             revisionNumero: rev,
             itemKey: key,
             estado: r.estado,
             observacion: texto,
             fotoPath: r.fotoPath,
-          }),
-        );
+          });
+          if (!res.ok) throw new Error(res.mensaje);
+        });
       } catch (e) {
         toast.error(
           e instanceof Error ? e.message : "No se pudo guardar la observación.",
@@ -601,7 +606,7 @@ export function InspeccionForm({
         });
         // Ya con foto, la fila no_conforme completa se puede persistir.
         const r = respuestasRef.current[key];
-        await guardarRespuestaItem({
+        const res = await guardarRespuestaItem({
           ticketId,
           revisionNumero: rev,
           itemKey: key,
@@ -609,6 +614,7 @@ export function InspeccionForm({
           observacion: r.observacion,
           fotoPath: path,
         });
+        if (!res.ok) throw new Error(res.mensaje);
       });
     } catch (e) {
       toast.error(
@@ -635,7 +641,7 @@ export function InspeccionForm({
           fotoPreviewUrl: null,
         });
         // Sin foto, la fila no_conforme deja de ser válida: se borra en la BD.
-        await guardarRespuestaItem({
+        const res = await guardarRespuestaItem({
           ticketId,
           revisionNumero: rev,
           itemKey: key,
@@ -643,6 +649,7 @@ export function InspeccionForm({
           observacion: r.observacion,
           fotoPath: null,
         });
+        if (!res.ok) throw new Error(res.mensaje);
       });
     } catch {
       /* no bloquea: "Finalizar revisión" vuelve a validar */
@@ -671,13 +678,14 @@ export function InspeccionForm({
         );
         const previewUrl = URL.createObjectURL(blob);
         patchFotoSlot(key, orden, { path, nombre: file.name, previewUrl });
-        await guardarFotoChecklistItem({
+        const res = await guardarFotoChecklistItem({
           ticketId,
           revisionNumero: rev,
           itemKey: key,
           orden,
           path,
         });
+        if (!res.ok) throw new Error(res.mensaje);
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "No se pudo subir la foto.");
@@ -699,13 +707,14 @@ export function InspeccionForm({
             .catch(() => {});
         }
         patchFotoSlot(key, orden, { path: null, nombre: null, previewUrl: null });
-        await guardarFotoChecklistItem({
+        const res = await guardarFotoChecklistItem({
           ticketId,
           revisionNumero: rev,
           itemKey: key,
           orden,
           path: null,
         });
+        if (!res.ok) throw new Error(res.mensaje);
       });
     } catch {
       /* no bloquea: "Finalizar revisión" vuelve a validar */
@@ -721,9 +730,14 @@ export function InspeccionForm({
     if (obsGeneralTimer.current) clearTimeout(obsGeneralTimer.current);
     obsGeneralTimer.current = setTimeout(async () => {
       try {
-        await guardadoObsGeneral.ejecutar(() =>
-          guardarObservacionGeneral({ ticketId, revisionNumero: rev, texto }),
-        );
+        await guardadoObsGeneral.ejecutar(async () => {
+          const res = await guardarObservacionGeneral({
+            ticketId,
+            revisionNumero: rev,
+            texto,
+          });
+          if (!res.ok) throw new Error(res.mensaje);
+        });
       } catch (e) {
         toast.error(
           e instanceof Error ? e.message : "No se pudo guardar la observación.",
@@ -777,18 +791,21 @@ export function InspeccionForm({
             await dataUrlABlob(firmaFiscalizadorUrl as string),
             "image/png",
           );
-          await guardarFirmaRevision({
+          const resFirmaConductor = await guardarFirmaRevision({
             ticketId,
             revisionNumero: rev,
             quien: "conductor",
             path: firmaConductorPath,
           });
-          await guardarFirmaRevision({
+          if (!resFirmaConductor.ok) throw new Error(resFirmaConductor.mensaje);
+          const resFirmaFiscalizador = await guardarFirmaRevision({
             ticketId,
             revisionNumero: rev,
             quien: "fiscalizador",
             path: firmaFiscalizadorPath,
           });
+          if (!resFirmaFiscalizador.ok)
+            throw new Error(resFirmaFiscalizador.mensaje);
 
           // §2.8: "Finalizar revisión" solo CIERRA sobre datos ya guardados.
           // finalizarInspeccion/finalizarReinspeccion ya llaman revalidatePath
@@ -799,6 +816,7 @@ export function InspeccionForm({
           let ticketIdInforme: string;
           if (modo === "nueva") {
             const res = await finalizarInspeccion({ ticketId });
+            if (!res.ok) throw new Error(res.mensaje);
             toast.success(
               `Inspección guardada (Nro ${res.numeroInspeccion}). Generar y enviar el informe.`,
             );
@@ -808,6 +826,7 @@ export function InspeccionForm({
               ticketId,
               revisionNumero: rev,
             });
+            if (!res.ok) throw new Error(res.mensaje);
             toast.success("Revisión guardada. Generar y enviar el informe.");
             ticketIdInforme = res.ticketId;
           }

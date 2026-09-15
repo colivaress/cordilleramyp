@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireRol } from "@/lib/auth";
 import { ORDEN_TIPOS_INSPECCION, type RolUsuario } from "@/lib/tipos";
+import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
 
 export type UsuarioInput = {
   nombre: string;
@@ -15,9 +16,9 @@ export type UsuarioInput = {
   rol: RolUsuario;
 };
 
-export type ResultadoUsuario = { ok: true; aviso?: string };
+export type ResultadoUsuario = ResultadoAccion<{ aviso?: string }>;
 
-function validar(input: UsuarioInput) {
+function validar(input: UsuarioInput): ResultadoAccion {
   const req: [string, string][] = [
     ["nombre", input.nombre],
     ["apellido", input.apellido],
@@ -26,14 +27,15 @@ function validar(input: UsuarioInput) {
   ];
   for (const [campo, valor] of req) {
     if (!String(valor ?? "").trim())
-      throw new Error(`Falta completar "${campo}".`);
+      return { ok: false, mensaje: `Falta completar "${campo}".` };
   }
   if (input.rol !== "supervisor" && input.rol !== "administrador")
-    throw new Error("Rol inválido.");
+    return { ok: false, mensaje: "Rol inválido." };
   // §2.10/§3.1: el teléfono es obligatorio para un supervisor (lo usa el
   // WhatsApp automático y el manual).
   if (input.rol === "supervisor" && !input.telefono.trim())
-    throw new Error("El teléfono es obligatorio para un supervisor.");
+    return { ok: false, mensaje: "El teléfono es obligatorio para un supervisor." };
+  return { ok: true };
 }
 
 /** Envía (o reenvía) la invitación de Supabase Auth. Best-effort. */
@@ -72,7 +74,8 @@ export async function agregarUsuario(
   input: UsuarioInput,
 ): Promise<ResultadoUsuario> {
   await requireRol("administrador");
-  validar(input);
+  const val = validar(input);
+  if (!val.ok) return val;
   const supabase = await createClient();
 
   const email = input.email.trim().toLowerCase();
@@ -81,7 +84,8 @@ export async function agregarUsuario(
     .select("id")
     .ilike("email", email)
     .maybeSingle();
-  if (existente) throw new Error("Ya existe un usuario con ese correo.");
+  if (existente)
+    return { ok: false, mensaje: "Ya existe un usuario con ese correo." };
 
   const { error } = await supabase.from("personal").insert({
     nombre: input.nombre.trim(),
@@ -93,7 +97,7 @@ export async function agregarUsuario(
     activo: true,
     user_id: null,
   });
-  if (error) throw new Error(`No se pudo crear el usuario: ${error.message}`);
+  if (error) return errorInesperado("agregarUsuario.insert", error);
 
   const aviso = await invitar({
     email,
@@ -112,7 +116,8 @@ export async function editarUsuario(
   input: UsuarioInput & { id: string },
 ): Promise<ResultadoUsuario> {
   await requireRol("administrador");
-  validar(input);
+  const val = validar(input);
+  if (!val.ok) return val;
   const supabase = await createClient();
 
   // El correo no se edita (es el vínculo con la cuenta de autenticación).
@@ -126,7 +131,7 @@ export async function editarUsuario(
       rol: input.rol,
     })
     .eq("id", input.id);
-  if (error) throw new Error(`No se pudo guardar: ${error.message}`);
+  if (error) return errorInesperado("editarUsuario.update", error);
 
   revalidatePath("/usuarios");
   return { ok: true };
@@ -156,14 +161,14 @@ export async function actualizarTiposInspeccion(input: {
     .delete()
     .eq("personal_id", input.personalId);
   if (errDelete)
-    throw new Error(`No se pudieron actualizar los permisos: ${errDelete.message}`);
+    return errorInesperado("actualizarTiposInspeccion.delete", errDelete);
 
   if (tipos.length > 0) {
     const { error: errInsert } = await supabase
       .from("personal_tipos_inspeccion")
       .insert(tipos.map((tipo_inspeccion) => ({ personal_id: input.personalId, tipo_inspeccion })));
     if (errInsert)
-      throw new Error(`No se pudieron guardar los permisos: ${errInsert.message}`);
+      return errorInesperado("actualizarTiposInspeccion.insert", errInsert);
   }
 
   revalidatePath("/usuarios");
@@ -176,14 +181,14 @@ export async function cambiarActivo(input: {
 }): Promise<ResultadoUsuario> {
   const { perfil } = await requireRol("administrador");
   if (!input.activo && input.id === perfil.id)
-    throw new Error("No puedes desactivar tu propia cuenta.");
+    return { ok: false, mensaje: "No puedes desactivar tu propia cuenta." };
 
   const supabase = await createClient();
   const { error } = await supabase
     .from("personal")
     .update({ activo: input.activo })
     .eq("id", input.id);
-  if (error) throw new Error(error.message);
+  if (error) return errorInesperado("cambiarActivo.update", error);
 
   revalidatePath("/usuarios");
   return { ok: true };
@@ -200,9 +205,12 @@ export async function reenviarInvitacion(input: {
     .select("email, nombre, apellido, rol, telefono, fecha_nacimiento, user_id")
     .eq("id", input.id)
     .maybeSingle();
-  if (!u) throw new Error("Usuario no encontrado.");
+  if (!u) return { ok: false, mensaje: "Usuario no encontrado." };
   if (u.user_id)
-    throw new Error("Este usuario ya activó su cuenta; no hay invitación pendiente.");
+    return {
+      ok: false,
+      mensaje: "Este usuario ya activó su cuenta; no hay invitación pendiente.",
+    };
 
   const aviso = await invitar({
     email: u.email ?? "",
