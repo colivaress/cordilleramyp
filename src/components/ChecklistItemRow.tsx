@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { IndicadorGuardado } from "@/components/ui/estado-accion";
+import { nativeSelectClassName } from "@/components/ui/native-select";
 import { cn } from "@/lib/utils";
 import type { ChecklistItem, ItemEstado } from "@/lib/tipos";
 import type { EstadoGuardado } from "@/hooks/use-estado-guardado";
@@ -144,18 +145,30 @@ export function ChecklistItemRow({
         noConforme && "rounded-lg bg-danger-50 px-3",
       )}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground tabular-nums">
-          {indice.toString().padStart(2, "0")}
-        </span>
-        <span className="text-sm font-medium">{item.nombre}</span>
-        <InfoPopover titulo={item.nombre} exigencia={item.exigencia ?? ""} />
-        <IndicadorGuardado estado={estadoGuardado} />
+      {/*
+        Antes de la escala táctil, todo iba en una sola fila (flex-wrap) —
+        con el ícono de info y el select a 44px, esa fila dejó de entrar en
+        360px de ancho para la mitad de los ítems (el nombre más largo, p.
+        ej. "Slider (Broches sujeta cortina)") y el select caía a una
+        segunda línea de forma inconsistente ítem por ítem: algunas filas de
+        44px, otras de 96px, sin ningún patrón visible para quien scrollea.
+        Dos filas fijas, siempre — parejo para los 18 ítems, no depende del
+        largo del nombre.
+      */}
+      <div className="grid gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-muted-foreground tabular-nums">
+            {indice.toString().padStart(2, "0")}
+          </span>
+          <span className="text-sm font-medium">{item.nombre}</span>
+          <InfoPopover titulo={item.nombre} exigencia={item.exigencia ?? ""} />
+          <IndicadorGuardado estado={estadoGuardado} />
+        </div>
         <select
           aria-label={`Estado de ${item.nombre}`}
           value={valor.estado}
           onChange={(e) => onEstado(e.target.value as ItemEstado)}
-          className="ml-auto h-8 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className={cn(nativeSelectClassName, "w-full")}
         >
           {OPCIONES.map((o) => (
             <option key={o.value} value={o.value}>
@@ -183,32 +196,33 @@ export function ChecklistItemRow({
             </Label>
 
             {valor.fotoPreviewUrl ? (
-              <div className="flex items-start gap-3">
-                <Image
-                  src={valor.fotoPreviewUrl}
-                  alt={`Foto de la falla en ${item.nombre}`}
-                  width={160}
-                  height={120}
-                  unoptimized
-                  className="h-24 w-32 rounded-md border bg-white object-cover"
-                />
-                <div className="grid gap-1">
+              <div className="grid gap-2">
+                <div className="flex items-start gap-3">
+                  <Image
+                    src={valor.fotoPreviewUrl}
+                    alt={`Foto de la falla en ${item.nombre}`}
+                    width={160}
+                    height={120}
+                    unoptimized
+                    className="h-24 w-32 rounded-md border bg-white object-cover"
+                  />
                   {valor.fotoNombre && (
                     <span className="text-xs text-muted-foreground">
                       {valor.fotoNombre}
                     </span>
                   )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    className="w-fit"
-                    onClick={onQuitarFoto}
-                  >
-                    <Trash2Icon />
-                    Eliminar y volver a tomar
-                  </Button>
                 </div>
+                {/* Fila propia, separada de la miniatura — no debe quedar al
+                    lado de la foto que el dedo está por tocar (ver §9). */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-1 w-fit"
+                  onClick={onQuitarFoto}
+                >
+                  <Trash2Icon />
+                  Eliminar y volver a tomar
+                </Button>
               </div>
             ) : (
               <>
@@ -263,30 +277,30 @@ function FotoSlotInput({
     <div className="grid gap-1.5">
       <Label htmlFor={inputId}>{label}</Label>
       {slot.previewUrl ? (
-        <div className="flex items-start gap-3">
-          <Image
-            src={slot.previewUrl}
-            alt={alt}
-            width={160}
-            height={120}
-            unoptimized
-            className="h-24 w-32 rounded-md border bg-white object-cover"
-          />
-          <div className="grid gap-1">
+        <div className="grid gap-2">
+          <div className="flex items-start gap-3">
+            <Image
+              src={slot.previewUrl}
+              alt={alt}
+              width={160}
+              height={120}
+              unoptimized
+              className="h-24 w-32 rounded-md border bg-white object-cover"
+            />
             {slot.nombre && (
               <span className="text-xs text-muted-foreground">{slot.nombre}</span>
             )}
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              className="w-fit"
-              onClick={onQuitar}
-            >
-              <Trash2Icon />
-              Eliminar y volver a tomar
-            </Button>
           </div>
+          {/* Fila propia, separada de la miniatura — ver ChecklistItemRow. */}
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-1 w-fit"
+            onClick={onQuitar}
+          >
+            <Trash2Icon />
+            Eliminar y volver a tomar
+          </Button>
         </div>
       ) : (
         <>

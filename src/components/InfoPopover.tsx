@@ -1,6 +1,7 @@
 "use client";
 
 import { InfoIcon } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Popover,
   PopoverContent,
@@ -8,6 +9,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 
 /**
  * Ícono "i" al lado del nombre del elemento del checklist (§2.4).
@@ -24,7 +26,10 @@ export function InfoPopover({
   return (
     <Popover>
       <PopoverTrigger
-        className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+        className={cn(
+          buttonVariants({ variant: "ghost", size: "icon" }),
+          "rounded-full text-muted-foreground",
+        )}
         aria-label={`Exigencias para cargar: ${titulo}`}
       >
         <InfoIcon className="size-4" />

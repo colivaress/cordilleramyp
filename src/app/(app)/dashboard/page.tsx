@@ -220,7 +220,7 @@ export default async function DashboardPage({
                         <Link
                           href={`/tickets/${t.id}/report`}
                           className={cn(
-                            buttonVariants({ variant: "outline", size: "xs" }),
+                            buttonVariants({ variant: "outline" }),
                             "border-brand-600/40 text-brand-700 hover:bg-brand-50 hover:text-brand-800",
                           )}
                         >

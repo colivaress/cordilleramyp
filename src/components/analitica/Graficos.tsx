@@ -14,6 +14,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { nativeSelectClassName } from "@/components/ui/native-select";
+import { cn } from "@/lib/utils";
 
 // §6: misma paleta que el resto de la app (tokens semánticos de Tailwind v4).
 const AZUL = "var(--color-brand-500)";
@@ -131,7 +133,7 @@ export function GraficoDonaSupervisores({
           id="dona-mes"
           value={mes}
           onChange={(e) => setMes(e.target.value)}
-          className="h-9 w-fit rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className={cn(nativeSelectClassName, "w-fit")}
         >
           <option value="">Todos los meses</option>
           {mesesOpciones.map((o) => (

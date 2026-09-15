@@ -129,14 +129,14 @@ export default async function InformePage({
           {esSupervisor && puedeReinspeccionar(ticket.estado) && (
             <Link
               href={`/tickets/${id}/reinspeccion`}
-              className={buttonVariants({ size: "sm" })}
+              className={buttonVariants({})}
             >
               Registrar re-inspección
             </Link>
           )}
           <Link
             href={`/tickets/${id}`}
-            className={buttonVariants({ variant: "outline", size: "sm" })}
+            className={buttonVariants({ variant: "outline" })}
           >
             Ver historial completo
           </Link>
@@ -257,7 +257,7 @@ export default async function InformePage({
                 que se renderiza según el rol. */}
             <Link
               href="/dashboard"
-              className={buttonVariants({ variant: "outline", size: "sm" })}
+              className={buttonVariants({ variant: "outline" })}
             >
               Volver a las inspecciones
             </Link>

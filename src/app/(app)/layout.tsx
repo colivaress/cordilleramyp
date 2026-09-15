@@ -26,26 +26,26 @@ export default async function AppLayout({
           >
             <Logo />
           </Link>
-          <nav className="flex items-center gap-1 text-sm">
+          <nav className="flex items-center gap-2 text-sm">
             {/* §2.11: "Dashboard" = analítica; "Inspecciones" = el listado.
                 §2.6: el supervisor no ve ninguno de los dos. */}
             {esAdmin && (
               <>
                 <Link
                   href="/dashboard/analitica"
-                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                  className={buttonVariants({ variant: "ghost" })}
                 >
                   Dashboard
                 </Link>
                 <Link
                   href="/dashboard"
-                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                  className={buttonVariants({ variant: "ghost" })}
                 >
                   Inspecciones
                 </Link>
                 <Link
                   href="/usuarios"
-                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                  className={buttonVariants({ variant: "ghost" })}
                 >
                   Usuarios
                 </Link>
@@ -55,7 +55,7 @@ export default async function AppLayout({
             {esSupervisor && (
               <Link
                 href="/tickets/new"
-                className={buttonVariants({ variant: "ghost", size: "sm" })}
+                className={buttonVariants({ variant: "ghost" })}
               >
                 Nueva inspección
               </Link>
@@ -71,7 +71,7 @@ export default async function AppLayout({
               {esAdmin ? "Administrador" : "Supervisor"}
             </Badge>
             <form action="/auth/signout" method="post">
-              <Button type="submit" variant="outline" size="sm">
+              <Button type="submit" variant="outline">
                 Salir
               </Button>
             </form>

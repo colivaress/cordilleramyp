@@ -24,6 +24,7 @@ import {
 import { SignaturePad } from "@/components/SignaturePad";
 import { ContenidoBoton, IndicadorGuardado } from "@/components/ui/estado-accion";
 import { OverlayBloqueante } from "@/components/ui/overlay-bloqueante";
+import { nativeSelectClassName } from "@/components/ui/native-select";
 import {
   useEstadoGuardado,
   useEstadoGuardadoPorClave,
@@ -874,7 +875,10 @@ export function InspeccionForm({
                   disabled={paso === 2}
                   value={tipoSeleccionado}
                   onChange={(e) => onCambiarTipo(e.target.value)}
-                  className="h-9 w-fit min-w-0 justify-self-start rounded-md border border-input bg-transparent py-1 pl-3 pr-8 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  className={cn(
+                    nativeSelectClassName,
+                    "w-fit min-w-0 justify-self-start pr-8",
+                  )}
                 >
                   <option value="">Seleccionar…</option>
                   {opcionesTipo.map((clave) => (
