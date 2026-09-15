@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { IndicadorGuardado } from "@/components/ui/estado-accion";
+import { nativeSelectClassName } from "@/components/ui/native-select";
 
 type Opcion = { valor: string; etiqueta: string };
 
@@ -108,7 +109,7 @@ function Campo({
         value={valor}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+        className={nativeSelectClassName}
       >
         <option value="">{todos}</option>
         {opciones.map((o) => (

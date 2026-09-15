@@ -89,14 +89,19 @@ function validarCamposPorTipo(
 /**
  * Deja lista una revisión para que se pueda ir guardando por partes (§2.8):
  * garantiza la fila en `ticket_revisiones` (es el padre FK de las respuestas) y
- * siembra las respuestas del checklist DEL TIPO de esta inspección — así los
- * ítems que el supervisor no toca igual quedan registrados y "Finalizar
- * revisión" solo tiene que cerrar sobre datos ya guardados. Es idempotente: si
- * el supervisor vuelve atrás y reingresa, no pisa lo ya marcado.
+ * siembra las FILAS del checklist DEL TIPO de esta inspección — así hay algo
+ * que actualizar por ítem apenas el supervisor lo marca, y "Finalizar
+ * revisión" solo tiene que cerrar sobre datos ya guardados. Es idempotente
+ * (`ignoreDuplicates`): si el supervisor vuelve atrás y reingresa, no pisa lo
+ * ya marcado.
  *
- * Los ítems de modo 'fotos' se siembran con `estado = null` — no tienen
- * Conforme/No conforme/No aplica (§7 de la fase, el estado resultante de esas
- * inspecciones lo define la observación general, no un estado por ítem).
+ * Todas las filas se siembran con `estado = null` — ítems de modo 'fotos'
+ * (nunca tienen Conforme/No conforme/No aplica, §7 de la fase) y también
+ * ítems de modo 'estado' (§2.7: sin valor preseleccionado — el supervisor
+ * elige. Antes se sembraban en "conforme": si no tocaba nada, el informe
+ * salía afirmando que todo estaba conforme sin que nadie lo hubiera
+ * revisado. `cerrarRevision` exige que todo ítem modo 'estado' tenga un
+ * `estado` real antes de poder cerrar — ver ahí).
  */
 async function prepararRevision(
   supabase: SupabaseServer,
@@ -145,7 +150,7 @@ async function prepararRevision(
     ticket_id: opts.ticketId,
     revision_numero: opts.numeroRevision,
     item_key: i.key,
-    estado: i.modo === "fotos" ? null : ("conforme" as const),
+    estado: null,
   }));
   if (filas.length > 0) {
     const { error } = await supabase
@@ -166,11 +171,21 @@ async function prepararRevision(
  * Devuelve el estado para que el llamador actualice el ticket. NO inserta
  * respuestas: solo cierra sobre lo ya guardado.
  *
- * Validación por modo de ítem: modo 'estado' exige observación+foto si quedó
- * no_conforme (como siempre); modo 'fotos' exige checklist_items.fotos_requeridas
- * fotos en ticket_checklist_fotos (no en foto_url — esa columna solo espeja
- * la primera, ver guardarFotoChecklistItem) — la cantidad varía por ítem,
- * no es una constante.
+ * Validación por modo de ítem: modo 'estado' exige un `estado` real (§2.7 —
+ * ya no hay valor preseleccionado, un ítem sin responder tiene `estado =
+ * null`) y observación+foto si quedó no_conforme (como siempre); modo
+ * 'fotos' exige checklist_items.fotos_requeridas fotos en
+ * ticket_checklist_fotos (no en foto_url — esa columna solo espeja la
+ * primera, ver guardarFotoChecklistItem) — la cantidad varía por ítem, no es
+ * una constante.
+ *
+ * 🔴 Esta es la regla que hace que quitar el valor preseleccionado valga la
+ * pena: sin ella, un ítem sin responder simplemente queda con `estado = null`
+ * para siempre y el informe termina con huecos silenciosos — peor que el
+ * problema original (que al menos afirmaba algo de forma pareja, aunque
+ * fuera falso). No basta con que el cliente lo valide: esto se re-verifica
+ * acá porque es el único punto por el que TODOS los caminos para cerrar una
+ * revisión pasan (InspeccionForm y BotonFinalizarPendiente).
  *
  * Estado resultante: si el checklist de este tipo es TODO modo 'fotos' (hoy,
  * únicamente exportacion_chimolsa — §7 de la fase), lo define si hay texto en
@@ -228,7 +243,14 @@ async function cerrarRevision(
     (items ?? []).map((i) => [i.key, i.fotos_requeridas ?? 0]),
   );
   const guardadas = respuestas ?? [];
-  const respondidas = new Set(guardadas.map((r) => r.item_key));
+  // "Pendiente" = no hay fila todavía, O la hay pero (ítem modo 'estado')
+  // `estado` sigue en null — un ítem nunca respondido y uno con fila sembrada
+  // pero sin tocar (§2.7) son el mismo caso para este chequeo.
+  const respondidas = new Set(
+    guardadas
+      .filter((r) => modoPorKey.get(r.item_key) === "fotos" || r.estado != null)
+      .map((r) => r.item_key),
+  );
   const faltan = claves.filter((k) => !respondidas.has(k));
   if (claves.length === 0 || faltan.length > 0)
     return {

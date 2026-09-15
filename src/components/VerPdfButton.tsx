@@ -51,7 +51,7 @@ export function VerPdfButton({
       target="_blank"
       rel="noopener noreferrer"
       onClick={onClick}
-      className={buttonVariants({ variant: "outline", size: "sm" })}
+      className={buttonVariants({ variant: "outline" })}
     >
       {abriendo ? (
         <Loader2Icon className="animate-spin motion-reduce:animate-none" />

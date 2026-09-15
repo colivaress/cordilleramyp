@@ -6,6 +6,7 @@ import { PencilIcon, UserPlusIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { nativeSelectClassName } from "@/components/ui/native-select";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -428,7 +429,7 @@ export function UsuariosTabla({
                       rol: e.target.value as RolUsuario,
                     }))
                   }
-                  className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  className={nativeSelectClassName}
                 >
                   <option value="supervisor">Supervisor</option>
                   <option value="administrador">Administrador</option>
@@ -603,10 +604,14 @@ function FilaUsuario({
       <TableCell>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <IndicadorGuardado estado={guardado.estado} />
+          {/* size="sm" explícito a propósito: hasta 3 acciones por fila en un
+              panel de administración de escritorio — el default de 44px
+              infla cada fila sin necesidad (no es lo que usa el supervisor
+              parado en el patio, ver button.tsx). */}
           <Button
             type="button"
             variant="outline"
-            size="xs"
+            size="sm"
             disabled={guardado.pendiente}
             onClick={() => onEditar(u)}
           >
@@ -616,7 +621,7 @@ function FilaUsuario({
           <Button
             type="button"
             variant="outline"
-            size="xs"
+            size="sm"
             disabled={guardado.pendiente || (esYo && u.activo)}
             title={
               esYo && u.activo
@@ -640,7 +645,7 @@ function FilaUsuario({
             <Button
               type="button"
               variant="outline"
-              size="xs"
+              size="sm"
               disabled={guardado.pendiente}
               onClick={() =>
                 accion(

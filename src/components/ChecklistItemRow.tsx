@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { IndicadorGuardado } from "@/components/ui/estado-accion";
+import { nativeSelectClassName } from "@/components/ui/native-select";
 import { cn } from "@/lib/utils";
 import type { ChecklistItem, ItemEstado } from "@/lib/tipos";
 import type { EstadoGuardado } from "@/hooks/use-estado-guardado";
@@ -27,7 +28,12 @@ const slotVacio = (): FotoSlot => ({
 export type RespuestaEditable = {
   // Solo relevante para ítems de modo 'estado' — un ítem de modo 'fotos'
   // nunca tiene Conforme/No conforme/No aplica, este campo queda sin usar.
-  estado: ItemEstado;
+  // `null` = todavía sin responder. Antes arrancaba en "conforme" — eso
+  // hacía que un ítem nunca tocado quedara igual, en los datos, a uno que
+  // el supervisor sí revisó y confirmó: el informe afirmaba algo que nadie
+  // miró. Ahora el supervisor elige, ítem por ítem (o de una con "Marcar
+  // los pendientes como conforme" — ver InspeccionForm).
+  estado: ItemEstado | null;
   // Observación POR ÍTEM — solo modo 'estado'. Los ítems de modo 'fotos'
   // comparten una única observación general para toda la revisión, aparte
   // (ver InspeccionForm, sección "Observaciones" debajo del checklist).
@@ -47,7 +53,7 @@ export type RespuestaEditable = {
 
 /** `cantidadFotos` = checklist_items.fotos_requeridas del ítem (0 si modo 'estado'). */
 export const respuestaVacia = (cantidadFotos = 0): RespuestaEditable => ({
-  estado: "conforme",
+  estado: null,
   observacion: "",
   fotoPath: null,
   fotoNombre: null,
@@ -136,27 +142,53 @@ export function ChecklistItemRow({
   }
 
   const noConforme = valor.estado === "no_conforme";
+  const sinResponder = valor.estado == null;
 
   return (
     <div
+      id={`checklist-item-${item.key}`}
       className={cn(
         "grid gap-3 border-b py-3 last:border-b-0",
         noConforme && "rounded-lg bg-danger-50 px-3",
+        sinResponder && "rounded-lg bg-warning-50 px-3",
       )}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground tabular-nums">
-          {indice.toString().padStart(2, "0")}
-        </span>
-        <span className="text-sm font-medium">{item.nombre}</span>
-        <InfoPopover titulo={item.nombre} exigencia={item.exigencia ?? ""} />
-        <IndicadorGuardado estado={estadoGuardado} />
+      {/*
+        Antes de la escala táctil, todo iba en una sola fila (flex-wrap) —
+        con el ícono de info y el select a 44px, esa fila dejó de entrar en
+        360px de ancho para la mitad de los ítems (el nombre más largo, p.
+        ej. "Slider (Broches sujeta cortina)") y el select caía a una
+        segunda línea de forma inconsistente ítem por ítem: algunas filas de
+        44px, otras de 96px, sin ningún patrón visible para quien scrollea.
+        Dos filas fijas, siempre — parejo para los 18 ítems, no depende del
+        largo del nombre.
+      */}
+      <div className="grid gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-muted-foreground tabular-nums">
+            {indice.toString().padStart(2, "0")}
+          </span>
+          <span className="text-sm font-medium">{item.nombre}</span>
+          <InfoPopover titulo={item.nombre} exigencia={item.exigencia ?? ""} />
+          <IndicadorGuardado estado={estadoGuardado} />
+        </div>
         <select
           aria-label={`Estado de ${item.nombre}`}
-          value={valor.estado}
+          value={valor.estado ?? ""}
           onChange={(e) => onEstado(e.target.value as ItemEstado)}
-          className="ml-auto h-8 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className={cn(
+            nativeSelectClassName,
+            "w-full",
+            sinResponder && "border-warning-400 text-muted-foreground",
+          )}
         >
+          {/* Sin valor preseleccionado (§2.7, mismo criterio que "Tipo de
+              inspección") — el supervisor elige. Esta opción solo existe
+              para representar "sin responder"; no es un valor real, por eso
+              el select no puede quedarse en ella una vez elegido algo. */}
+          <option value="" disabled>
+            Sin responder
+          </option>
           {OPCIONES.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
@@ -183,32 +215,33 @@ export function ChecklistItemRow({
             </Label>
 
             {valor.fotoPreviewUrl ? (
-              <div className="flex items-start gap-3">
-                <Image
-                  src={valor.fotoPreviewUrl}
-                  alt={`Foto de la falla en ${item.nombre}`}
-                  width={160}
-                  height={120}
-                  unoptimized
-                  className="h-24 w-32 rounded-md border bg-white object-cover"
-                />
-                <div className="grid gap-1">
+              <div className="grid gap-2">
+                <div className="flex items-start gap-3">
+                  <Image
+                    src={valor.fotoPreviewUrl}
+                    alt={`Foto de la falla en ${item.nombre}`}
+                    width={160}
+                    height={120}
+                    unoptimized
+                    className="h-24 w-32 rounded-md border bg-white object-cover"
+                  />
                   {valor.fotoNombre && (
                     <span className="text-xs text-muted-foreground">
                       {valor.fotoNombre}
                     </span>
                   )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    className="w-fit"
-                    onClick={onQuitarFoto}
-                  >
-                    <Trash2Icon />
-                    Eliminar y volver a tomar
-                  </Button>
                 </div>
+                {/* Fila propia, separada de la miniatura — no debe quedar al
+                    lado de la foto que el dedo está por tocar (ver §9). */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-1 w-fit"
+                  onClick={onQuitarFoto}
+                >
+                  <Trash2Icon />
+                  Eliminar y volver a tomar
+                </Button>
               </div>
             ) : (
               <>
@@ -263,30 +296,30 @@ function FotoSlotInput({
     <div className="grid gap-1.5">
       <Label htmlFor={inputId}>{label}</Label>
       {slot.previewUrl ? (
-        <div className="flex items-start gap-3">
-          <Image
-            src={slot.previewUrl}
-            alt={alt}
-            width={160}
-            height={120}
-            unoptimized
-            className="h-24 w-32 rounded-md border bg-white object-cover"
-          />
-          <div className="grid gap-1">
+        <div className="grid gap-2">
+          <div className="flex items-start gap-3">
+            <Image
+              src={slot.previewUrl}
+              alt={alt}
+              width={160}
+              height={120}
+              unoptimized
+              className="h-24 w-32 rounded-md border bg-white object-cover"
+            />
             {slot.nombre && (
               <span className="text-xs text-muted-foreground">{slot.nombre}</span>
             )}
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              className="w-fit"
-              onClick={onQuitar}
-            >
-              <Trash2Icon />
-              Eliminar y volver a tomar
-            </Button>
           </div>
+          {/* Fila propia, separada de la miniatura — ver ChecklistItemRow. */}
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-1 w-fit"
+            onClick={onQuitar}
+          >
+            <Trash2Icon />
+            Eliminar y volver a tomar
+          </Button>
         </div>
       ) : (
         <>

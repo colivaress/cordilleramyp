@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { IndicadorGuardado } from "@/components/ui/estado-accion";
+import { nativeSelectClassName } from "@/components/ui/native-select";
 
 export type OpcionRevision = { valor: string; etiqueta: string };
 
@@ -46,7 +47,7 @@ export function RevisionInformeSelector({
           value={valorActual}
           disabled={pendiente}
           onChange={(e) => cambiar(e.target.value)}
-          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className={nativeSelectClassName}
         >
           {opciones.map((o) => (
             <option key={o.valor} value={o.valor}>
