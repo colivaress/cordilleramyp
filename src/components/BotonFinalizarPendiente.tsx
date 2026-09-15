@@ -8,6 +8,10 @@ import { OverlayBloqueante } from "@/components/ui/overlay-bloqueante";
 import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
 import { useAccionLarga } from "@/hooks/use-accion-larga";
 import {
+  NavegacionNoConfirmadaError,
+  useEsperaNavegacion,
+} from "@/hooks/use-espera-navegacion";
+import {
   finalizarInspeccion,
   finalizarReinspeccion,
 } from "@/app/(app)/tickets/actions";
@@ -31,22 +35,36 @@ export function BotonFinalizarPendiente({
   const router = useRouter();
   const guardado = useEstadoGuardado();
   const overlay = useAccionLarga();
+  const esperarNavegacionInforme = useEsperaNavegacion();
 
   async function finalizar() {
     try {
       await guardado.ejecutar(() =>
         overlay.ejecutar(async () => {
+          // finalizarInspeccion/finalizarReinspeccion ya revalidan /dashboard y
+          // /tickets/[id] en el servidor — un router.refresh() acá duplicaría
+          // la carga completa de /report sin invalidar nada más.
           if (revisionNumero <= 1) await finalizarInspeccion({ ticketId });
           else await finalizarReinspeccion({ ticketId, revisionNumero });
           toast.success("Revisión finalizada. Generar y enviar el informe.");
           router.push(`/tickets/${ticketId}/report`);
-          router.refresh();
+          // Mismo patrón que InspeccionForm: el overlay se queda hasta que
+          // el informe esté en pantalla, no hasta acá — ver useEsperaNavegacion.
+          await esperarNavegacionInforme();
         }, "Finalizando inspección…"),
       );
     } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : "No se pudo finalizar la revisión.",
-      );
+      // Mismo criterio que InspeccionForm: si esto es
+      // NavegacionNoConfirmadaError, la revisión SÍ se cerró bien — solo
+      // falló mostrar el informe. No usar lenguaje de "falló" acá, o el
+      // supervisor reintenta y el servidor lo rechaza con "ya fue finalizada".
+      if (e instanceof NavegacionNoConfirmadaError) {
+        toast.warning(e.message, { duration: 10000 });
+      } else {
+        toast.error(
+          e instanceof Error ? e.message : "No se pudo finalizar la revisión.",
+        );
+      }
     }
   }
 
