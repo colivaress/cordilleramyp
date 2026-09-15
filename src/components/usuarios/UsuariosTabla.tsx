@@ -31,6 +31,7 @@ import {
   cambiarActivo,
   editarUsuario,
   reenviarInvitacion,
+  type ResultadoUsuario,
 } from "@/app/(app)/usuarios/actions";
 import {
   ETIQUETA_TIPO_INSPECCION,
@@ -214,15 +215,17 @@ export function UsuariosTabla({
         const res = editandoId
           ? await editarUsuario({ ...base, id: editandoId })
           : await agregarUsuario(base);
+        if (!res.ok) throw new Error(res.mensaje);
         // Fase "tipos de inspección" §1: los permisos se editan solo desde
         // "Editar" — un supervisor recién creado parte SIN ningún tipo
         // asignado, o sea sin poder realizar ni ver ninguna inspección,
         // hasta que un administrador entre a "Editar" y le asigne alguno.
         if (editandoId && form.rol === "supervisor") {
-          await actualizarTiposInspeccion({
+          const resTipos = await actualizarTiposInspeccion({
             personalId: editandoId,
             tipos: form.tiposInspeccion,
           });
+          if (!resTipos.ok) throw new Error(resTipos.mensaje);
         }
         setAbierto(false);
         toast.success(
@@ -549,14 +552,15 @@ function FilaUsuario({
   const esYo = u.id === perfilId;
   const guardado = useEstadoGuardado();
 
-  async function accion(
-    fn: () => Promise<{ aviso?: string } | undefined>,
-    exito: string,
-  ) {
+  async function accion(fn: () => Promise<ResultadoUsuario>, exito: string) {
     try {
-      const r = await guardado.ejecutar(fn);
+      const r = await guardado.ejecutar(async () => {
+        const res = await fn();
+        if (!res.ok) throw new Error(res.mensaje);
+        return res;
+      });
       toast.success(exito);
-      if (r?.aviso) toast.warning(r.aviso, { duration: 8000 });
+      if (r.aviso) toast.warning(r.aviso, { duration: 8000 });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo completar.");
     }

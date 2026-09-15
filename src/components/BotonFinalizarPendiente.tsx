@@ -44,8 +44,13 @@ export function BotonFinalizarPendiente({
           // finalizarInspeccion/finalizarReinspeccion ya revalidan /dashboard y
           // /tickets/[id] en el servidor — un router.refresh() acá duplicaría
           // la carga completa de /report sin invalidar nada más.
-          if (revisionNumero <= 1) await finalizarInspeccion({ ticketId });
-          else await finalizarReinspeccion({ ticketId, revisionNumero });
+          if (revisionNumero <= 1) {
+            const res = await finalizarInspeccion({ ticketId });
+            if (!res.ok) throw new Error(res.mensaje);
+          } else {
+            const res = await finalizarReinspeccion({ ticketId, revisionNumero });
+            if (!res.ok) throw new Error(res.mensaje);
+          }
           toast.success("Revisión finalizada. Generar y enviar el informe.");
           router.push(`/tickets/${ticketId}/report`);
           // Mismo patrón que InspeccionForm: el overlay se queda hasta que

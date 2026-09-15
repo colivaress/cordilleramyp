@@ -9,6 +9,7 @@ import {
 } from "@/lib/ticket-state-machine";
 import { ORDEN_TIPOS_INSPECCION } from "@/lib/tipos";
 import type { ItemEstado, TicketEstado } from "@/lib/tipos";
+import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
 
 type SupabaseServer = Awaited<ReturnType<typeof createClient>>;
 
@@ -50,11 +51,12 @@ export type GuardarRespuestaItemInput = {
   fotoPath: string | null;
 };
 
-function validarCabecera(c: CabeceraInput) {
+function validarCabecera(c: CabeceraInput): ResultadoAccion {
   for (const [k, v] of Object.entries(c)) {
     if (!String(v ?? "").trim())
-      throw new Error(`Falta el dato de inspección "${k}".`);
+      return { ok: false, mensaje: `Falta el dato de inspección "${k}".` };
   }
+  return { ok: true };
 }
 
 /**
@@ -70,17 +72,18 @@ function validarCamposPorTipo(
     nombreGuardia?: string | null;
     nroContenedor?: string | null;
   },
-) {
+): ResultadoAccion {
   if (tipo === "control_salida") {
     if (!campos.nombreEncarpador?.trim())
-      throw new Error('Falta el "Nombre Encarpador".');
+      return { ok: false, mensaje: 'Falta el "Nombre Encarpador".' };
     if (!campos.nombreGuardia?.trim())
-      throw new Error('Falta el "Nombre Guardia".');
+      return { ok: false, mensaje: 'Falta el "Nombre Guardia".' };
   }
   if (tipo === "exportacion_chimolsa") {
     if (!campos.nroContenedor?.trim())
-      throw new Error('Falta el "Nro de Contenedor".');
+      return { ok: false, mensaje: 'Falta el "Nro de Contenedor".' };
   }
+  return { ok: true };
 }
 
 /**
@@ -110,7 +113,7 @@ async function prepararRevision(
     fechaVencimientoISO: string;
     tipoInspeccion: string;
   },
-) {
+): Promise<ResultadoAccion> {
   const { data: revExistente } = await supabase
     .from("ticket_revisiones")
     .select("id")
@@ -126,8 +129,7 @@ async function prepararRevision(
         fecha_vencimiento: opts.fechaVencimientoISO,
       })
       .eq("id", revExistente.id);
-    if (error)
-      throw new Error(`No se pudo actualizar la revisión: ${error.message}`);
+    if (error) return errorInesperado("prepararRevision.update", error);
   } else {
     const { error } = await supabase.from("ticket_revisiones").insert({
       ticket_id: opts.ticketId,
@@ -137,8 +139,7 @@ async function prepararRevision(
       conductor: opts.conductor,
       fecha_vencimiento: opts.fechaVencimientoISO,
     });
-    if (error)
-      throw new Error(`No se pudo iniciar la revisión: ${error.message}`);
+    if (error) return errorInesperado("prepararRevision.insert", error);
   }
 
   const { data: items } = await supabase
@@ -158,11 +159,9 @@ async function prepararRevision(
         onConflict: "ticket_id,revision_numero,item_key",
         ignoreDuplicates: true,
       });
-    if (error)
-      throw new Error(
-        `No se pudieron inicializar las respuestas: ${error.message}`,
-      );
+    if (error) return errorInesperado("prepararRevision.upsertRespuestas", error);
   }
+  return { ok: true };
 }
 
 /**
@@ -209,7 +208,7 @@ async function cerrarRevision(
   ticketId: string,
   numeroRevision: number,
   tipoInspeccion: string,
-): Promise<TicketEstado> {
+): Promise<ResultadoAccion<{ estado: TicketEstado }>> {
   const { data: rev } = await supabase
     .from("ticket_revisiones")
     .select("id, firma_conductor_url, firma_fiscalizador_url, observacion_general")
@@ -217,11 +216,16 @@ async function cerrarRevision(
     .eq("numero_revision", numeroRevision)
     .maybeSingle();
   if (!rev)
-    throw new Error(
-      "La revisión no está iniciada. Volver a los datos y presionar 'Realizar revisión'.",
-    );
+    return {
+      ok: false,
+      mensaje:
+        "La revisión no está iniciada. Volver a los datos y presionar 'Realizar revisión'.",
+    };
   if (!rev.firma_conductor_url || !rev.firma_fiscalizador_url)
-    throw new Error("Faltan las firmas del conductor y/o del fiscalizador.");
+    return {
+      ok: false,
+      mensaje: "Faltan las firmas del conductor y/o del fiscalizador.",
+    };
 
   const { data: items } = await supabase
     .from("checklist_items")
@@ -249,11 +253,12 @@ async function cerrarRevision(
   );
   const faltan = claves.filter((k) => !respondidas.has(k));
   if (claves.length === 0 || faltan.length > 0)
-    throw new Error(
-      `Quedan ${
+    return {
+      ok: false,
+      mensaje: `Quedan ${
         faltan.length || claves.length
       } elemento(s) del checklist por completar (marcarlos, y adjuntar la foto en los no conformes).`,
-    );
+    };
 
   const idsRespuestasFotos = guardadas
     .filter((r) => modoPorKey.get(r.item_key) === "fotos")
@@ -277,11 +282,15 @@ async function cerrarRevision(
     if (modo === "fotos") {
       const requeridas = fotosRequeridasPorKey.get(r.item_key) ?? 0;
       if ((cantidadFotosPorRespuesta.get(r.id) ?? 0) < requeridas)
-        throw new Error(
-          "Faltan fotos en algún elemento del checklist.",
-        );
+        return {
+          ok: false,
+          mensaje: "Faltan fotos en algún elemento del checklist.",
+        };
     } else if (r.estado === "no_conforme" && (!r.observacion?.trim() || !r.foto_url)) {
-      throw new Error("Hay un elemento no conforme sin observación o sin foto.");
+      return {
+        ok: false,
+        mensaje: "Hay un elemento no conforme sin observación o sin foto.",
+      };
     }
   }
 
@@ -296,8 +305,8 @@ async function cerrarRevision(
     .from("ticket_revisiones")
     .update({ estado_resultante: estado })
     .eq("id", rev.id);
-  if (error) throw new Error(`No se pudo cerrar la revisión: ${error.message}`);
-  return estado;
+  if (error) return errorInesperado("cerrarRevision.update", error);
+  return { ok: true, estado };
 }
 
 /**
@@ -314,20 +323,22 @@ async function cerrarRevision(
  */
 export async function iniciarInspeccion(
   input: IniciarInspeccionInput,
-): Promise<InspeccionResultado> {
+): Promise<ResultadoAccion<InspeccionResultado>> {
   const { perfil } = await getSesion();
   if (perfil.rol !== "supervisor")
-    throw new Error("Solo un supervisor puede crear inspecciones.");
+    return { ok: false, mensaje: "Solo un supervisor puede crear inspecciones." };
   const supabase = await createClient();
 
-  validarCabecera(input.cabecera);
+  const valCabecera = validarCabecera(input.cabecera);
+  if (!valCabecera.ok) return valCabecera;
   if (!input.fechaVencimientoISO)
-    throw new Error("Falta la fecha de vencimiento de la corrección.");
+    return { ok: false, mensaje: "Falta la fecha de vencimiento de la corrección." };
   if (!input.tipoInspeccion)
-    throw new Error("Falta el tipo de inspección.");
+    return { ok: false, mensaje: "Falta el tipo de inspección." };
   if (!(ORDEN_TIPOS_INSPECCION as readonly string[]).includes(input.tipoInspeccion))
-    throw new Error("Tipo de inspección inválido.");
-  validarCamposPorTipo(input.tipoInspeccion, input);
+    return { ok: false, mensaje: "Tipo de inspección inválido." };
+  const valCampos = validarCamposPorTipo(input.tipoInspeccion, input);
+  if (!valCampos.ok) return valCampos;
 
   // Fase "tipos de inspección" — parte 4/4: mensaje amigable ANTES del
   // INSERT, respaldado por la política RLS de tickets_insert (que rechazaría
@@ -342,9 +353,11 @@ export async function iniciarInspeccion(
     .eq("personal_id", perfil.id);
   const clavesPermitidas = new Set((permitidos ?? []).map((p) => p.tipo_inspeccion));
   if (!clavesPermitidas.has(input.tipoInspeccion))
-    throw new Error(
-      "No tenés permiso para realizar este tipo de inspección. Pedile a un administrador que te lo asigne en Usuarios.",
-    );
+    return {
+      ok: false,
+      mensaje:
+        "No tenés permiso para realizar este tipo de inspección. Pedile a un administrador que te lo asigne en Usuarios.",
+    };
 
   const { data, error } = await supabase
     .from("tickets")
@@ -372,12 +385,9 @@ export async function iniciarInspeccion(
     )
     .select("numero_inspeccion")
     .single();
-  if (error || !data)
-    throw new Error(
-      `No se pudo iniciar la inspección: ${error?.message ?? "sin datos"}`,
-    );
+  if (error || !data) return errorInesperado("iniciarInspeccion.upsert", error);
 
-  await prepararRevision(supabase, {
+  const prep = await prepararRevision(supabase, {
     ticketId: input.ticketId,
     numeroRevision: 1,
     supervisorId: perfil.id,
@@ -385,9 +395,14 @@ export async function iniciarInspeccion(
     fechaVencimientoISO: input.fechaVencimientoISO,
     tipoInspeccion: input.tipoInspeccion,
   });
+  if (!prep.ok) return prep;
 
   revalidatePath("/dashboard");
-  return { ticketId: input.ticketId, numeroInspeccion: data.numero_inspeccion };
+  return {
+    ok: true,
+    ticketId: input.ticketId,
+    numeroInspeccion: data.numero_inspeccion,
+  };
 }
 
 /**
@@ -400,16 +415,16 @@ async function autorizarRevisionEnCurso(
   perfilId: string,
   ticketId: string,
   revisionNumero: number,
-) {
+): Promise<ResultadoAccion> {
   const { data: ticket } = await supabase
     .from("tickets")
     .select("supervisor_id, estado")
     .eq("id", ticketId)
     .maybeSingle();
-  if (!ticket) throw new Error("No se encontró la inspección.");
+  if (!ticket) return { ok: false, mensaje: "No se encontró la inspección." };
   if (ticket.estado !== "en_revision")
-    throw new Error("La revisión ya fue finalizada.");
-  if (ticket.supervisor_id === perfilId) return;
+    return { ok: false, mensaje: "La revisión ya fue finalizada." };
+  if (ticket.supervisor_id === perfilId) return { ok: true };
 
   const { data: rev } = await supabase
     .from("ticket_revisiones")
@@ -417,9 +432,12 @@ async function autorizarRevisionEnCurso(
     .eq("ticket_id", ticketId)
     .eq("numero_revision", revisionNumero)
     .maybeSingle();
-  if (rev?.supervisor_id === perfilId) return;
+  if (rev?.supervisor_id === perfilId) return { ok: true };
 
-  throw new Error("Solo el supervisor a cargo de esta revisión puede editarla.");
+  return {
+    ok: false,
+    mensaje: "Solo el supervisor a cargo de esta revisión puede editarla.",
+  };
 }
 
 /**
@@ -433,15 +451,16 @@ async function autorizarRevisionEnCurso(
  */
 export async function guardarRespuestaItem(
   input: GuardarRespuestaItemInput,
-): Promise<{ guardado: boolean }> {
+): Promise<ResultadoAccion<{ guardado: boolean }>> {
   const { perfil } = await getSesion();
   const supabase = await createClient();
-  await autorizarRevisionEnCurso(
+  const auth = await autorizarRevisionEnCurso(
     supabase,
     perfil.id,
     input.ticketId,
     input.revisionNumero,
   );
+  if (!auth.ok) return auth;
 
   const esNoConforme = input.estado === "no_conforme";
 
@@ -452,9 +471,8 @@ export async function guardarRespuestaItem(
       .eq("ticket_id", input.ticketId)
       .eq("revision_numero", input.revisionNumero)
       .eq("item_key", input.itemKey);
-    if (error)
-      throw new Error(`No se pudo actualizar la respuesta: ${error.message}`);
-    return { guardado: false };
+    if (error) return errorInesperado("guardarRespuestaItem.delete", error);
+    return { ok: true, guardado: false };
   }
 
   const { error } = await supabase.from("ticket_checklist_respuestas").upsert(
@@ -468,9 +486,8 @@ export async function guardarRespuestaItem(
     },
     { onConflict: "ticket_id,revision_numero,item_key" },
   );
-  if (error)
-    throw new Error(`No se pudo guardar la respuesta: ${error.message}`);
-  return { guardado: true };
+  if (error) return errorInesperado("guardarRespuestaItem.upsert", error);
+  return { ok: true, guardado: true };
 }
 
 /**
@@ -491,7 +508,8 @@ export async function guardarRespuestaItem(
  * no puede vivir en un BEFORE INSERT sobre el padre, porque esas filas
  * todavía no existen en ese momento. Misma forma del problema de las
  * migraciones 21/22 (INSERT ... RETURNING sobre una fila que la propia
- * política/trigger todavía no ve).
+ * política/trigger todavía no ve) — ver también src/lib/resultado-accion.ts,
+ * que documenta el otro síntoma que dejó ese mismo incidente.
  */
 export async function guardarFotoChecklistItem(input: {
   ticketId: string;
@@ -503,15 +521,16 @@ export async function guardarFotoChecklistItem(input: {
   orden: number;
   /** null = quitar esa foto. */
   path: string | null;
-}): Promise<{ guardado: boolean }> {
+}): Promise<ResultadoAccion<{ guardado: boolean }>> {
   const { perfil } = await getSesion();
   const supabase = await createClient();
-  await autorizarRevisionEnCurso(
+  const auth = await autorizarRevisionEnCurso(
     supabase,
     perfil.id,
     input.ticketId,
     input.revisionNumero,
   );
+  if (!auth.ok) return auth;
 
   const { data: respuesta, error: errResp } = await supabase
     .from("ticket_checklist_respuestas")
@@ -521,9 +540,11 @@ export async function guardarFotoChecklistItem(input: {
     .eq("item_key", input.itemKey)
     .maybeSingle();
   if (errResp || !respuesta)
-    throw new Error(
-      "No se encontró la respuesta de este ítem. Volver a 'Datos de Inspección' y presionar 'Realizar revisión'.",
-    );
+    return {
+      ok: false,
+      mensaje:
+        "No se encontró la respuesta de este ítem. Volver a 'Datos de Inspección' y presionar 'Realizar revisión'.",
+    };
 
   if (input.path === null) {
     const { error } = await supabase
@@ -531,13 +552,13 @@ export async function guardarFotoChecklistItem(input: {
       .delete()
       .eq("respuesta_id", respuesta.id)
       .eq("orden", input.orden);
-    if (error) throw new Error(`No se pudo quitar la foto: ${error.message}`);
+    if (error) return errorInesperado("guardarFotoChecklistItem.delete", error);
   } else {
     const { error } = await supabase.from("ticket_checklist_fotos").upsert(
       { respuesta_id: respuesta.id, orden: input.orden, url: input.path },
       { onConflict: "respuesta_id,orden" },
     );
-    if (error) throw new Error(`No se pudo guardar la foto: ${error.message}`);
+    if (error) return errorInesperado("guardarFotoChecklistItem.upsert", error);
   }
 
   const { data: primera } = await supabase
@@ -551,9 +572,9 @@ export async function guardarFotoChecklistItem(input: {
     .update({ foto_url: primera?.url ?? null })
     .eq("id", respuesta.id);
   if (errFotoUrl)
-    throw new Error(`No se pudo actualizar la respuesta: ${errFotoUrl.message}`);
+    return errorInesperado("guardarFotoChecklistItem.updateFotoUrl", errFotoUrl);
 
-  return { guardado: true };
+  return { ok: true, guardado: true };
 }
 
 /**
@@ -575,24 +596,24 @@ export async function guardarObservacionGeneral(input: {
   ticketId: string;
   revisionNumero: number;
   texto: string;
-}): Promise<{ guardado: boolean }> {
+}): Promise<ResultadoAccion<{ guardado: boolean }>> {
   const { perfil } = await getSesion();
   const supabase = await createClient();
-  await autorizarRevisionEnCurso(
+  const auth = await autorizarRevisionEnCurso(
     supabase,
     perfil.id,
     input.ticketId,
     input.revisionNumero,
   );
+  if (!auth.ok) return auth;
 
   const { error } = await supabase
     .from("ticket_revisiones")
     .update({ observacion_general: input.texto.trim() || null })
     .eq("ticket_id", input.ticketId)
     .eq("numero_revision", input.revisionNumero);
-  if (error)
-    throw new Error(`No se pudo guardar la observación: ${error.message}`);
-  return { guardado: true };
+  if (error) return errorInesperado("guardarObservacionGeneral.update", error);
+  return { ok: true, guardado: true };
 }
 
 /**
@@ -605,15 +626,16 @@ export async function guardarFirmaRevision(input: {
   revisionNumero: number;
   quien: "conductor" | "fiscalizador";
   path: string | null;
-}) {
+}): Promise<ResultadoAccion> {
   const { perfil } = await getSesion();
   const supabase = await createClient();
-  await autorizarRevisionEnCurso(
+  const auth = await autorizarRevisionEnCurso(
     supabase,
     perfil.id,
     input.ticketId,
     input.revisionNumero,
   );
+  if (!auth.ok) return auth;
 
   const cambio =
     input.quien === "conductor"
@@ -624,7 +646,8 @@ export async function guardarFirmaRevision(input: {
     .update(cambio)
     .eq("ticket_id", input.ticketId)
     .eq("numero_revision", input.revisionNumero);
-  if (error) throw new Error(`No se pudo guardar la firma: ${error.message}`);
+  if (error) return errorInesperado("guardarFirmaRevision.update", error);
+  return { ok: true };
 }
 
 /**
@@ -635,7 +658,7 @@ export async function guardarFirmaRevision(input: {
  */
 export async function finalizarInspeccion(input: {
   ticketId: string;
-}): Promise<InspeccionResultado> {
+}): Promise<ResultadoAccion<InspeccionResultado>> {
   const { perfil } = await getSesion();
   const supabase = await createClient();
 
@@ -645,32 +668,39 @@ export async function finalizarInspeccion(input: {
     .eq("id", input.ticketId)
     .maybeSingle();
   if (!ticket)
-    throw new Error(
-      "No se encontró la inspección iniciada. Volver a 'Datos de Inspección' y presionar 'Realizar revisión'.",
-    );
+    return {
+      ok: false,
+      mensaje:
+        "No se encontró la inspección iniciada. Volver a 'Datos de Inspección' y presionar 'Realizar revisión'.",
+    };
   if (ticket.supervisor_id !== perfil.id)
-    throw new Error("Solo el supervisor a cargo puede finalizar la inspección.");
+    return {
+      ok: false,
+      mensaje: "Solo el supervisor a cargo puede finalizar la inspección.",
+    };
   if (ticket.estado !== "en_revision")
-    throw new Error("Esta inspección ya fue finalizada.");
+    return { ok: false, mensaje: "Esta inspección ya fue finalizada." };
   if (!ticket.tipo_inspeccion)
-    throw new Error("Falta el tipo de inspección del ticket.");
+    return { ok: false, mensaje: "Falta el tipo de inspección del ticket." };
 
-  const estado = await cerrarRevision(
+  const cierre = await cerrarRevision(
     supabase,
     input.ticketId,
     1,
     ticket.tipo_inspeccion,
   );
+  if (!cierre.ok) return cierre;
 
   const { error: eUpd } = await supabase
     .from("tickets")
-    .update({ estado, updated_at: new Date().toISOString() })
+    .update({ estado: cierre.estado, updated_at: new Date().toISOString() })
     .eq("id", input.ticketId);
-  if (eUpd) throw new Error(eUpd.message);
+  if (eUpd) return errorInesperado("finalizarInspeccion.update", eUpd);
 
   revalidatePath(`/tickets/${input.ticketId}`);
   revalidatePath("/dashboard");
   return {
+    ok: true,
     ticketId: input.ticketId,
     numeroInspeccion: ticket.numero_inspeccion,
   };
@@ -693,34 +723,38 @@ export async function iniciarReinspeccion(input: {
   ticketId: string;
   conductor: string;
   fechaVencimientoISO: string;
-}): Promise<{ ticketId: string; numeroRevision: number }> {
+}): Promise<ResultadoAccion<{ ticketId: string; numeroRevision: number }>> {
   const { perfil } = await getSesion();
   if (perfil.rol !== "supervisor")
-    throw new Error("Solo un supervisor puede registrar re-inspecciones.");
+    return {
+      ok: false,
+      mensaje: "Solo un supervisor puede registrar re-inspecciones.",
+    };
   const supabase = await createClient();
 
   if (!input.conductor?.trim())
-    throw new Error("Falta el conductor de esta revisión.");
+    return { ok: false, mensaje: "Falta el conductor de esta revisión." };
   if (!input.fechaVencimientoISO)
-    throw new Error("Falta la fecha de vencimiento de la corrección.");
+    return { ok: false, mensaje: "Falta la fecha de vencimiento de la corrección." };
 
   const { data: ticket } = await supabase
     .from("tickets")
     .select("estado, revision_actual, supervisor_id, tipo_inspeccion")
     .eq("id", input.ticketId)
     .maybeSingle();
-  if (!ticket) throw new Error("Ticket no encontrado.");
+  if (!ticket) return { ok: false, mensaje: "Ticket no encontrado." };
   if (!ticket.tipo_inspeccion)
-    throw new Error("Falta el tipo de inspección del ticket.");
+    return { ok: false, mensaje: "Falta el tipo de inspección del ticket." };
 
   // Puede venir desde "finalizada_con_observaciones" (o el legado
   // "en_reparacion_de_observaciones") en el primer ingreso, o ya estar
   // "en_revision" si el supervisor volvió a los datos y reingresó.
   const yaEnCurso = ticket.estado === "en_revision";
   if (!yaEnCurso && !puedeReinspeccionar(ticket.estado))
-    throw new Error(
-      "Solo se puede re-inspeccionar un ticket con observaciones pendientes.",
-    );
+    return {
+      ok: false,
+      mensaje: "Solo se puede re-inspeccionar un ticket con observaciones pendientes.",
+    };
 
   if (yaEnCurso) {
     // Otra persona no puede continuar una re-inspección que ya arrancó otro.
@@ -735,9 +769,10 @@ export async function iniciarReinspeccion(input: {
       revEnCurso.supervisor_id !== perfil.id &&
       ticket.supervisor_id !== perfil.id
     )
-      throw new Error(
-        "Otro supervisor ya está realizando la re-inspección de este ticket.",
-      );
+      return {
+        ok: false,
+        mensaje: "Otro supervisor ya está realizando la re-inspección de este ticket.",
+      };
   }
 
   const numeroRevision = yaEnCurso
@@ -745,7 +780,7 @@ export async function iniciarReinspeccion(input: {
     : ticket.revision_actual + 1;
   const conductor = input.conductor.trim();
 
-  await prepararRevision(supabase, {
+  const prep = await prepararRevision(supabase, {
     ticketId: input.ticketId,
     numeroRevision,
     supervisorId: perfil.id,
@@ -753,6 +788,7 @@ export async function iniciarReinspeccion(input: {
     fechaVencimientoISO: input.fechaVencimientoISO,
     tipoInspeccion: ticket.tipo_inspeccion,
   });
+  if (!prep.ok) return prep;
 
   if (!yaEnCurso) {
     const { error } = await supabase
@@ -769,12 +805,12 @@ export async function iniciarReinspeccion(input: {
         updated_at: new Date().toISOString(),
       })
       .eq("id", input.ticketId);
-    if (error) throw new Error(error.message);
+    if (error) return errorInesperado("iniciarReinspeccion.update", error);
   }
 
   revalidatePath(`/tickets/${input.ticketId}`);
   revalidatePath("/dashboard");
-  return { ticketId: input.ticketId, numeroRevision };
+  return { ok: true, ticketId: input.ticketId, numeroRevision };
 }
 
 /**
@@ -785,7 +821,7 @@ export async function iniciarReinspeccion(input: {
 export async function finalizarReinspeccion(input: {
   ticketId: string;
   revisionNumero: number;
-}): Promise<{ ticketId: string }> {
+}): Promise<ResultadoAccion<{ ticketId: string }>> {
   const { perfil } = await getSesion();
   const supabase = await createClient();
 
@@ -794,11 +830,11 @@ export async function finalizarReinspeccion(input: {
     .select("estado, supervisor_id, tipo_inspeccion")
     .eq("id", input.ticketId)
     .maybeSingle();
-  if (!ticket) throw new Error("Ticket no encontrado.");
+  if (!ticket) return { ok: false, mensaje: "Ticket no encontrado." };
   if (ticket.estado !== "en_revision")
-    throw new Error("Esta re-inspección ya fue finalizada.");
+    return { ok: false, mensaje: "Esta re-inspección ya fue finalizada." };
   if (!ticket.tipo_inspeccion)
-    throw new Error("Falta el tipo de inspección del ticket.");
+    return { ok: false, mensaje: "Falta el tipo de inspección del ticket." };
 
   const { data: rev } = await supabase
     .from("ticket_revisiones")
@@ -806,22 +842,24 @@ export async function finalizarReinspeccion(input: {
     .eq("ticket_id", input.ticketId)
     .eq("numero_revision", input.revisionNumero)
     .maybeSingle();
-  if (!rev) throw new Error("La revisión no está iniciada.");
+  if (!rev) return { ok: false, mensaje: "La revisión no está iniciada." };
   // §2.6: la finaliza quien la hizo (o el creador del ticket / un admin).
   if (ticket.supervisor_id !== perfil.id && rev.supervisor_id !== perfil.id)
-    throw new Error(
-      "Solo el supervisor a cargo de esta re-inspección puede finalizarla.",
-    );
+    return {
+      ok: false,
+      mensaje: "Solo el supervisor a cargo de esta re-inspección puede finalizarla.",
+    };
 
-  const estado = await cerrarRevision(
+  const cierre = await cerrarRevision(
     supabase,
     input.ticketId,
     input.revisionNumero,
     ticket.tipo_inspeccion,
   );
+  if (!cierre.ok) return cierre;
 
   const cambios = {
-    estado,
+    estado: cierre.estado,
     revision_actual: input.revisionNumero,
     fecha_vencimiento: rev.fecha_vencimiento,
     conductor: rev.conductor ?? undefined,
@@ -836,9 +874,9 @@ export async function finalizarReinspeccion(input: {
     .from("tickets")
     .update(cambios)
     .eq("id", input.ticketId);
-  if (errFinal) throw new Error(errFinal.message);
+  if (errFinal) return errorInesperado("finalizarReinspeccion.update", errFinal);
 
   revalidatePath(`/tickets/${input.ticketId}`);
   revalidatePath("/dashboard");
-  return { ticketId: input.ticketId };
+  return { ok: true, ticketId: input.ticketId };
 }
