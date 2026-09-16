@@ -1,3 +1,9 @@
+// Generado con: supabase gen types typescript --local (CLI, no MCP — el MCP
+// lee del proyecto remoto, y a esta fecha la migración de este PR aún no
+// está aplicada ahí). El shape difiere un poco del generado por MCP
+// anteriormente en este repo (sin `__InternalSupabase.PostgrestVersion`,
+// con un schema `graphql_public` extra) — es una diferencia de versión de
+// la CLI, no una edición a mano. Regenerar tras cambios de esquema.
 export type Json =
   | string
   | number
@@ -79,8 +85,6 @@ export type Database = {
           email: string
           id: string
           nombre: string
-          recibe_informes: boolean
-          recibe_vencimientos: boolean
         }
         Insert: {
           activo?: boolean
@@ -88,8 +92,6 @@ export type Database = {
           email: string
           id?: string
           nombre: string
-          recibe_informes?: boolean
-          recibe_vencimientos?: boolean
         }
         Update: {
           activo?: boolean
@@ -97,8 +99,6 @@ export type Database = {
           email?: string
           id?: string
           nombre?: string
-          recibe_informes?: boolean
-          recibe_vencimientos?: boolean
         }
         Relationships: []
       }

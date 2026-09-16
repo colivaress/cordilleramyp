@@ -34,7 +34,8 @@ export const dynamic = "force-dynamic";
  *         - interno: administradores activos de `personal` + el supervisor
  *           del ticket si está activo. Plantilla con el link al informe y el
  *           nombre del supervisor (construirCorreoVencimientoAdmin).
- *         - externo: `destinatarios_correo` con `recibe_vencimientos = true`.
+ *         - externo: `destinatarios_correo_tipos` con `recibe_vencimientos =
+ *           true` PARA EL TIPO del ticket.
  *           Plantilla sin esos dos datos (construirCorreoVencimientoExterno)
  *           — gente fuera de Cordillera, sin cuenta en el sistema.
  *       Si un correo aparece en los dos grupos, se deja solo en el interno
