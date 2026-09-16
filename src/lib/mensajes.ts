@@ -355,8 +355,9 @@ export type DatosAvisoVencimientoExterno = {
 
 /**
  * §3.2 — versión del aviso automático de vencimiento para destinatarios
- * externos a Cordillera M&P (destinatarios_correo con recibe_vencimientos,
- * no personal.rol = administrador). A diferencia de
+ * externos a Cordillera M&P (destinatarios_correo_tipos con
+ * recibe_vencimientos para el tipo del ticket, no personal.rol =
+ * administrador). A diferencia de
  * construirCorreoVencimientoAdmin, esta versión NO incluye el enlace al
  * informe (`/tickets/[id]/report` requiere sesión en el sistema, que estos
  * destinatarios no tienen) ni el nombre del supervisor a cargo (información
