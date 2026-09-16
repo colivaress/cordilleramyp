@@ -101,11 +101,37 @@ export const SignaturePad = forwardRef<
       onChange?.(url);
     };
     pad.addEventListener("endStroke", onEnd);
-    window.addEventListener("resize", onResize);
+
+    // Hallazgo de la investigación del pad "muerto" en iPhone (bloque 5):
+    // antes esto escuchaba `window`'s "resize" — que en iOS Safari también
+    // se dispara cada vez que el TECLADO aparece o desaparece en CUALQUIER
+    // campo de la página (una observación de un ítem no conforme, el
+    // textarea de observación general), no solo cuando el ancho real del
+    // canvas cambia. Cada disparo reseteaba las dimensiones del canvas
+    // (`ajustar()` — cambiar width/height de un <canvas> siempre borra su
+    // contenido, es comportamiento nativo) y llamaba `pad.clear()` en medio
+    // de lo que sea que estuviera pasando — si el dedo seguía sobre el
+    // canvas en ese instante (por ejemplo, tocando el textarea de un ítem
+    // justo arriba de las firmas en una pantalla chica), es plausible que
+    // el trazo en curso quedara con el puntero "levantado" a medias del
+    // lado de signature_pad, dejando el pad sin responder a toques nuevos
+    // hasta el próximo resize. Esto no está confirmado como LA causa — no
+    // se pudo reproducir de forma confiable en este entorno (mismo
+    // problema que otros bugs específicos de iOS de este proyecto) — pero
+    // es la hipótesis con más sustento del código real, y observar el
+    // tamaño del propio <canvas> en vez de una señal indirecta del window
+    // es estrictamente más correcto de cualquier forma: un ResizeObserver
+    // solo dispara cuando ESTE elemento cambia de tamaño de verdad (p. ej.
+    // rotar el teléfono, o cruzar el breakpoint sm:grid-cols-2), nunca por
+    // un teclado abriéndose en un campo de texto en otra parte de la
+    // página. Las cuatro preguntas de la investigación original siguen
+    // abiertas — esto reduce un disparador real, no cierra el caso.
+    const observer = new ResizeObserver(onResize);
+    observer.observe(canvas);
 
     return () => {
       pad.removeEventListener("endStroke", onEnd);
-      window.removeEventListener("resize", onResize);
+      observer.disconnect();
       pad.off();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
