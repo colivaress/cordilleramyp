@@ -9,6 +9,14 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    // Habilita import con extensión ".ts" real (ej. src/lib/patentes.test.ts
+    // importando "./patentes.ts") — hace falta para correr un archivo de
+    // prueba con `node --test` directo (la resolución ESM nativa de Node
+    // exige una extensión real y resolvible, a diferencia del resto del
+    // proyecto que usa el resolver de Next/bundler). Requiere `noEmit`
+    // (ya está arriba); no cambia nada del build de Next, que resuelve
+    // módulos con su propio bundler, no con tsc.
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
