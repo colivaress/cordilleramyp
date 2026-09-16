@@ -11,6 +11,7 @@ import { ORDEN_TIPOS_INSPECCION } from "@/lib/tipos";
 import type { ItemEstado, TicketEstado } from "@/lib/tipos";
 import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
 import { firmarRutas } from "@/lib/storage";
+import { normalizarPatente } from "@/lib/patentes";
 
 type SupabaseServer = Awaited<ReturnType<typeof createClient>>;
 
@@ -329,6 +330,14 @@ export async function iniciarInspeccion(
   if (perfil.rol !== "supervisor")
     return { ok: false, mensaje: "Solo un supervisor puede crear inspecciones." };
   const supabase = await createClient();
+
+  // Normaliza ANTES de validar "no vacío" (un valor de solo espacios tiene
+  // que fallar la validación tras normalizar, no colarse como "" vacío) y
+  // antes del upsert de más abajo, que hace spread de `input.cabecera` tal
+  // cual — así la fila que se guarda ya queda con el valor normalizado, sin
+  // un segundo paso. Única fuente de la regla: `normalizarPatente` (src/lib).
+  input.cabecera.patente_camion = normalizarPatente(input.cabecera.patente_camion);
+  input.cabecera.patente_rampla = normalizarPatente(input.cabecera.patente_rampla);
 
   const valCabecera = validarCabecera(input.cabecera);
   if (!valCabecera.ok) return valCabecera;
