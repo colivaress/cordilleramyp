@@ -117,19 +117,34 @@ export async function GET(req: NextRequest) {
     .map((a) => (a.email ?? "").trim())
     .filter(Boolean);
 
+  // Destinatarios por tipo de inspección: el grupo externo del aviso de
+  // vencimiento ya no es una sola lista global — cada destinatario está
+  // autorizado (o no) por tipo, en destinatarios_correo_tipos. Se trae UNA
+  // sola vez, agrupado por tipo, y se busca el grupo correspondiente por
+  // ticket dentro del loop de abajo (t.tipo_inspeccion) — evita repetir la
+  // consulta por cada ticket de la corrida. El grupo INTERNO (admins +
+  // supervisor del ticket) sigue siendo automático y por rol, no se toca —
+  // eso no se configura por tipo, ver el comentario grande de arriba.
   const { data: externosData } = await supabase
-    .from("destinatarios_correo")
-    .select("email")
-    .eq("activo", true)
-    .eq("recibe_vencimientos", true);
-  const externosGlobal = (externosData ?? [])
-    .map((d) => (d.email ?? "").trim())
-    .filter(Boolean);
+    .from("destinatarios_correo_tipos")
+    .select(
+      "tipo_inspeccion, destinatario:destinatarios_correo!inner(email, activo)",
+    )
+    .eq("recibe_vencimientos", true)
+    .eq("destinatarios_correo.activo", true);
+  const externosPorTipo = new Map<string, string[]>();
+  for (const d of externosData ?? []) {
+    const email = (d.destinatario.email ?? "").trim();
+    if (!email) continue;
+    const lista = externosPorTipo.get(d.tipo_inspeccion) ?? [];
+    lista.push(email);
+    externosPorTipo.set(d.tipo_inspeccion, lista);
+  }
 
   const { data: ticketsCorreo } = await supabase
     .from("tickets")
     .select(
-      "id, numero_inspeccion, patente_camion, patente_rampla, transporte, fecha_vencimiento, estado, alerta_admin_48h_enviada, alerta_admin_24h_enviada, alerta_admin_vencido_enviada, supervisor:personal!tickets_supervisor_id_fkey(nombre, apellido, email, activo)",
+      "id, numero_inspeccion, patente_camion, patente_rampla, transporte, fecha_vencimiento, estado, tipo_inspeccion, alerta_admin_48h_enviada, alerta_admin_24h_enviada, alerta_admin_vencido_enviada, supervisor:personal!tickets_supervisor_id_fkey(nombre, apellido, email, activo)",
     )
     .neq("estado", "finalizada_sin_observaciones");
 
@@ -161,7 +176,12 @@ export async function GET(req: NextRequest) {
       },
       correoVencimiento: {
         adminsActivos: adminEmails.length,
-        externosActivos: externosGlobal.length,
+        externosActivosPorTipo: Object.fromEntries(
+          [...externosPorTipo.entries()].map(([tipo, emails]) => [
+            tipo,
+            emails.length,
+          ]),
+        ),
         avisos: avisosCorreo.map(({ t, momento, horas }) => ({
           numeroInspeccion: t.numero_inspeccion,
           momento,
@@ -267,11 +287,15 @@ export async function GET(req: NextRequest) {
     }
     const correosInternos = Array.from(internosLower);
 
-    // Externo: destinatarios_correo con recibe_vencimientos, menos quien ya
-    // esté en el grupo interno — nadie recibe dos copias ni dos versiones.
+    // Externo: destinatarios_correo_tipos con recibe_vencimientos PARA EL
+    // TIPO de este ticket, menos quien ya esté en el grupo interno — nadie
+    // recibe dos copias ni dos versiones.
+    const externosDeEsteTipo = t.tipo_inspeccion
+      ? (externosPorTipo.get(t.tipo_inspeccion) ?? [])
+      : [];
     const correosExternos = Array.from(
       new Set(
-        externosGlobal
+        externosDeEsteTipo
           .map((e) => e.toLowerCase())
           .filter((e) => !internosLower.has(e)),
       ),
@@ -419,7 +443,12 @@ export async function GET(req: NextRequest) {
     },
     correoVencimiento: {
       adminsActivos: adminEmails.length,
-      externosActivos: externosGlobal.length,
+      externosActivosPorTipo: Object.fromEntries(
+        [...externosPorTipo.entries()].map(([tipo, emails]) => [
+          tipo,
+          emails.length,
+        ]),
+      ),
       avisos: avisosCorreo.length,
       enviados: resultadosCorreo.filter((r) => r.ok).length,
       fallidos: resultadosCorreo.filter((r) => !r.ok).length,
