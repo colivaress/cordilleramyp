@@ -375,8 +375,33 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // --- grupo externo (solo si quedó alguien tras la deduplicación) ---
-    if (correosExternos.length > 0) {
+    // --- grupo externo ---
+    // A diferencia del interno (siempre debería haber administradores), un
+    // tipo de inspección sin destinatarios externos configurados es un
+    // estado válido — pero no debe quedar en silencio: si nadie externo se
+    // entera de un vencimiento porque nadie cargó destinatarios para ese
+    // tipo (o el Map ni siquiera trae esa clave, `?? []`), eso tiene que
+    // verse en la corrida, no descubrirse después preguntando por qué no
+    // llegó nada.
+    if (correosExternos.length === 0) {
+      console.log(
+        `[cron alertas] correo ${momento}/externo Inspección ${t.numero_inspeccion}: sin destinatarios externos configurados para tipo "${t.tipo_inspeccion ?? "—"}" (o todos ya estaban en el grupo interno)`,
+      );
+      await registrar(
+        supabase,
+        t.id,
+        "email",
+        "—",
+        `SIN DESTINATARIOS [${momento}/externo] (tipo ${t.tipo_inspeccion ?? "—"}): ningún destinatario externo configurado/activo para este tipo`,
+      );
+      resultadosCorreo.push({
+        numeroInspeccion: t.numero_inspeccion,
+        momento,
+        grupo: "externo",
+        ok: false,
+        error: `sin destinatarios externos para tipo ${t.tipo_inspeccion ?? "—"}`,
+      });
+    } else {
       const { asunto: asuntoExterno, html: htmlExterno } =
         construirCorreoVencimientoExterno(momento, {
           numeroInspeccion: t.numero_inspeccion,
