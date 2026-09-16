@@ -10,6 +10,7 @@ import {
 import { ORDEN_TIPOS_INSPECCION } from "@/lib/tipos";
 import type { ItemEstado, TicketEstado } from "@/lib/tipos";
 import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
+import { firmarRutas } from "@/lib/storage";
 
 type SupabaseServer = Awaited<ReturnType<typeof createClient>>;
 
@@ -437,6 +438,154 @@ async function autorizarRevisionEnCurso(
   return {
     ok: false,
     mensaje: "Solo el supervisor a cargo de esta revisión puede editarla.",
+  };
+}
+
+export type ItemHidratado = {
+  itemKey: string;
+  estado: ItemEstado | null;
+  observacion: string;
+  fotoPath: string | null;
+  /** URL firmada — la foto ya sube a Storage apenas se toma (§2.8); esto es
+   *  solo para poder mostrar la vista previa de nuevo tras recargar. */
+  fotoUrlFirmada: string | null;
+  /** Solo modo 'fotos'. Una entrada por foto ya guardada (orden 1..N). */
+  fotos: { orden: number; path: string; urlFirmada: string | null }[];
+};
+
+export type EstadoRevisionHidratado = {
+  tipoInspeccion: string;
+  numeroInspeccion: number;
+  /** Cabecera del TICKET — solo la usa el modo "nueva" al recuperar una
+   *  sesión (en reinspección, la cabecera ya llega por props del servidor,
+   *  §2.14, así que esto queda de más ahí pero no molesta traerlo igual). Sin
+   *  esto, "Volver a los datos" tras recuperar una sesión mostraría el paso 1
+   *  en blanco — y volver a enviarlo pisaría con blancos la cabecera real
+   *  del ticket (mismo upsert que lo creó).
+   */
+  cabecera: CabeceraInput;
+  nombreEncarpador: string | null;
+  nombreGuardia: string | null;
+  nroContenedor: string | null;
+  conductorRevision: string;
+  fechaVencimientoRevision: string | null;
+  items: ItemHidratado[];
+  observacionGeneral: string;
+  firmaConductorUrl: string | null;
+  firmaFiscalizadorUrl: string | null;
+};
+
+/**
+ * Recupera todo lo que ya se guardó de una revisión EN CURSO — checklist,
+ * observación general y firmas — para poder reconstruir el formulario tal
+ * como estaba si la página se recarga a mitad de camino (el celular se
+ * queda sin batería, Safari mata la pestaña en segundo plano, el supervisor
+ * la recarga a mano porque algo dejó de responder). Sin esto, recargar
+ * significa perder de vista todo lo ya guardado del lado del servidor —
+ * "perder de vista", no "perder": los datos siguen en la base, pero el
+ * formulario los vuelve a mostrar en blanco y el supervisor no tiene forma
+ * de saber que su ticket ya existe con progreso real.
+ *
+ * Se apoya en `autorizarRevisionEnCurso` para el mismo criterio de acceso
+ * (dueño del ticket o de la revisión, y solo si sigue `en_revision`) — si
+ * el ticket no existe todavía (nunca se llegó a crear) o ya se cerró,
+ * devuelve `ok: false` y el llamador simplemente no hidrata nada; no es un
+ * error que el supervisor deba ver, es la señal de "no hay nada que
+ * recuperar acá".
+ */
+export async function obtenerEstadoRevision(input: {
+  ticketId: string;
+  revisionNumero: number;
+}): Promise<ResultadoAccion<EstadoRevisionHidratado>> {
+  const { perfil } = await getSesion();
+  const supabase = await createClient();
+
+  const auth = await autorizarRevisionEnCurso(
+    supabase,
+    perfil.id,
+    input.ticketId,
+    input.revisionNumero,
+  );
+  if (!auth.ok) return auth;
+
+  const { data: ticket } = await supabase
+    .from("tickets")
+    .select(
+      "tipo_inspeccion, numero_inspeccion, transporte, conductor, fecha, procedencia, tipo_camion, patente_camion, patente_rampla, nombre_encarpador, nombre_guardia, nro_contenedor",
+    )
+    .eq("id", input.ticketId)
+    .maybeSingle();
+  if (!ticket?.tipo_inspeccion)
+    return { ok: false, mensaje: "Falta el tipo de inspección del ticket." };
+
+  const { data: rev } = await supabase
+    .from("ticket_revisiones")
+    .select(
+      "conductor, fecha_vencimiento, observacion_general, firma_conductor_url, firma_fiscalizador_url",
+    )
+    .eq("ticket_id", input.ticketId)
+    .eq("numero_revision", input.revisionNumero)
+    .maybeSingle();
+
+  const { data: respuestas } = await supabase
+    .from("ticket_checklist_respuestas")
+    .select(
+      "item_key, estado, observacion, foto_url, fotos:ticket_checklist_fotos(url, orden)",
+    )
+    .eq("ticket_id", input.ticketId)
+    .eq("revision_numero", input.revisionNumero);
+
+  const rutasAFirmar = [
+    ...(respuestas ?? []).map((r) => r.foto_url),
+    ...(respuestas ?? []).flatMap((r) => (r.fotos ?? []).map((f) => f.url)),
+  ];
+  const urlFotos = await firmarRutas(supabase, "fallas", rutasAFirmar);
+  const urlFirmas = await firmarRutas(supabase, "firmas", [
+    rev?.firma_conductor_url,
+    rev?.firma_fiscalizador_url,
+  ]);
+
+  const items: ItemHidratado[] = (respuestas ?? []).map((r) => ({
+    itemKey: r.item_key,
+    estado: r.estado,
+    observacion: r.observacion ?? "",
+    fotoPath: r.foto_url,
+    fotoUrlFirmada: r.foto_url ? (urlFotos[r.foto_url] ?? null) : null,
+    fotos: (r.fotos ?? [])
+      .filter((f): f is { url: string; orden: number } => !!f.url)
+      .map((f) => ({
+        orden: f.orden,
+        path: f.url,
+        urlFirmada: urlFotos[f.url] ?? null,
+      })),
+  }));
+
+  return {
+    ok: true,
+    tipoInspeccion: ticket.tipo_inspeccion,
+    numeroInspeccion: ticket.numero_inspeccion,
+    cabecera: {
+      transporte: ticket.transporte,
+      conductor: ticket.conductor,
+      fecha: ticket.fecha,
+      procedencia: ticket.procedencia,
+      tipo_camion: ticket.tipo_camion,
+      patente_camion: ticket.patente_camion,
+      patente_rampla: ticket.patente_rampla,
+    },
+    nombreEncarpador: ticket.nombre_encarpador,
+    nombreGuardia: ticket.nombre_guardia,
+    nroContenedor: ticket.nro_contenedor,
+    conductorRevision: rev?.conductor ?? ticket.conductor,
+    fechaVencimientoRevision: rev?.fecha_vencimiento ?? null,
+    items,
+    observacionGeneral: rev?.observacion_general ?? "",
+    firmaConductorUrl: rev?.firma_conductor_url
+      ? (urlFirmas[rev.firma_conductor_url] ?? null)
+      : null,
+    firmaFiscalizadorUrl: rev?.firma_fiscalizador_url
+      ? (urlFirmas[rev.firma_fiscalizador_url] ?? null)
+      : null,
   };
 }
 
