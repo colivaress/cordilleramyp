@@ -52,6 +52,12 @@ export default async function AppLayout({
                 >
                   Usuarios
                 </Link>
+                <Link
+                  href="/configuracion/correos"
+                  className={buttonVariants({ variant: "ghost" })}
+                >
+                  Configuración correos
+                </Link>
               </>
             )}
             {/* §2.6: solo el supervisor crea inspecciones; el admin no ve el link. */}
