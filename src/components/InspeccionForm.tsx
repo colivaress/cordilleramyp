@@ -45,6 +45,7 @@ import {
   guardarFirmaRevision,
   guardarFotoChecklistItem,
   guardarObservacionGeneral,
+  obtenerEstadoRevision,
 } from "@/app/(app)/tickets/actions";
 import {
   ETIQUETA_TIPO_INSPECCION,
@@ -189,6 +190,34 @@ async function comprimirImagen(
   }
 }
 
+// §2.8 — recuperación tras recargar: en modo "nueva" el ticketId nace como un
+// UUID generado en el cliente, sin URL propia (a diferencia de reinspección,
+// que vive en /tickets/[id]/reinspeccion). Sin esto, una recarga a mitad de
+// camino generaba un UUID NUEVO, dejando el ticket ya creado (con checklist,
+// firmas, todo) inalcanzable desde este formulario — no es "se pierde lo que
+// no se guardó", es "el ticket entero queda huérfano". Se persiste apenas se
+// genera (no recién al crear el ticket) para cubrir también una recarga en
+// el paso 1, antes de "Realizar revisión".
+const CLAVE_TICKET_EN_PROGRESO = "cordillera-inspeccion-en-progreso";
+
+function ticketIdRecuperadoONuevo(): string {
+  if (typeof window === "undefined") return crypto.randomUUID();
+  try {
+    const guardado = window.localStorage.getItem(CLAVE_TICKET_EN_PROGRESO);
+    if (guardado) return guardado;
+  } catch {
+    // localStorage puede fallar (modo privado, cuota) — degradar a "sin
+    // recuperación" en vez de romper la creación de la inspección.
+  }
+  const nuevo = crypto.randomUUID();
+  try {
+    window.localStorage.setItem(CLAVE_TICKET_EN_PROGRESO, nuevo);
+  } catch {
+    /* ver arriba */
+  }
+  return nuevo;
+}
+
 export function InspeccionForm({
   modo,
   items,
@@ -223,7 +252,9 @@ export function InspeccionForm({
   // §2.8: el id del ticket y el nro de revisión se fijan al montar, así cada
   // firma/foto/respuesta se guarda con una ruta estable ANTES de "Finalizar
   // revisión".
-  const [ticketId] = useState(() => ticketIdProp ?? crypto.randomUUID());
+  const [ticketId] = useState(
+    () => ticketIdProp ?? ticketIdRecuperadoONuevo(),
+  );
   const rev = modo === "nueva" ? 1 : numeroRevision;
 
   const [paso, setPaso] = useState<1 | 2>(1);
@@ -367,6 +398,106 @@ export function InspeccionForm({
   const [firmaFiscalizadorUrl, setFirmaFiscalizadorUrl] = useState<string | null>(
     null,
   );
+
+  // Recuperación tras recargar — ver ticketIdRecuperadoONuevo() y el
+  // comentario de obtenerEstadoRevision(). Corre una sola vez al montar: si
+  // el ticket ya existe con progreso guardado (se creó en una carga anterior
+  // de esta misma sesión, o es una re-inspección ya empezada antes de esta
+  // recarga), reconstruye cabecera, checklist, observación general y firmas
+  // — y salta directo al paso 2 si había algo real que mostrar, en vez de
+  // forzar a re-completar "Datos de Inspección" para algo que ya existe.
+  //
+  // Si no hay nada que recuperar (ticket recién creado en esta misma carga,
+  // o no existe todavía porque nunca se llegó a "Realizar revisión"),
+  // `obtenerEstadoRevision` devuelve `ok: false` y no se toca nada — ese no
+  // es un error que el supervisor deba ver.
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const res = await obtenerEstadoRevision({ ticketId, revisionNumero: rev });
+      if (cancelado || !res.ok) return;
+
+      const itemsDeEsteTipo = items
+        .filter((i) => i.tipo === res.tipoInspeccion)
+        .sort((a, b) => a.orden - b.orden);
+      const nuevasRespuestas: Record<string, RespuestaEditable> = Object.fromEntries(
+        itemsDeEsteTipo.map((i) => [i.key, respuestaVacia(cantidadFotosItem(i))]),
+      );
+
+      let huboAlgo = false;
+      for (const it of res.items) {
+        const base = nuevasRespuestas[it.itemKey];
+        if (!base) continue;
+        if (it.estado != null || it.observacion || it.fotoPath || it.fotos.length > 0)
+          huboAlgo = true;
+        nuevasRespuestas[it.itemKey] = {
+          ...base,
+          estado: it.estado,
+          observacion: it.observacion,
+          fotoPath: it.fotoPath,
+          fotoNombre: it.fotoPath ? "Foto guardada" : null,
+          fotoPreviewUrl: it.fotoUrlFirmada,
+          fotos: base.fotos.map((slot, idx) => {
+            const guardada = it.fotos.find((f) => f.orden === idx + 1);
+            return guardada
+              ? {
+                  path: guardada.path,
+                  nombre: "Foto guardada",
+                  previewUrl: guardada.urlFirmada,
+                }
+              : slot;
+          }),
+        };
+      }
+      setRespuestas(nuevasRespuestas);
+
+      if (res.observacionGeneral) {
+        setObservacionGeneral(res.observacionGeneral);
+        huboAlgo = true;
+      }
+      if (res.firmaConductorUrl) {
+        setFirmaConductorUrl(res.firmaConductorUrl);
+        huboAlgo = true;
+      }
+      if (res.firmaFiscalizadorUrl) {
+        setFirmaFiscalizadorUrl(res.firmaFiscalizadorUrl);
+        huboAlgo = true;
+      }
+
+      if (modo === "nueva") {
+        setTipoSeleccionado(res.tipoInspeccion);
+        setNumInsp(res.numeroInspeccion);
+        // Sin esto, "Volver a los datos" tras recuperar la sesión mostraría
+        // el paso 1 en blanco, y reenviarlo pisaría con blancos la cabecera
+        // real del ticket (mismo upsert que lo creó) — ver el comentario en
+        // obtenerEstadoRevision.
+        setCabecera({
+          transporte: res.cabecera.transporte,
+          conductor: res.cabecera.conductor,
+          fecha: isoADatetimeLocal(res.cabecera.fecha),
+          fechaVencimiento: isoADatetimeLocal(res.fechaVencimientoRevision),
+          procedencia: res.cabecera.procedencia,
+          tipo_camion: res.cabecera.tipo_camion,
+          patente_camion: res.cabecera.patente_camion,
+          patente_rampla: res.cabecera.patente_rampla,
+        });
+        setNombreEncarpador(res.nombreEncarpador ?? "");
+        setNombreGuardia(res.nombreGuardia ?? "");
+        setNroContenedor(res.nroContenedor ?? "");
+      }
+
+      if (huboAlgo) {
+        setPaso(2);
+        setPasoMaxVisto(2);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+    // Deliberadamente solo al montar — ticketId/rev son estables durante toda
+    // la vida del formulario (§2.8), no hace falta re-ejecutar esto.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const obsTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const obsGeneralTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -890,6 +1021,15 @@ export function InspeccionForm({
           if (modo === "nueva") {
             const res = await finalizarInspeccion({ ticketId });
             if (!res.ok) throw new Error(res.mensaje);
+            // Ya cerrada — dejar de intentar recuperarla en la próxima
+            // "Nueva inspección" (ver ticketIdRecuperadoONuevo()).
+            try {
+              window.localStorage.removeItem(CLAVE_TICKET_EN_PROGRESO);
+            } catch {
+              /* no crítico: en el peor caso, la próxima carga intenta
+                 recuperar un ticket ya cerrado y obtenerEstadoRevision
+                 devuelve ok:false — no rompe nada, solo no hidrata. */
+            }
             toast.success(
               `Inspección guardada (Nro ${res.numeroInspeccion}). Generar y enviar el informe.`,
             );
