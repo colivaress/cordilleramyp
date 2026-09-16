@@ -12,7 +12,6 @@ import type { ItemEstado, TicketEstado } from "@/lib/tipos";
 import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
 import { firmarRutas } from "@/lib/storage";
 import { normalizarPatente } from "@/lib/patentes";
-import { nombreCompleto } from "@/lib/mensajes";
 
 type SupabaseServer = Awaited<ReturnType<typeof createClient>>;
 
@@ -1152,27 +1151,22 @@ function filtroPatenteExacta(normalizado: string): string {
  */
 const LIMITE_RESULTADOS_LISTADO = 30;
 
-export type ItemNoConformeResumen = {
-  itemKey: string;
-  nombre: string;
-  observacion: string | null;
-};
-
 export type ResultadoBusquedaTicket = {
   ticketId: string;
   numeroInspeccion: number;
+  numeroRevision: number;
   tipoInspeccion: string;
   estado: TicketEstado;
   patenteCamion: string;
   patenteRampla: string;
-  /** Fecha de la revisión más reciente (no la de creación del ticket). */
+  transporte: string;
+  /** Fecha de la inspección (tickets.fecha, §1) — no la de creación del ticket. */
   fecha: string;
-  quienLaHizoNombre: string;
-  /** Identidad del camión = patente_camion (§1). patente_rampla puede
-   *  coincidir también — se informa cuál, nunca se mezclan en un solo
-   *  veredicto. */
-  coincidioEn: ("camion" | "rampla")[];
-  itemsNoConformes: ItemNoConformeResumen[];
+  fechaVencimiento: string | null;
+  /** Nombre del supervisor DUEÑO del ticket (quien lo creó) — mismo dato que
+   *  la columna "Supervisor" de la tabla normal (dashboard/page.tsx), para
+   *  que sea la misma fila con los mismos datos en los dos lugares (§5). */
+  supervisorNombre: string;
 };
 
 export type ResultadoBusquedaPatente = {
@@ -1279,9 +1273,10 @@ async function hayCoincidenciaOcultaPara(
 
 /**
  * Busca tickets pendientes/con observaciones por patente (camión o rampla).
- * Sin N+1: como mucho 3 consultas sin importar cuántos tickets coincidan
- * (tickets, sus revisiones, sus respuestas no_conforme) — nunca una consulta
- * por resultado.
+ * UNA sola consulta a `tickets` sin importar cuántos coincidan — §5 sacó el
+ * detalle de ítems no conformes de esta pantalla (queda solo detrás de
+ * "Ver", igual que siempre), así que ya no hace falta traer revisiones ni
+ * respuestas del checklist acá.
  *
  * FUERA DE ALCANCE a propósito: no toca patente_rampla en ningún lado (vive
  * en `tickets`, no en `ticket_revisiones` — mover eso es un problema
@@ -1316,7 +1311,7 @@ export async function buscarPorPatente(
   const { data: tickets, error } = await supabase
     .from("tickets")
     .select(
-      "id, numero_inspeccion, tipo_inspeccion, estado, patente_camion, patente_rampla, revision_actual, supervisor_id",
+      "id, numero_inspeccion, revision_actual, tipo_inspeccion, estado, patente_camion, patente_rampla, transporte, fecha, fecha_vencimiento, supervisor_id, supervisor:personal!tickets_supervisor_id_fkey(nombre)",
     )
     .in("estado", ESTADOS_RELEVANTES_BUSQUEDA)
     .or(filtroPatente(normalizado))
@@ -1326,84 +1321,23 @@ export async function buscarPorPatente(
   const traidos = tickets ?? [];
   const hayMasResultados = traidos.length > LIMITE_RESULTADOS_LISTADO;
   const lista = traidos.slice(0, LIMITE_RESULTADOS_LISTADO);
-  if (lista.length === 0) {
-    return {
-      ok: true,
-      misInspecciones: [],
-      conObservaciones: [],
-      hayCoincidenciaOculta: await hayCoincidenciaOcultaPara(supabase, normalizado),
-      hayMasResultados: false,
-      tiposPermitidos: await tiposPermitidosDe(supabase, perfil.id),
-    };
-  }
-
-  const ids = lista.map((t) => t.id);
-
-  // Todas las revisiones de los tickets encontrados — UNA consulta, se
-  // reduce a "la más reciente por ticket" en JS (no una consulta por
-  // ticket).
-  const { data: revisiones } = await supabase
-    .from("ticket_revisiones")
-    .select(
-      "ticket_id, numero_revision, created_at, supervisor:personal!ticket_revisiones_supervisor_id_fkey(nombre, apellido)",
-    )
-    .in("ticket_id", ids);
-
-  type FilaRevision = NonNullable<typeof revisiones>[number];
-  const ultimaRevisionPorTicket = new Map<string, FilaRevision>();
-  for (const r of revisiones ?? []) {
-    const actual = ultimaRevisionPorTicket.get(r.ticket_id);
-    if (!actual || r.numero_revision > actual.numero_revision)
-      ultimaRevisionPorTicket.set(r.ticket_id, r);
-  }
-
-  // Ítems no conformes de TODAS las revisiones de estos tickets — UNA
-  // consulta, filtrada en JS a la revisión más reciente de cada uno (ver
-  // arriba). Con esto y las dos consultas de arriba, son 3 en total sin
-  // importar cuántos tickets hayan coincidido.
-  const { data: respuestas } = await supabase
-    .from("ticket_checklist_respuestas")
-    .select(
-      "ticket_id, revision_numero, item_key, observacion, item:checklist_items(nombre)",
-    )
-    .in("ticket_id", ids)
-    .eq("estado", "no_conforme");
-
-  const itemsPorTicket = new Map<string, ItemNoConformeResumen[]>();
-  for (const r of respuestas ?? []) {
-    const ultima = ultimaRevisionPorTicket.get(r.ticket_id);
-    if (!ultima || r.revision_numero !== ultima.numero_revision) continue;
-    const arr = itemsPorTicket.get(r.ticket_id) ?? [];
-    arr.push({
-      itemKey: r.item_key,
-      nombre: r.item?.nombre ?? r.item_key,
-      observacion: r.observacion,
-    });
-    itemsPorTicket.set(r.ticket_id, arr);
-  }
 
   const misInspecciones: ResultadoBusquedaTicket[] = [];
   const conObservaciones: ResultadoBusquedaTicket[] = [];
 
   for (const t of lista) {
-    const ultima = ultimaRevisionPorTicket.get(t.id);
-    const coincidioEn: ("camion" | "rampla")[] = [];
-    if (t.patente_camion.includes(normalizado)) coincidioEn.push("camion");
-    if (t.patente_rampla.includes(normalizado)) coincidioEn.push("rampla");
-
     const resultado: ResultadoBusquedaTicket = {
       ticketId: t.id,
       numeroInspeccion: t.numero_inspeccion,
+      numeroRevision: t.revision_actual,
       tipoInspeccion: t.tipo_inspeccion ?? "",
       estado: t.estado,
       patenteCamion: t.patente_camion,
       patenteRampla: t.patente_rampla,
-      fecha: ultima?.created_at ?? "",
-      quienLaHizoNombre: ultima?.supervisor
-        ? nombreCompleto(ultima.supervisor.nombre, ultima.supervisor.apellido)
-        : "—",
-      coincidioEn,
-      itemsNoConformes: itemsPorTicket.get(t.id) ?? [],
+      transporte: t.transporte,
+      fecha: t.fecha,
+      fechaVencimiento: t.fecha_vencimiento,
+      supervisorNombre: t.supervisor?.nombre ?? "—",
     };
 
     if (t.supervisor_id === perfil.id) misInspecciones.push(resultado);
@@ -1421,6 +1355,17 @@ export async function buscarPorPatente(
 }
 
 /**
+ * 🟡 SIN USO desde §5 (el buscador de patentes pasó a filtrar la tabla
+ * normal y a apoyarse en "Ver" -> informe -> "Registrar re-inspección", sin
+ * un botón "Tomar" propio — ver BuscadorPatente.tsx). Queda la función acá,
+ * sin borrar, porque sigue siendo la única transición ATÓMICA (el `.eq`
+ * doble de más abajo) para reclamar un ticket antes de abrir el checklist —
+ * "Registrar re-inspección" no tiene ese resguardo, así que si más adelante
+ * hace falta prevenir la carrera de dos supervisores entrando al mismo
+ * ticket "con observaciones" a la vez, esta es la pieza para retomar en vez
+ * de escribir una nueva. Decisión pendiente de confirmar con el usuario:
+ * borrarla del todo, o volver a exponerla como acción explícita.
+ *
  * "Tomar" una inspección con observaciones de OTRO supervisor, desde el
  * buscador de patentes. Transición ÚNICA y acotada a propósito: la RLS de
  * `tickets_update` permite más de lo que este flujo debería (un supervisor
