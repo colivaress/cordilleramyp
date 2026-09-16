@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { getSesion } from "@/lib/auth";
 import {
   estadoTrasChecklist,
@@ -1116,59 +1115,66 @@ async function tiposPermitidosDe(
 }
 
 /**
- * §5: compara el conteo SIN RLS contra `conteoVisible` (el largo del
- * resultado de la consulta normal, que sí respeta RLS) — la diferencia es
- * el conjunto oculto. Nunca expone cuál: solo un booleano.
+ * §5: compara, para la patente EXACTA (no substring — ver el comentario de
+ * la migración 20260916040000), el conteo SIN RLS
+ * (public.contar_tickets_con_patente_exacta, security definer, llamada por
+ * `.rpc()`) contra `conteoVisibleExacto` — la diferencia es el conjunto
+ * oculto. Nunca expone cuál: solo un booleano.
  *
- * NO es una función SQL security definer — se intentó ese diseño primero
- * (una función en el esquema `private`, llamada vía `.rpc()`) pero
- * `private` no está en `schemas` de `supabase/config.toml` (solo `public`/
- * `graphql_public` lo están) — PostgREST no expone rutas para ese esquema
- * en absoluto, así que `.rpc()` no la habría alcanzado nunca (404, no un
- * problema de permisos). La alternativa de moverla a `public` para poder
- * llamarla quedaba peor que el problema que resolvía: cualquier cliente
- * autenticado (no solo este Server Action) podría invocarla directo vía
- * REST con cualquier término, convirtiéndola en el mismo "oráculo sobre
- * toda la tabla" que la primera versión (con `p_tipos_permitidos`) ya
- * había descartado — solo que ahora la puerta sería un endpoint expuesto
- * en vez de un parámetro.
+ * Por qué esta versión y no las dos anteriores (histórico, no borrar sin
+ * releer antes de tocar esto):
+ *   v1 — función con `p_tipos_permitidos` como parámetro: descartada, una
+ *        security definer no puede recibir su propio alcance de
+ *        autorización como input.
+ *   v2 — sacado ese parámetro, pero como `private` no está expuesto por
+ *        PostgREST (`schemas` en supabase/config.toml), se llamaba con
+ *        `createAdminClient()` en vez de como función: descartada también
+ *        — eso le daba a esta ruta de código acceso a la base entera (el
+ *        radio de un error futuro en `buscarPorPatente` pasa de "una
+ *        consulta de conteo" a "cualquier cosa"), y el término seguía
+ *        concatenado en un `.or()` en vez de ir como parámetro ligado.
+ *   v3 (esta) — función en `public` (si expuesta por PostgREST), llamada
+ *        por `.rpc()` con el término como parámetro ligado — la inyección
+ *        queda eliminada por construcción. Exponerla a `authenticated` no
+ *        filtra nada que la pantalla no muestre ya: sin el parámetro de
+ *        alcance, solo responde "¿existe algo para esta patente EXACTA?".
  *
- * En cambio, usa `createAdminClient()` (service role) — el mismo patrón ya
- * establecido en este proyecto (usuarios/actions.ts, invitación) para
- * operaciones server-only sin sesión de usuario. Nunca se expone al
- * cliente ni queda alcanzable por HTTP: solo se ejecuta dentro de este
- * Server Action, que ya exige sesión de supervisor (getSesion +
- * perfil.rol) antes de llegar acá — la barrera de autorización la sigue
- * poniendo el código de la aplicación, no un contrato a nivel de base que
- * tendría que sostenerse solo frente a cualquier invocación posible.
+ * IMPORTANTE — por qué exacto y no substring, y por qué su propio conteo
+ * visible en vez de reusar `lista`/`filtroPatente` de arriba: la resta de
+ * conteos solo es válida si los dos lados usan EXACTAMENTE el mismo
+ * predicado salvo la RLS. El listado visible es substring (ILIKE) a
+ * propósito — ahí la RLS ya es el límite real, substring es solo
+ * conveniencia. Pero para la señal de "hay algo oculto", un substring de
+ * 2-3 letras dispara en casi cualquier búsqueda (no informa nada) y sirve
+ * de sonda para enumerar coincidencias letra por letra. Por eso este
+ * conteo es aparte, con su PROPIO par (RPC sin RLS vs. `lista` filtrada a
+ * coincidencia exacta) — nunca mezclado con el conteo del listado
+ * substring, que mentiría si se restara contra un total calculado con un
+ * predicado distinto.
  *
- * El predicado (`filtroPatente` + `ESTADOS_RELEVANTES_BUSQUEDA`) es la
- * MISMA función/constante que usa la consulta con RLS de arriba — nunca
- * una copia — para que la resta de conteos sea válida. Si la consulta
- * falla, no se rompe la búsqueda entera por esto: se loguea y se asume "no
- * hay coincidencia oculta" (falso negativo aceptable acá — es un aviso
- * adicional, no la fuente de verdad de qué mostrar).
+ * `conteoVisibleExacto` no necesita una consulta aparte: se deriva
+ * filtrando en JS los resultados de `lista` (ya venían con RLS aplicada, y
+ * filtrar más en memoria nunca puede "revelar" una fila que RLS ya había
+ * excluido) a los que matchean exacto — sigue siendo el mismo total de
+ * consultas de la función que llama a esta.
+ *
+ * Si el RPC falla, no se rompe la búsqueda entera por esto: se loguea y se
+ * asume "no hay coincidencia oculta" (falso negativo aceptable acá — es un
+ * aviso adicional, no la fuente de verdad de qué mostrar).
  */
 async function hayCoincidenciaOcultaPara(
-  terminoNormalizado: string,
-  conteoVisible: number,
+  supabase: SupabaseServer,
+  patenteNormalizada: string,
+  conteoVisibleExacto: number,
 ): Promise<boolean> {
-  try {
-    const admin = createAdminClient();
-    const { count, error } = await admin
-      .from("tickets")
-      .select("id", { count: "exact", head: true })
-      .in("estado", ESTADOS_RELEVANTES_BUSQUEDA)
-      .or(filtroPatente(terminoNormalizado));
-    if (error) {
-      console.error("[hayCoincidenciaOcultaPara]", error);
-      return false;
-    }
-    return (count ?? 0) > conteoVisible;
-  } catch (e) {
-    console.error("[hayCoincidenciaOcultaPara]", e);
+  const { data, error } = await supabase.rpc("contar_tickets_con_patente_exacta", {
+    p_patente_normalizada: patenteNormalizada,
+  });
+  if (error) {
+    console.error("[hayCoincidenciaOcultaPara]", error);
     return false;
   }
+  return Number(data ?? 0) > conteoVisibleExacto;
 }
 
 /**
@@ -1220,7 +1226,7 @@ export async function buscarPorPatente(
       ok: true,
       misInspecciones: [],
       conObservaciones: [],
-      hayCoincidenciaOculta: await hayCoincidenciaOcultaPara(normalizado, 0),
+      hayCoincidenciaOculta: await hayCoincidenciaOcultaPara(supabase, normalizado, 0),
       tiposPermitidos: await tiposPermitidosDe(supabase, perfil.id),
     };
   }
@@ -1298,11 +1304,23 @@ export async function buscarPorPatente(
     else conObservaciones.push(resultado);
   }
 
+  // §5: conteo visible propio, por coincidencia EXACTA — no el largo de
+  // `lista` (que es substring). Derivado de `lista` en JS, sin consulta
+  // aparte: filtrar más adentro de lo que RLS ya devolvió nunca puede
+  // revelar una fila que RLS había excluido.
+  const conteoVisibleExacto = lista.filter(
+    (t) => t.patente_camion === normalizado || t.patente_rampla === normalizado,
+  ).length;
+
   return {
     ok: true,
     misInspecciones,
     conObservaciones,
-    hayCoincidenciaOculta: await hayCoincidenciaOcultaPara(normalizado, lista.length),
+    hayCoincidenciaOculta: await hayCoincidenciaOcultaPara(
+      supabase,
+      normalizado,
+      conteoVisibleExacto,
+    ),
     tiposPermitidos: await tiposPermitidosDe(supabase, perfil.id),
   };
 }
