@@ -1152,6 +1152,15 @@ export function InspeccionForm({
                     disabled={camposDeshabilitados}
                     value={cabecera[c.key]}
                     onChange={(e) => setCampoCabecera(c.key, e.target.value)}
+                    // Solo visual — la normalización real (mayúsculas, sin
+                    // guiones/puntos, espacios colapsados) la hace el
+                    // servidor en iniciarInspeccion (src/lib/patentes.ts),
+                    // esto no cambia el valor que se envía.
+                    className={
+                      c.key === "patente_camion" || c.key === "patente_rampla"
+                        ? "uppercase"
+                        : undefined
+                    }
                   />
                   {c.key === "fechaVencimiento" && (
                     <span className="text-xs text-muted-foreground">
