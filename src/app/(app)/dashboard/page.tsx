@@ -18,6 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { TicketStatusBadge } from "@/components/TicketStatusBadge";
+import { BuscadorPatente } from "@/components/BuscadorPatente";
 import { CountdownBadge } from "@/components/CountdownBadge";
 import { DashboardFilters } from "@/components/DashboardFilters";
 import { Paginacion } from "@/components/Paginacion";
@@ -159,6 +160,10 @@ export default async function DashboardPage({
           </Link>
         )}
       </div>
+
+      {/* Pensado para usarse ANTES de "Nueva inspección" — por eso va acá,
+          antes de la tabla, no al final de la pantalla. */}
+      {esSupervisor && <BuscadorPatente />}
 
       {esAdmin && <ResumenCards resumen={resumen} />}
 

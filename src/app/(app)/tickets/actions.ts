@@ -12,6 +12,7 @@ import type { ItemEstado, TicketEstado } from "@/lib/tipos";
 import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
 import { firmarRutas } from "@/lib/storage";
 import { normalizarPatente } from "@/lib/patentes";
+import { nombreCompleto } from "@/lib/mensajes";
 
 type SupabaseServer = Awaited<ReturnType<typeof createClient>>;
 
@@ -1037,4 +1038,246 @@ export async function finalizarReinspeccion(input: {
   revalidatePath(`/tickets/${input.ticketId}`);
   revalidatePath("/dashboard");
   return { ok: true, ticketId: input.ticketId };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Buscador de patentes — pantalla de inspecciones del supervisor, para usar
+// ANTES de crear una inspección nueva.
+// ═══════════════════════════════════════════════════════════════════════
+
+const ESTADOS_RELEVANTES_BUSQUEDA = [
+  "en_revision",
+  "finalizada_con_observaciones",
+  "en_reparacion_de_observaciones",
+] as const;
+
+export type ItemNoConformeResumen = {
+  itemKey: string;
+  nombre: string;
+  observacion: string | null;
+};
+
+export type ResultadoBusquedaTicket = {
+  ticketId: string;
+  numeroInspeccion: number;
+  tipoInspeccion: string;
+  estado: TicketEstado;
+  patenteCamion: string;
+  patenteRampla: string;
+  /** Fecha de la revisión más reciente (no la de creación del ticket). */
+  fecha: string;
+  quienLaHizoNombre: string;
+  /** Identidad del camión = patente_camion (§1). patente_rampla puede
+   *  coincidir también — se informa cuál, nunca se mezclan en un solo
+   *  veredicto. */
+  coincidioEn: ("camion" | "rampla")[];
+  itemsNoConformes: ItemNoConformeResumen[];
+};
+
+export type ResultadoBusquedaPatente = {
+  misInspecciones: ResultadoBusquedaTicket[];
+  conObservaciones: ResultadoBusquedaTicket[];
+  /** Claves de tipos_inspeccion que este supervisor puede revisar — para el
+   *  mensaje de estado vacío (§5: nunca "la patente está limpia", siempre
+   *  acotado a lo que este supervisor puede ver). */
+  tiposPermitidos: string[];
+};
+
+async function tiposPermitidosDe(
+  supabase: SupabaseServer,
+  personalId: string,
+): Promise<string[]> {
+  const { data } = await supabase
+    .from("personal_tipos_inspeccion")
+    .select("tipo_inspeccion")
+    .eq("personal_id", personalId);
+  return (data ?? []).map((p) => p.tipo_inspeccion);
+}
+
+/**
+ * Busca tickets pendientes/con observaciones por patente (camión o rampla).
+ * Sin N+1: como mucho 3 consultas sin importar cuántos tickets coincidan
+ * (tickets, sus revisiones, sus respuestas no_conforme) — nunca una consulta
+ * por resultado.
+ *
+ * FUERA DE ALCANCE a propósito: no toca patente_rampla en ningún lado (vive
+ * en `tickets`, no en `ticket_revisiones` — mover eso es un problema
+ * conocido y aparte, no se lo empeora acá).
+ *
+ * Lo que NO hace todavía (pendiente de decidir con el usuario, ver §5 del
+ * pedido): avisar cuando el término coincide con un ticket de un tipo que
+ * este supervisor no puede ver (la RLS ya se lo oculta del todo, así que
+ * hoy simplemente no aparece en ningún resultado — el mensaje de estado
+ * vacío de abajo es honesto sobre eso, pero todavía no hay una señal activa
+ * de "existe algo que no podés ver").
+ */
+export async function buscarPorPatente(
+  termino: string,
+): Promise<ResultadoAccion<ResultadoBusquedaPatente>> {
+  const { perfil } = await getSesion();
+  if (perfil.rol !== "supervisor")
+    return { ok: false, mensaje: "Solo un supervisor puede buscar por patente." };
+
+  const normalizado = normalizarPatente(termino);
+  if (!normalizado)
+    return { ok: false, mensaje: "Escribí al menos parte de una patente." };
+
+  const supabase = await createClient();
+
+  const { data: tickets, error } = await supabase
+    .from("tickets")
+    .select(
+      "id, numero_inspeccion, tipo_inspeccion, estado, patente_camion, patente_rampla, revision_actual, supervisor_id",
+    )
+    .in("estado", ESTADOS_RELEVANTES_BUSQUEDA)
+    .or(
+      `patente_camion.ilike.%${normalizado}%,patente_rampla.ilike.%${normalizado}%`,
+    );
+  if (error) return errorInesperado("buscarPorPatente.tickets", error);
+
+  const lista = tickets ?? [];
+  if (lista.length === 0) {
+    return {
+      ok: true,
+      misInspecciones: [],
+      conObservaciones: [],
+      tiposPermitidos: await tiposPermitidosDe(supabase, perfil.id),
+    };
+  }
+
+  const ids = lista.map((t) => t.id);
+
+  // Todas las revisiones de los tickets encontrados — UNA consulta, se
+  // reduce a "la más reciente por ticket" en JS (no una consulta por
+  // ticket).
+  const { data: revisiones } = await supabase
+    .from("ticket_revisiones")
+    .select(
+      "ticket_id, numero_revision, created_at, supervisor:personal!ticket_revisiones_supervisor_id_fkey(nombre, apellido)",
+    )
+    .in("ticket_id", ids);
+
+  type FilaRevision = NonNullable<typeof revisiones>[number];
+  const ultimaRevisionPorTicket = new Map<string, FilaRevision>();
+  for (const r of revisiones ?? []) {
+    const actual = ultimaRevisionPorTicket.get(r.ticket_id);
+    if (!actual || r.numero_revision > actual.numero_revision)
+      ultimaRevisionPorTicket.set(r.ticket_id, r);
+  }
+
+  // Ítems no conformes de TODAS las revisiones de estos tickets — UNA
+  // consulta, filtrada en JS a la revisión más reciente de cada uno (ver
+  // arriba). Con esto y las dos consultas de arriba, son 3 en total sin
+  // importar cuántos tickets hayan coincidido.
+  const { data: respuestas } = await supabase
+    .from("ticket_checklist_respuestas")
+    .select(
+      "ticket_id, revision_numero, item_key, observacion, item:checklist_items(nombre)",
+    )
+    .in("ticket_id", ids)
+    .eq("estado", "no_conforme");
+
+  const itemsPorTicket = new Map<string, ItemNoConformeResumen[]>();
+  for (const r of respuestas ?? []) {
+    const ultima = ultimaRevisionPorTicket.get(r.ticket_id);
+    if (!ultima || r.revision_numero !== ultima.numero_revision) continue;
+    const arr = itemsPorTicket.get(r.ticket_id) ?? [];
+    arr.push({
+      itemKey: r.item_key,
+      nombre: r.item?.nombre ?? r.item_key,
+      observacion: r.observacion,
+    });
+    itemsPorTicket.set(r.ticket_id, arr);
+  }
+
+  const misInspecciones: ResultadoBusquedaTicket[] = [];
+  const conObservaciones: ResultadoBusquedaTicket[] = [];
+
+  for (const t of lista) {
+    const ultima = ultimaRevisionPorTicket.get(t.id);
+    const coincidioEn: ("camion" | "rampla")[] = [];
+    if (t.patente_camion.includes(normalizado)) coincidioEn.push("camion");
+    if (t.patente_rampla.includes(normalizado)) coincidioEn.push("rampla");
+
+    const resultado: ResultadoBusquedaTicket = {
+      ticketId: t.id,
+      numeroInspeccion: t.numero_inspeccion,
+      tipoInspeccion: t.tipo_inspeccion ?? "",
+      estado: t.estado,
+      patenteCamion: t.patente_camion,
+      patenteRampla: t.patente_rampla,
+      fecha: ultima?.created_at ?? "",
+      quienLaHizoNombre: ultima?.supervisor
+        ? nombreCompleto(ultima.supervisor.nombre, ultima.supervisor.apellido)
+        : "—",
+      coincidioEn,
+      itemsNoConformes: itemsPorTicket.get(t.id) ?? [],
+    };
+
+    if (t.supervisor_id === perfil.id) misInspecciones.push(resultado);
+    else conObservaciones.push(resultado);
+  }
+
+  return {
+    ok: true,
+    misInspecciones,
+    conObservaciones,
+    tiposPermitidos: await tiposPermitidosDe(supabase, perfil.id),
+  };
+}
+
+/**
+ * "Tomar" una inspección con observaciones de OTRO supervisor, desde el
+ * buscador de patentes. Transición ÚNICA y acotada a propósito: la RLS de
+ * `tickets_update` permite más de lo que este flujo debería (un supervisor
+ * con permiso de tipo podría, en teoría, escribir cualquier columna
+ * permitida por la política — incluidas patentes, o saltar directo a
+ * `finalizada_sin_observaciones` sin pasar por una revisión real). Este
+ * action nunca expone esos campos: el único cambio posible es
+ * `finalizada_con_observaciones` -> `en_reparacion_de_observaciones`, nada
+ * más.
+ *
+ * No crea la fila de `ticket_revisiones` ni toca `revision_actual` — eso ya
+ * lo hace `iniciarReinspeccion` (sin cambios) cuando el supervisor llega a
+ * `/tickets/[id]/reinspeccion`: `puedeReinspeccionar` ya acepta
+ * `en_reparacion_de_observaciones` como punto de partida válido, y esa
+ * función ya registra `ticket_revisiones.supervisor_id` como quien llama
+ * (nunca sobrescribe `tickets.supervisor_id`, que conserva el origen del
+ * ticket) — no hacía falta tocar ese código.
+ *
+ * El doble filtro en el `update` (`.eq("estado", "finalizada_con_observaciones")`)
+ * es la defensa real contra dos supervisores tomando la misma inspección a
+ * la vez: si otro ya la tomó entre que este supervisor la vio en los
+ * resultados y apretó "Tomar", el update no afecta ninguna fila y se avisa
+ * en vez de fingir éxito.
+ */
+export async function tomarInspeccionConObservaciones(input: {
+  ticketId: string;
+}): Promise<ResultadoAccion> {
+  const { perfil } = await getSesion();
+  if (perfil.rol !== "supervisor")
+    return { ok: false, mensaje: "Solo un supervisor puede tomar una inspección." };
+
+  const supabase = await createClient();
+
+  const { data: actualizado, error } = await supabase
+    .from("tickets")
+    .update({
+      estado: "en_reparacion_de_observaciones",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.ticketId)
+    .eq("estado", "finalizada_con_observaciones")
+    .select("id")
+    .maybeSingle();
+  if (error) return errorInesperado("tomarInspeccionConObservaciones.update", error);
+  if (!actualizado)
+    return {
+      ok: false,
+      mensaje:
+        "No se pudo tomar — puede que otro supervisor ya la haya tomado, o que ya no esté disponible. Volvé a buscar.",
+    };
+
+  revalidatePath("/dashboard");
+  return { ok: true };
 }
