@@ -140,6 +140,13 @@ export function BuscadorPatente() {
           </div>
         )}
 
+        {buscado && resultado && resultado.hayMasResultados && (
+          <p className="text-xs text-muted-foreground">
+            Hay más resultados de los que se muestran acá — escribí más
+            letras o números para acotar la búsqueda.
+          </p>
+        )}
+
         {buscado && resultado && !sinResultados && (
           <div className="grid gap-6">
             <GrupoResultados
