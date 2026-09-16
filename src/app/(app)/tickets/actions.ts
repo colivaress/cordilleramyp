@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getSesion } from "@/lib/auth";
 import {
   estadoTrasChecklist,
@@ -1051,6 +1052,22 @@ const ESTADOS_RELEVANTES_BUSQUEDA = [
   "en_reparacion_de_observaciones",
 ] as const;
 
+/**
+ * String de filtro `.or()` para patente_camion/patente_rampla — UNA sola
+ * función, usada tanto por la consulta con RLS como por la consulta sin RLS
+ * de §5 (ver hayCoincidenciaOcultaPara), para que el predicado de las dos
+ * sea EXACTAMENTE el mismo y la resta de conteos sea válida.
+ *
+ * Requiere `normalizado` restringido a [A-Z0-9]+ (ver la validación en
+ * buscarPorPatente, antes de llamar esta función) — el filtro `.or()` de
+ * PostgREST se arma interpolando el string a mano; sin esa restricción,
+ * una coma o un paréntesis en el término permitiría inyectar condiciones
+ * adicionales al filtro.
+ */
+function filtroPatente(normalizado: string): string {
+  return `patente_camion.ilike.%${normalizado}%,patente_rampla.ilike.%${normalizado}%`;
+}
+
 export type ItemNoConformeResumen = {
   itemKey: string;
   nombre: string;
@@ -1081,6 +1098,10 @@ export type ResultadoBusquedaPatente = {
    *  mensaje de estado vacío (§5: nunca "la patente está limpia", siempre
    *  acotado a lo que este supervisor puede ver). */
   tiposPermitidos: string[];
+  /** §5: true si existe AL MENOS un ticket que matchea el término en un tipo
+   *  que este supervisor no puede ver — sin número, sin detalle, sin
+   *  contenido (ver hayCoincidenciaOcultaPara). */
+  hayCoincidenciaOculta: boolean;
 };
 
 async function tiposPermitidosDe(
@@ -1095,6 +1116,62 @@ async function tiposPermitidosDe(
 }
 
 /**
+ * §5: compara el conteo SIN RLS contra `conteoVisible` (el largo del
+ * resultado de la consulta normal, que sí respeta RLS) — la diferencia es
+ * el conjunto oculto. Nunca expone cuál: solo un booleano.
+ *
+ * NO es una función SQL security definer — se intentó ese diseño primero
+ * (una función en el esquema `private`, llamada vía `.rpc()`) pero
+ * `private` no está en `schemas` de `supabase/config.toml` (solo `public`/
+ * `graphql_public` lo están) — PostgREST no expone rutas para ese esquema
+ * en absoluto, así que `.rpc()` no la habría alcanzado nunca (404, no un
+ * problema de permisos). La alternativa de moverla a `public` para poder
+ * llamarla quedaba peor que el problema que resolvía: cualquier cliente
+ * autenticado (no solo este Server Action) podría invocarla directo vía
+ * REST con cualquier término, convirtiéndola en el mismo "oráculo sobre
+ * toda la tabla" que la primera versión (con `p_tipos_permitidos`) ya
+ * había descartado — solo que ahora la puerta sería un endpoint expuesto
+ * en vez de un parámetro.
+ *
+ * En cambio, usa `createAdminClient()` (service role) — el mismo patrón ya
+ * establecido en este proyecto (usuarios/actions.ts, invitación) para
+ * operaciones server-only sin sesión de usuario. Nunca se expone al
+ * cliente ni queda alcanzable por HTTP: solo se ejecuta dentro de este
+ * Server Action, que ya exige sesión de supervisor (getSesion +
+ * perfil.rol) antes de llegar acá — la barrera de autorización la sigue
+ * poniendo el código de la aplicación, no un contrato a nivel de base que
+ * tendría que sostenerse solo frente a cualquier invocación posible.
+ *
+ * El predicado (`filtroPatente` + `ESTADOS_RELEVANTES_BUSQUEDA`) es la
+ * MISMA función/constante que usa la consulta con RLS de arriba — nunca
+ * una copia — para que la resta de conteos sea válida. Si la consulta
+ * falla, no se rompe la búsqueda entera por esto: se loguea y se asume "no
+ * hay coincidencia oculta" (falso negativo aceptable acá — es un aviso
+ * adicional, no la fuente de verdad de qué mostrar).
+ */
+async function hayCoincidenciaOcultaPara(
+  terminoNormalizado: string,
+  conteoVisible: number,
+): Promise<boolean> {
+  try {
+    const admin = createAdminClient();
+    const { count, error } = await admin
+      .from("tickets")
+      .select("id", { count: "exact", head: true })
+      .in("estado", ESTADOS_RELEVANTES_BUSQUEDA)
+      .or(filtroPatente(terminoNormalizado));
+    if (error) {
+      console.error("[hayCoincidenciaOcultaPara]", error);
+      return false;
+    }
+    return (count ?? 0) > conteoVisible;
+  } catch (e) {
+    console.error("[hayCoincidenciaOcultaPara]", e);
+    return false;
+  }
+}
+
+/**
  * Busca tickets pendientes/con observaciones por patente (camión o rampla).
  * Sin N+1: como mucho 3 consultas sin importar cuántos tickets coincidan
  * (tickets, sus revisiones, sus respuestas no_conforme) — nunca una consulta
@@ -1104,12 +1181,10 @@ async function tiposPermitidosDe(
  * en `tickets`, no en `ticket_revisiones` — mover eso es un problema
  * conocido y aparte, no se lo empeora acá).
  *
- * Lo que NO hace todavía (pendiente de decidir con el usuario, ver §5 del
- * pedido): avisar cuando el término coincide con un ticket de un tipo que
- * este supervisor no puede ver (la RLS ya se lo oculta del todo, así que
- * hoy simplemente no aparece en ningún resultado — el mensaje de estado
- * vacío de abajo es honesto sobre eso, pero todavía no hay una señal activa
- * de "existe algo que no podés ver").
+ * §5: además del mensaje de estado vacío (nunca "la patente está limpia",
+ * siempre acotado a los tipos que este supervisor puede revisar), avisa
+ * cuando el término coincide con un ticket de un tipo que no puede ver — sin
+ * número, sin detalle, sin contenido. Ver `hayCoincidenciaOcultaPara`.
  */
 export async function buscarPorPatente(
   termino: string,
@@ -1121,6 +1196,12 @@ export async function buscarPorPatente(
   const normalizado = normalizarPatente(termino);
   if (!normalizado)
     return { ok: false, mensaje: "Escribí al menos parte de una patente." };
+  // Restringido a alfanumérico: el filtro .or() de PostgREST se arma
+  // interpolando este string a mano (filtroPatente) — sin esta validación,
+  // una coma o un paréntesis en el término permitiría inyectar condiciones
+  // adicionales al filtro. Una patente real nunca necesita otro carácter.
+  if (!/^[A-Z0-9]+$/.test(normalizado))
+    return { ok: false, mensaje: "La búsqueda solo puede tener letras y números." };
 
   const supabase = await createClient();
 
@@ -1130,9 +1211,7 @@ export async function buscarPorPatente(
       "id, numero_inspeccion, tipo_inspeccion, estado, patente_camion, patente_rampla, revision_actual, supervisor_id",
     )
     .in("estado", ESTADOS_RELEVANTES_BUSQUEDA)
-    .or(
-      `patente_camion.ilike.%${normalizado}%,patente_rampla.ilike.%${normalizado}%`,
-    );
+    .or(filtroPatente(normalizado));
   if (error) return errorInesperado("buscarPorPatente.tickets", error);
 
   const lista = tickets ?? [];
@@ -1141,6 +1220,7 @@ export async function buscarPorPatente(
       ok: true,
       misInspecciones: [],
       conObservaciones: [],
+      hayCoincidenciaOculta: await hayCoincidenciaOcultaPara(normalizado, 0),
       tiposPermitidos: await tiposPermitidosDe(supabase, perfil.id),
     };
   }
@@ -1222,6 +1302,7 @@ export async function buscarPorPatente(
     ok: true,
     misInspecciones,
     conObservaciones,
+    hayCoincidenciaOculta: await hayCoincidenciaOcultaPara(normalizado, lista.length),
     tiposPermitidos: await tiposPermitidosDe(supabase, perfil.id),
   };
 }

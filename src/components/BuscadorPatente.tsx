@@ -125,6 +125,21 @@ export function BuscadorPatente() {
           <IndicadorGuardado estado={guardado.estado} />
         </form>
 
+        {/* §5: se muestra SIEMPRE que exista, tenga o no resultados visibles
+            esta búsqueda — un tipo oculto puede coexistir con resultados
+            visibles de otro tipo. Sin número, sin detalle, sin contenido:
+            solo la existencia. */}
+        {buscado && resultado && resultado.hayCoincidenciaOculta && (
+          <div className="flex items-start gap-2 rounded-md border border-warning-300 bg-warning-50 p-3 text-sm text-warning-900">
+            <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
+            <span>
+              Esta patente tiene además una coincidencia en un tipo de
+              inspección que no podés revisar. No se puede mostrar cuál ni
+              qué dice — preguntale a un administrador o a otro inspector.
+            </span>
+          </div>
+        )}
+
         {buscado && resultado && !sinResultados && (
           <div className="grid gap-6">
             <GrupoResultados
