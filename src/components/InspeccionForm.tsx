@@ -556,20 +556,32 @@ export function InspeccionForm({
 
   /**
    * "Abrir no debe escribir": en reinspección, iniciarReinspeccion (crea la
-   * fila de ticket_revisiones + siembra el checklist + pasa el ticket a
-   * en_revision) ya NO se llama al pasar de "Datos de esta revisión" al
-   * checklist (ver irAlChecklist) — se llama acá, envolviendo el PRIMER
-   * guardado real (el primer ítem respondido o la primera firma), nunca
-   * antes. Si el supervisor sale de la pantalla sin guardar nada, no queda
-   * ninguna revisión a medias: el ticket sigue como lo dejó "Tomar"
-   * (en_reparacion_de_observaciones — visible para cualquiera, retomable
-   * por cualquiera), no en_revision (que solo el dueño puede ver).
+   * fila de ticket_revisiones + siembra el checklist) ya NO se llama al
+   * pasar de "Datos de esta revisión" al checklist (ver irAlChecklist) — se
+   * llama acá, envolviendo el PRIMER guardado real (el primer ítem
+   * respondido o la primera firma), nunca antes. Si el supervisor sale de
+   * la pantalla sin guardar nada, no queda ninguna revisión a medias.
+   *
+   * `iniciarReinspeccion` deja `tickets.estado` en
+   * `en_reparacion_de_observaciones` — NO en `en_revision` — y se queda ahí
+   * durante TODA la revisión (ver el comentario grande en esa función,
+   * tickets/actions.ts): es lo que mantiene el ticket visible para el
+   * resto de los supervisores mientras dura, no solo antes del primer
+   * guardado. Este wrapper no decide ESE valor, solo cuándo se llama a la
+   * función que lo escribe.
    *
    * Idempotente por partida doble: iniciarReinspeccion en sí ya lo es
    * (prepararRevision hace upsert/insert-ignore), y este wrapper además
    * evita el viaje de red de más en cada guardado siguiente una vez que
    * revisionAseguradaRef ya está en true (seteado acá al confirmar éxito, o
    * en el efecto de recuperación al montar si ya existía).
+   *
+   * Este wrapper es una conveniencia, no la barrera real: si algún guardado
+   * futuro se agrega sin pasar por acá, `autorizarRevisionEnCurso`
+   * (server-side, dentro de cada guardarX) igual lo rechaza con un mensaje
+   * claro en vez de escribir mal — compara `tickets.revision_actual` contra
+   * el número de revisión recibido, que no va a coincidir si la revisión
+   * nunca se creó. Ver el comentario de esa función.
    */
   async function conRevisionAsegurada<T>(
     fn: () => Promise<ResultadoAccion<T>>,

@@ -421,6 +421,41 @@ export async function iniciarInspeccion(
  * O el supervisor que abrió esa revisión (`ticket_revisiones.supervisor_id`) —
  * una re-inspección la puede tomar un supervisor distinto al creador del ticket.
  */
+/**
+ * Gate de "esta revisión está abierta y este supervisor puede escribir en
+ * ella" — lo usan `guardarRespuestaItem`, `guardarFotoChecklistItem`,
+ * `guardarObservacionGeneral`, `guardarFirmaRevision` y `obtenerEstadoRevision`.
+ *
+ * 🔴 Ya NO depende de `tickets.estado === 'en_revision'`. Motivo: durante una
+ * reinspección, `tickets.estado` se queda en `en_reparacion_de_observaciones`
+ * TODO el tiempo que la revisión sigue abierta (no solo antes del primer
+ * guardado) — es lo que mantiene el ticket visible para el resto de los
+ * supervisores mientras se reinspecciona (RLS: `en_reparacion_de_observaciones`
+ * está en la misma rama "con observaciones" que `finalizada_con_observaciones`;
+ * `en_revision` es la única que restringe a un solo dueño). Si este gate
+ * siguiera pidiendo `en_revision`, cada guardado después del primero
+ * rechazaría con "La revisión ya fue finalizada" apenas alguien cambiara ese
+ * valor de vuelta a en_revision — que es justo lo que NO debe pasar.
+ *
+ * En cambio, "abierta" se decide mirando la revisión misma:
+ *   1. `tickets.revision_actual` tiene que apuntar a ESTA revisión (si
+ *      apunta a una anterior, esta ya fue superada o nunca se creó — ver
+ *      el punto 3 más abajo).
+ *   2. `ticket_revisiones.estado_resultante` de esa fila tiene que seguir
+ *      en `'en_revision'` (el valor con el que `prepararRevision` la siembra
+ *      al crearla; `cerrarRevision` lo reemplaza por el resultado real al
+ *      cerrar — nunca vuelve a `'en_revision'` después de eso).
+ *
+ * Consecuencia importante (pedida a propósito, no un efecto secundario): si
+ * un guardado llega para una revisión que todavía no existe (`iniciarInspeccion`/
+ * `iniciarReinspeccion` no corrieron todavía — antes de "conRevisionAsegurada"
+ * en InspeccionForm.tsx), `ticket.revision_actual` no va a matchear
+ * `revisionNumero` y esto rechaza con un mensaje claro, en vez de escribir
+ * en la fila equivocada o fallar en silencio. Es la misma barrera aunque
+ * alguien agregue un guardado nuevo y se olvide de pasar por el wrapper del
+ * cliente — el gate real vive acá, server-side, no en una convención que el
+ * cliente tiene que recordar.
+ */
 async function autorizarRevisionEnCurso(
   supabase: SupabaseServer,
   perfilId: string,
@@ -429,21 +464,24 @@ async function autorizarRevisionEnCurso(
 ): Promise<ResultadoAccion> {
   const { data: ticket } = await supabase
     .from("tickets")
-    .select("supervisor_id, estado")
+    .select("supervisor_id, revision_actual")
     .eq("id", ticketId)
     .maybeSingle();
   if (!ticket) return { ok: false, mensaje: "No se encontró la inspección." };
-  if (ticket.estado !== "en_revision")
+  if (ticket.revision_actual !== revisionNumero)
     return { ok: false, mensaje: "La revisión ya fue finalizada." };
-  if (ticket.supervisor_id === perfilId) return { ok: true };
 
   const { data: rev } = await supabase
     .from("ticket_revisiones")
-    .select("supervisor_id")
+    .select("supervisor_id, estado_resultante")
     .eq("ticket_id", ticketId)
     .eq("numero_revision", revisionNumero)
     .maybeSingle();
-  if (rev?.supervisor_id === perfilId) return { ok: true };
+  if (!rev || rev.estado_resultante !== "en_revision")
+    return { ok: false, mensaje: "La revisión ya fue finalizada." };
+
+  if (ticket.supervisor_id === perfilId) return { ok: true };
+  if (rev.supervisor_id === perfilId) return { ok: true };
 
   return {
     ok: false,
@@ -869,20 +907,36 @@ export async function finalizarInspeccion(input: {
  * §2.8: arranque de una re-inspección — mismo criterio que `iniciarInspeccion`.
  * §2.3/§2.6: se entra directo desde "Finalizada con observaciones" (o el legado
  * "En reparación de observaciones"), sin paso manual de "Iniciar reparación", y
- * la puede tomar CUALQUIER supervisor, no solo el que creó el ticket. Pasa el
- * ticket a `en_revision` con `revision_actual += 1`, deja lista la fila de
- * `ticket_revisiones` de la nueva revisión (con `supervisor_id` = quien hace
- * ESTA revisión) y siembra sus respuestas. Idempotente si el mismo supervisor
- * reingresa a la revisión en curso.
+ * la puede tomar CUALQUIER supervisor, no solo el que creó el ticket. Deja
+ * lista la fila de `ticket_revisiones` de la nueva revisión (con
+ * `supervisor_id` = quien hace ESTA revisión) y siembra sus respuestas.
+ * Idempotente si el mismo supervisor reingresa a la revisión en curso.
  *
  * "Abrir no debe escribir": esta función YA NO se llama al pasar de "Datos
  * de esta revisión" al checklist (InspeccionForm.tsx, irAlChecklist) — se
  * llama recién en el PRIMER guardado real (ver conRevisionAsegurada en
  * InspeccionForm.tsx), para no dejar una revisión vacía si el supervisor
- * sale de la pantalla sin guardar nada. Esta función en sí no cambió: sigue
- * pasando el ticket a en_revision incondicionalmente — es CORRECTO que lo
- * haga, porque ahora solo se llama cuando ya hay un guardado real
- * ocurriendo al mismo tiempo (nunca antes).
+ * sale de la pantalla sin guardar nada.
+ *
+ * 🔴 `tickets.estado` pasa a `en_reparacion_de_observaciones` — NO a
+ * `en_revision` — y se queda ahí DURANTE TODA la revisión, hasta que
+ * `finalizarReinspeccion` la cierre. Antes escribía `en_revision`
+ * incondicionalmente (mismo criterio que `iniciarInspeccion`, copiado sin
+ * pensarlo) y eso reintroducía el bug que "Tomar" existe para evitar, solo
+ * corrido del momento de abrir al momento del primer guardado: en cuanto
+ * alguien respondía un ítem, el ticket volvía a `en_revision` — visible
+ * SOLO para quien la está haciendo (`tickets_select` no incluye `en_revision`
+ * en la rama "con observaciones") — y el camión con una revisión a medias
+ * desaparecía otra vez para el resto de los supervisores. Con
+ * `en_reparacion_de_observaciones` sostenido, el ticket sigue en esa misma
+ * rama de RLS mientras dura la reinspección completa, no solo antes de
+ * empezarla.
+ *
+ * Consecuencia: "¿ya está en curso?" ya NO se lee de `tickets.estado`
+ * (nunca vuelve a decir `en_revision` en este flujo) — se lee de la última
+ * fila de `ticket_revisiones`: si su `estado_resultante` sigue en
+ * `'en_revision'`, esa revisión sigue abierta (mismo criterio que
+ * `autorizarRevisionEnCurso`, que usan los guardados por ítem/firma).
  *
  * El tipo de inspección NO se vuelve a pedir — es fijo desde que se creó el
  * ticket (`tickets.tipo_inspeccion`), se re-lee de ahí.
@@ -914,37 +968,36 @@ export async function iniciarReinspeccion(input: {
   if (!ticket.tipo_inspeccion)
     return { ok: false, mensaje: "Falta el tipo de inspección del ticket." };
 
-  // Puede venir desde "finalizada_con_observaciones" (o el legado
-  // "en_reparacion_de_observaciones") en el primer ingreso, o ya estar
-  // "en_revision" si el supervisor volvió a los datos y reingresó.
-  const yaEnCurso = ticket.estado === "en_revision";
+  // La última revisión de este ticket — si su estado_resultante sigue en
+  // 'en_revision', ESA es la revisión en curso (no hay que crear otra).
+  const { data: ultimaRev } = await supabase
+    .from("ticket_revisiones")
+    .select("numero_revision, estado_resultante, supervisor_id")
+    .eq("ticket_id", input.ticketId)
+    .order("numero_revision", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const yaEnCurso = ultimaRev?.estado_resultante === "en_revision";
+
   if (!yaEnCurso && !puedeReinspeccionar(ticket.estado))
     return {
       ok: false,
       mensaje: "Solo se puede re-inspeccionar un ticket con observaciones pendientes.",
     };
 
-  if (yaEnCurso) {
-    // Otra persona no puede continuar una re-inspección que ya arrancó otro.
-    const { data: revEnCurso } = await supabase
-      .from("ticket_revisiones")
-      .select("supervisor_id")
-      .eq("ticket_id", input.ticketId)
-      .eq("numero_revision", ticket.revision_actual)
-      .maybeSingle();
-    if (
-      revEnCurso &&
-      revEnCurso.supervisor_id !== perfil.id &&
-      ticket.supervisor_id !== perfil.id
-    )
-      return {
-        ok: false,
-        mensaje: "Otro supervisor ya está realizando la re-inspección de este ticket.",
-      };
-  }
+  // Otra persona no puede continuar una re-inspección que ya arrancó otro.
+  if (
+    yaEnCurso &&
+    ultimaRev!.supervisor_id !== perfil.id &&
+    ticket.supervisor_id !== perfil.id
+  )
+    return {
+      ok: false,
+      mensaje: "Otro supervisor ya está realizando la re-inspección de este ticket.",
+    };
 
   const numeroRevision = yaEnCurso
-    ? ticket.revision_actual
+    ? ultimaRev!.numero_revision
     : ticket.revision_actual + 1;
   const conductor = input.conductor.trim();
 
@@ -962,7 +1015,8 @@ export async function iniciarReinspeccion(input: {
     const { error } = await supabase
       .from("tickets")
       .update({
-        estado: "en_revision",
+        // NO 'en_revision' — ver el comentario grande de arriba.
+        estado: "en_reparacion_de_observaciones",
         revision_actual: numeroRevision,
         // §3.1/§3.2: nuevo ciclo de vencimiento → se rehabilitan todos los avisos
         // automáticos (WhatsApp al supervisor y correos a administradores).
@@ -995,22 +1049,27 @@ export async function finalizarReinspeccion(input: {
 
   const { data: ticket } = await supabase
     .from("tickets")
-    .select("estado, supervisor_id, tipo_inspeccion")
+    .select("supervisor_id, tipo_inspeccion")
     .eq("id", input.ticketId)
     .maybeSingle();
   if (!ticket) return { ok: false, mensaje: "Ticket no encontrado." };
-  if (ticket.estado !== "en_revision")
-    return { ok: false, mensaje: "Esta re-inspección ya fue finalizada." };
   if (!ticket.tipo_inspeccion)
     return { ok: false, mensaje: "Falta el tipo de inspección del ticket." };
 
+  // Ya no se chequea tickets.estado === 'en_revision' — durante una
+  // reinspección ese valor se queda en en_reparacion_de_observaciones
+  // (ver iniciarReinspeccion). "Abierta" se decide con el
+  // estado_resultante de la revisión misma, igual que en
+  // autorizarRevisionEnCurso.
   const { data: rev } = await supabase
     .from("ticket_revisiones")
-    .select("conductor, fecha_vencimiento, supervisor_id")
+    .select("conductor, fecha_vencimiento, supervisor_id, estado_resultante")
     .eq("ticket_id", input.ticketId)
     .eq("numero_revision", input.revisionNumero)
     .maybeSingle();
   if (!rev) return { ok: false, mensaje: "La revisión no está iniciada." };
+  if (rev.estado_resultante !== "en_revision")
+    return { ok: false, mensaje: "Esta re-inspección ya fue finalizada." };
   // §2.6: la finaliza quien la hizo (o el creador del ticket / un admin).
   if (ticket.supervisor_id !== perfil.id && rev.supervisor_id !== perfil.id)
     return {
