@@ -875,6 +875,15 @@ export async function finalizarInspeccion(input: {
  * ESTA revisión) y siembra sus respuestas. Idempotente si el mismo supervisor
  * reingresa a la revisión en curso.
  *
+ * "Abrir no debe escribir": esta función YA NO se llama al pasar de "Datos
+ * de esta revisión" al checklist (InspeccionForm.tsx, irAlChecklist) — se
+ * llama recién en el PRIMER guardado real (ver conRevisionAsegurada en
+ * InspeccionForm.tsx), para no dejar una revisión vacía si el supervisor
+ * sale de la pantalla sin guardar nada. Esta función en sí no cambió: sigue
+ * pasando el ticket a en_revision incondicionalmente — es CORRECTO que lo
+ * haga, porque ahora solo se llama cuando ya hay un guardado real
+ * ocurriendo al mismo tiempo (nunca antes).
+ *
  * El tipo de inspección NO se vuelve a pedir — es fijo desde que se creó el
  * ticket (`tickets.tipo_inspeccion`), se re-lee de ahí.
  */
@@ -1363,13 +1372,23 @@ export async function buscarPorPatente(
  * `finalizada_con_observaciones` -> `en_reparacion_de_observaciones`, nada
  * más.
  *
- * No crea la fila de `ticket_revisiones` ni toca `revision_actual` — eso ya
- * lo hace `iniciarReinspeccion` (sin cambios) cuando el supervisor llega a
- * `/tickets/[id]/reinspeccion`: `puedeReinspeccionar` ya acepta
- * `en_reparacion_de_observaciones` como punto de partida válido, y esa
- * función ya registra `ticket_revisiones.supervisor_id` como quien llama
- * (nunca sobrescribe `tickets.supervisor_id`, que conserva el origen del
- * ticket) — no hacía falta tocar ese código.
+ * No crea la fila de `ticket_revisiones` ni toca `revision_actual`.
+ *
+ * 🔴 Esto SÍ falló en la práctica una vez (reportado desde staging): la
+ * primera versión de este comentario decía que `iniciarReinspeccion`
+ * corría "cuando el supervisor llega a la pantalla", pero en ese momento
+ * `irAlChecklist` (InspeccionForm.tsx) la llamaba al simple cambio de paso
+ * "Datos de esta revisión" -> checklist — ANTES de cualquier guardado
+ * real. Esa llamada pisaba el `en_reparacion_de_observaciones` de acá de
+ * vuelta a `en_revision` con el checklist todavío vacío, sin firmas —
+ * exactamente lo que esta acción existe para evitar. Corregido: ahora
+ * `iniciarReinspeccion` se llama recién en el PRIMER guardado real (ver
+ * `conRevisionAsegurada` en InspeccionForm.tsx), nunca al abrir la
+ * pantalla ni al cambiar de paso. `puedeReinspeccionar` ya aceptaba
+ * `en_reparacion_de_observaciones` como punto de partida válido, y
+ * `iniciarReinspeccion` ya registra `ticket_revisiones.supervisor_id` como
+ * quien llama (nunca sobrescribe `tickets.supervisor_id`, que conserva el
+ * origen del ticket) — esa función en sí no cambió, solo CUÁNDO se llama.
  *
  * El doble filtro en el `update` (`.eq("estado", "finalizada_con_observaciones")`)
  * es la defensa real contra dos supervisores tomando la misma inspección a
