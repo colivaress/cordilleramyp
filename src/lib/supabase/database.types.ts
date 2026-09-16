@@ -502,7 +502,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      contar_tickets_con_patente_exacta: {
+        Args: { p_patente_normalizada: string }
+        Returns: number
+      }
     }
     Enums: {
       item_estado: "conforme" | "no_conforme" | "no_aplica"

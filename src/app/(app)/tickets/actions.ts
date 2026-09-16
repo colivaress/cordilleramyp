@@ -12,6 +12,7 @@ import type { ItemEstado, TicketEstado } from "@/lib/tipos";
 import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
 import { firmarRutas } from "@/lib/storage";
 import { normalizarPatente } from "@/lib/patentes";
+import { nombreCompleto } from "@/lib/mensajes";
 
 type SupabaseServer = Awaited<ReturnType<typeof createClient>>;
 
@@ -1037,4 +1038,372 @@ export async function finalizarReinspeccion(input: {
   revalidatePath(`/tickets/${input.ticketId}`);
   revalidatePath("/dashboard");
   return { ok: true, ticketId: input.ticketId };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Buscador de patentes — pantalla de inspecciones del supervisor, para usar
+// ANTES de crear una inspección nueva.
+// ═══════════════════════════════════════════════════════════════════════
+
+const ESTADOS_RELEVANTES_BUSQUEDA = [
+  "en_revision",
+  "finalizada_con_observaciones",
+  "en_reparacion_de_observaciones",
+] as const;
+
+/**
+ * String de filtro `.or()` para patente_camion/patente_rampla — UNA sola
+ * función, usada tanto por la consulta con RLS como por la consulta sin RLS
+ * de §5 (ver hayCoincidenciaOcultaPara), para que el predicado de las dos
+ * sea EXACTAMENTE el mismo y la resta de conteos sea válida.
+ *
+ * Requiere `normalizado` restringido a [A-Z0-9]+ (ver la validación en
+ * buscarPorPatente, antes de llamar esta función) — el filtro `.or()` de
+ * PostgREST se arma interpolando el string a mano; sin esa restricción,
+ * una coma o un paréntesis en el término permitiría inyectar condiciones
+ * adicionales al filtro.
+ */
+function filtroPatente(normalizado: string): string {
+  return `patente_camion.ilike.%${normalizado}%,patente_rampla.ilike.%${normalizado}%`;
+}
+
+/** Mismo filtro que `filtroPatente` pero por igualdad — usado SOLO para el
+ *  conteo visible de §5 (ver hayCoincidenciaOcultaPara), nunca para el
+ *  listado (que es substring a propósito). */
+function filtroPatenteExacta(normalizado: string): string {
+  return `patente_camion.eq.${normalizado},patente_rampla.eq.${normalizado}`;
+}
+
+/**
+ * Tope del listado visible — `supabase/config.toml` fija `max_rows = 1000`
+ * a nivel de PostgREST (todo el proyecto, no algo que este archivo
+ * controle), así que sin ESTE límite propio, una búsqueda de una sola
+ * letra en un catálogo grande devolvería hasta 1000 tarjetas de golpe. Se
+ * pide uno de más (`+ 1`) para poder distinguir "hay exactamente el tope"
+ * de "hay más de lo que se muestra" sin una segunda consulta.
+ */
+const LIMITE_RESULTADOS_LISTADO = 30;
+
+export type ItemNoConformeResumen = {
+  itemKey: string;
+  nombre: string;
+  observacion: string | null;
+};
+
+export type ResultadoBusquedaTicket = {
+  ticketId: string;
+  numeroInspeccion: number;
+  tipoInspeccion: string;
+  estado: TicketEstado;
+  patenteCamion: string;
+  patenteRampla: string;
+  /** Fecha de la revisión más reciente (no la de creación del ticket). */
+  fecha: string;
+  quienLaHizoNombre: string;
+  /** Identidad del camión = patente_camion (§1). patente_rampla puede
+   *  coincidir también — se informa cuál, nunca se mezclan en un solo
+   *  veredicto. */
+  coincidioEn: ("camion" | "rampla")[];
+  itemsNoConformes: ItemNoConformeResumen[];
+};
+
+export type ResultadoBusquedaPatente = {
+  misInspecciones: ResultadoBusquedaTicket[];
+  conObservaciones: ResultadoBusquedaTicket[];
+  /** Claves de tipos_inspeccion que este supervisor puede revisar — para el
+   *  mensaje de estado vacío (§5: nunca "la patente está limpia", siempre
+   *  acotado a lo que este supervisor puede ver). */
+  tiposPermitidos: string[];
+  /** §5: true si existe AL MENOS un ticket que matchea el término en un tipo
+   *  que este supervisor no puede ver — sin número, sin detalle, sin
+   *  contenido (ver hayCoincidenciaOcultaPara). */
+  hayCoincidenciaOculta: boolean;
+  /** true si el listado se cortó en LIMITE_RESULTADOS_LISTADO — hay más
+   *  resultados de los que se muestran, hay que afinar la búsqueda. */
+  hayMasResultados: boolean;
+};
+
+async function tiposPermitidosDe(
+  supabase: SupabaseServer,
+  personalId: string,
+): Promise<string[]> {
+  const { data } = await supabase
+    .from("personal_tipos_inspeccion")
+    .select("tipo_inspeccion")
+    .eq("personal_id", personalId);
+  return (data ?? []).map((p) => p.tipo_inspeccion);
+}
+
+/**
+ * §5: compara, para la patente EXACTA (no substring — ver el comentario de
+ * la migración 20260916040000), el conteo SIN RLS
+ * (public.contar_tickets_con_patente_exacta, security definer, llamada por
+ * `.rpc()`) contra el conteo CON RLS del mismo predicado — la diferencia es
+ * el conjunto oculto. Nunca expone cuál: solo un booleano.
+ *
+ * Por qué esta versión y no las anteriores (histórico, no borrar sin releer
+ * antes de tocar esto):
+ *   v1 — función con `p_tipos_permitidos` como parámetro: descartada, una
+ *        security definer no puede recibir su propio alcance de
+ *        autorización como input.
+ *   v2 — sacado ese parámetro, pero como `private` no está expuesto por
+ *        PostgREST (`schemas` en supabase/config.toml), se llamaba con
+ *        `createAdminClient()` en vez de como función: descartada también
+ *        — eso le daba a esta ruta de código acceso a la base entera, y el
+ *        término seguía concatenado en un `.or()` en vez de ir como
+ *        parámetro ligado.
+ *   v3 — función en `public`, llamada por `.rpc()` con el término como
+ *        parámetro ligado. El conteo CON RLS se derivaba filtrando en JS
+ *        los resultados YA TRAÍDOS por el listado (`lista`, substring):
+ *        descartado también — el listado tiene su propio tope
+ *        (LIMITE_RESULTADOS_LISTADO) y, sin ese tope, PostgREST igual
+ *        corta en 1000 filas (`max_rows` de supabase/config.toml). Si el
+ *        listado se trunca, filtrar en JS podía dar un conteo CON RLS más
+ *        chico que el real, y el aviso gritaría "hay algo oculto" sobre un
+ *        ticket que en realidad SÍ es visible — solo que quedó fuera de
+ *        la página. Un aviso que grita en falso deja de creerse a la
+ *        tercera vez.
+ *   v4 (esta) — el conteo CON RLS de esta función es una consulta PROPIA,
+ *        `head: true` (cuenta sin traer filas — no le aplica ningún tope
+ *        de filas, a diferencia del listado) y por IGUALDAD, nunca
+ *        derivada del listado por substring. Los dos conteos que se
+ *        restan (este y el del RPC) usan el MISMO predicado exacto
+ *        (`filtroPatenteExacta` + `ESTADOS_RELEVANTES_BUSQUEDA`) y
+ *        difieren solo en la RLS — la resta es válida sin importar cuánto
+ *        crezca la tabla ni cuántas filas traiga el listado.
+ *
+ * IMPORTANTE — por qué exacto y no substring: la pregunta que hace la
+ * pantalla es "¿ESTE camión tiene algo pendiente en un tipo que no veo?",
+ * y eso es una patente exacta. Un substring de 2-3 letras dispara en casi
+ * cualquier búsqueda (no informa nada) y sirve de sonda para enumerar
+ * coincidencias letra por letra. El listado visible sigue siendo substring
+ * a propósito — ahí la RLS ya es el límite real.
+ *
+ * Si cualquiera de las dos consultas falla, no se rompe la búsqueda entera
+ * por esto: se loguea y se asume "no hay coincidencia oculta" (falso
+ * negativo aceptable acá — es un aviso adicional, no la fuente de verdad
+ * de qué mostrar).
+ */
+async function hayCoincidenciaOcultaPara(
+  supabase: SupabaseServer,
+  patenteNormalizada: string,
+): Promise<boolean> {
+  const [conRls, sinRls] = await Promise.all([
+    supabase
+      .from("tickets")
+      .select("id", { count: "exact", head: true })
+      .in("estado", ESTADOS_RELEVANTES_BUSQUEDA)
+      .or(filtroPatenteExacta(patenteNormalizada)),
+    supabase.rpc("contar_tickets_con_patente_exacta", {
+      p_patente_normalizada: patenteNormalizada,
+    }),
+  ]);
+  if (conRls.error) {
+    console.error("[hayCoincidenciaOcultaPara.conRls]", conRls.error);
+    return false;
+  }
+  if (sinRls.error) {
+    console.error("[hayCoincidenciaOcultaPara.sinRls]", sinRls.error);
+    return false;
+  }
+  return Number(sinRls.data ?? 0) > (conRls.count ?? 0);
+}
+
+/**
+ * Busca tickets pendientes/con observaciones por patente (camión o rampla).
+ * Sin N+1: como mucho 3 consultas sin importar cuántos tickets coincidan
+ * (tickets, sus revisiones, sus respuestas no_conforme) — nunca una consulta
+ * por resultado.
+ *
+ * FUERA DE ALCANCE a propósito: no toca patente_rampla en ningún lado (vive
+ * en `tickets`, no en `ticket_revisiones` — mover eso es un problema
+ * conocido y aparte, no se lo empeora acá).
+ *
+ * §5: además del mensaje de estado vacío (nunca "la patente está limpia",
+ * siempre acotado a los tipos que este supervisor puede revisar), avisa
+ * cuando el término coincide con un ticket de un tipo que no puede ver — sin
+ * número, sin detalle, sin contenido. Ver `hayCoincidenciaOcultaPara`.
+ */
+export async function buscarPorPatente(
+  termino: string,
+): Promise<ResultadoAccion<ResultadoBusquedaPatente>> {
+  const { perfil } = await getSesion();
+  if (perfil.rol !== "supervisor")
+    return { ok: false, mensaje: "Solo un supervisor puede buscar por patente." };
+
+  const normalizado = normalizarPatente(termino);
+  if (!normalizado)
+    return { ok: false, mensaje: "Escribí al menos parte de una patente." };
+  // Restringido a alfanumérico: el filtro .or() de PostgREST se arma
+  // interpolando este string a mano (filtroPatente) — sin esta validación,
+  // una coma o un paréntesis en el término permitiría inyectar condiciones
+  // adicionales al filtro. Una patente real nunca necesita otro carácter.
+  if (!/^[A-Z0-9]+$/.test(normalizado))
+    return { ok: false, mensaje: "La búsqueda solo puede tener letras y números." };
+
+  const supabase = await createClient();
+
+  // +1 sobre el tope: permite distinguir "hay más de lo que se muestra" sin
+  // una segunda consulta (ver LIMITE_RESULTADOS_LISTADO).
+  const { data: tickets, error } = await supabase
+    .from("tickets")
+    .select(
+      "id, numero_inspeccion, tipo_inspeccion, estado, patente_camion, patente_rampla, revision_actual, supervisor_id",
+    )
+    .in("estado", ESTADOS_RELEVANTES_BUSQUEDA)
+    .or(filtroPatente(normalizado))
+    .limit(LIMITE_RESULTADOS_LISTADO + 1);
+  if (error) return errorInesperado("buscarPorPatente.tickets", error);
+
+  const traidos = tickets ?? [];
+  const hayMasResultados = traidos.length > LIMITE_RESULTADOS_LISTADO;
+  const lista = traidos.slice(0, LIMITE_RESULTADOS_LISTADO);
+  if (lista.length === 0) {
+    return {
+      ok: true,
+      misInspecciones: [],
+      conObservaciones: [],
+      hayCoincidenciaOculta: await hayCoincidenciaOcultaPara(supabase, normalizado),
+      hayMasResultados: false,
+      tiposPermitidos: await tiposPermitidosDe(supabase, perfil.id),
+    };
+  }
+
+  const ids = lista.map((t) => t.id);
+
+  // Todas las revisiones de los tickets encontrados — UNA consulta, se
+  // reduce a "la más reciente por ticket" en JS (no una consulta por
+  // ticket).
+  const { data: revisiones } = await supabase
+    .from("ticket_revisiones")
+    .select(
+      "ticket_id, numero_revision, created_at, supervisor:personal!ticket_revisiones_supervisor_id_fkey(nombre, apellido)",
+    )
+    .in("ticket_id", ids);
+
+  type FilaRevision = NonNullable<typeof revisiones>[number];
+  const ultimaRevisionPorTicket = new Map<string, FilaRevision>();
+  for (const r of revisiones ?? []) {
+    const actual = ultimaRevisionPorTicket.get(r.ticket_id);
+    if (!actual || r.numero_revision > actual.numero_revision)
+      ultimaRevisionPorTicket.set(r.ticket_id, r);
+  }
+
+  // Ítems no conformes de TODAS las revisiones de estos tickets — UNA
+  // consulta, filtrada en JS a la revisión más reciente de cada uno (ver
+  // arriba). Con esto y las dos consultas de arriba, son 3 en total sin
+  // importar cuántos tickets hayan coincidido.
+  const { data: respuestas } = await supabase
+    .from("ticket_checklist_respuestas")
+    .select(
+      "ticket_id, revision_numero, item_key, observacion, item:checklist_items(nombre)",
+    )
+    .in("ticket_id", ids)
+    .eq("estado", "no_conforme");
+
+  const itemsPorTicket = new Map<string, ItemNoConformeResumen[]>();
+  for (const r of respuestas ?? []) {
+    const ultima = ultimaRevisionPorTicket.get(r.ticket_id);
+    if (!ultima || r.revision_numero !== ultima.numero_revision) continue;
+    const arr = itemsPorTicket.get(r.ticket_id) ?? [];
+    arr.push({
+      itemKey: r.item_key,
+      nombre: r.item?.nombre ?? r.item_key,
+      observacion: r.observacion,
+    });
+    itemsPorTicket.set(r.ticket_id, arr);
+  }
+
+  const misInspecciones: ResultadoBusquedaTicket[] = [];
+  const conObservaciones: ResultadoBusquedaTicket[] = [];
+
+  for (const t of lista) {
+    const ultima = ultimaRevisionPorTicket.get(t.id);
+    const coincidioEn: ("camion" | "rampla")[] = [];
+    if (t.patente_camion.includes(normalizado)) coincidioEn.push("camion");
+    if (t.patente_rampla.includes(normalizado)) coincidioEn.push("rampla");
+
+    const resultado: ResultadoBusquedaTicket = {
+      ticketId: t.id,
+      numeroInspeccion: t.numero_inspeccion,
+      tipoInspeccion: t.tipo_inspeccion ?? "",
+      estado: t.estado,
+      patenteCamion: t.patente_camion,
+      patenteRampla: t.patente_rampla,
+      fecha: ultima?.created_at ?? "",
+      quienLaHizoNombre: ultima?.supervisor
+        ? nombreCompleto(ultima.supervisor.nombre, ultima.supervisor.apellido)
+        : "—",
+      coincidioEn,
+      itemsNoConformes: itemsPorTicket.get(t.id) ?? [],
+    };
+
+    if (t.supervisor_id === perfil.id) misInspecciones.push(resultado);
+    else conObservaciones.push(resultado);
+  }
+
+  return {
+    ok: true,
+    misInspecciones,
+    conObservaciones,
+    hayCoincidenciaOculta: await hayCoincidenciaOcultaPara(supabase, normalizado),
+    hayMasResultados,
+    tiposPermitidos: await tiposPermitidosDe(supabase, perfil.id),
+  };
+}
+
+/**
+ * "Tomar" una inspección con observaciones de OTRO supervisor, desde el
+ * buscador de patentes. Transición ÚNICA y acotada a propósito: la RLS de
+ * `tickets_update` permite más de lo que este flujo debería (un supervisor
+ * con permiso de tipo podría, en teoría, escribir cualquier columna
+ * permitida por la política — incluidas patentes, o saltar directo a
+ * `finalizada_sin_observaciones` sin pasar por una revisión real). Este
+ * action nunca expone esos campos: el único cambio posible es
+ * `finalizada_con_observaciones` -> `en_reparacion_de_observaciones`, nada
+ * más.
+ *
+ * No crea la fila de `ticket_revisiones` ni toca `revision_actual` — eso ya
+ * lo hace `iniciarReinspeccion` (sin cambios) cuando el supervisor llega a
+ * `/tickets/[id]/reinspeccion`: `puedeReinspeccionar` ya acepta
+ * `en_reparacion_de_observaciones` como punto de partida válido, y esa
+ * función ya registra `ticket_revisiones.supervisor_id` como quien llama
+ * (nunca sobrescribe `tickets.supervisor_id`, que conserva el origen del
+ * ticket) — no hacía falta tocar ese código.
+ *
+ * El doble filtro en el `update` (`.eq("estado", "finalizada_con_observaciones")`)
+ * es la defensa real contra dos supervisores tomando la misma inspección a
+ * la vez: si otro ya la tomó entre que este supervisor la vio en los
+ * resultados y apretó "Tomar", el update no afecta ninguna fila y se avisa
+ * en vez de fingir éxito.
+ */
+export async function tomarInspeccionConObservaciones(input: {
+  ticketId: string;
+}): Promise<ResultadoAccion> {
+  const { perfil } = await getSesion();
+  if (perfil.rol !== "supervisor")
+    return { ok: false, mensaje: "Solo un supervisor puede tomar una inspección." };
+
+  const supabase = await createClient();
+
+  const { data: actualizado, error } = await supabase
+    .from("tickets")
+    .update({
+      estado: "en_reparacion_de_observaciones",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.ticketId)
+    .eq("estado", "finalizada_con_observaciones")
+    .select("id")
+    .maybeSingle();
+  if (error) return errorInesperado("tomarInspeccionConObservaciones.update", error);
+  if (!actualizado)
+    return {
+      ok: false,
+      mensaje:
+        "No se pudo tomar — puede que otro supervisor ya la haya tomado, o que ya no esté disponible. Volvé a buscar.",
+    };
+
+  revalidatePath("/dashboard");
+  return { ok: true };
 }
