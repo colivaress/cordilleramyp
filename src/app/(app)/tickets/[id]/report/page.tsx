@@ -264,7 +264,11 @@ export default async function InformePage({
             <VerPdfButton ticketId={ticket.id} rev={valorSelector} />
           </div>
         </div>
-        <EmailRecipientsSelect ticketId={ticket.id} rev={valorSelector} />
+        <EmailRecipientsSelect
+          ticketId={ticket.id}
+          tipoInspeccion={tipoInspeccion}
+          rev={valorSelector}
+        />
         <p className="mt-2 text-xs text-muted-foreground">
           {modoTodas
             ? "El PDF adjunto trae el historial completo de revisiones, una tras otra."

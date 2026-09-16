@@ -25,11 +25,17 @@ import type { DestinatarioCorreo } from "@/lib/tipos";
  */
 export function EmailRecipientsSelect({
   ticketId,
+  tipoInspeccion,
   // §4: revisión seleccionada en el informe ("todas" o el número). El PDF que se
   // envía corresponde a eso.
   rev = "",
 }: {
   ticketId: string;
+  /** Destinatarios por tipo de inspección: la lista se filtra a quienes
+   *  están autorizados para ESTE tipo (destinatarios_correo_tipos,
+   *  recibe_informes) — mostrar acá un destinatario que la ruta de envío
+   *  igual va a rechazar sería peor que no mostrarlo. */
+  tipoInspeccion: string;
   rev?: string;
 }) {
   const [lista, setLista] = useState<DestinatarioCorreo[]>([]);
@@ -42,14 +48,18 @@ export function EmailRecipientsSelect({
     (async () => {
       const supabase = createClient();
       const { data } = await supabase
-        .from("destinatarios_correo")
-        .select("*")
-        .eq("activo", true)
-        .order("nombre");
-      setLista(data ?? []);
+        .from("destinatarios_correo_tipos")
+        .select("destinatario:destinatarios_correo!inner(*)")
+        .eq("tipo_inspeccion", tipoInspeccion)
+        .eq("recibe_informes", true)
+        .eq("destinatarios_correo.activo", true);
+      const destinatarios = (data ?? [])
+        .map((d) => d.destinatario)
+        .sort((a, b) => a.nombre.localeCompare(b.nombre));
+      setLista(destinatarios);
       setCargando(false);
     })();
-  }, []);
+  }, [tipoInspeccion]);
 
   function toggle(email: string) {
     setSeleccion((prev) => {
