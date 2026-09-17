@@ -12,8 +12,10 @@ import { UsuariosTabla } from "@/components/usuarios/UsuariosTabla";
 export const dynamic = "force-dynamic";
 
 export default async function UsuariosPage() {
-  // §2.10: panel exclusivo del administrador (ruta + RLS de `personal`).
-  const { perfil } = await requireRol("administrador");
+  // §2.10: panel de administrador y administrador_contrato (ruta + RLS de
+  // `personal` — este último no puede crear/editar/borrar filas admin, eso
+  // lo aplica la RLS, no esta página).
+  const { perfil } = await requireRol("administrador", "administrador_contrato");
   const supabase = await createClient();
 
   // Fase "tipos de inspección" — parte 4/4: tipos permitidos por supervisor.
@@ -49,6 +51,7 @@ export default async function UsuariosPage() {
           <UsuariosTabla
             usuarios={usuarios ?? []}
             perfilId={perfil.id}
+            perfilRol={perfil.rol}
             tiposPorSupervisor={tiposPorSupervisor}
           />
         </CardContent>

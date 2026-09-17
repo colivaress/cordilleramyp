@@ -1,9 +1,6 @@
 // Generado con: supabase gen types typescript --local (CLI, no MCP — el MCP
-// lee del proyecto remoto, y a esta fecha la migración de este PR aún no
-// está aplicada ahí). El shape difiere un poco del generado por MCP
-// anteriormente en este repo (sin `__InternalSupabase.PostgrestVersion`,
-// con un schema `graphql_public` extra) — es una diferencia de versión de
-// la CLI, no una edición a mano. Regenerar tras cambios de esquema.
+// lee del proyecto remoto, y a esta fecha la migración de administrador_contrato
+// aún no está aplicada ahí). Regenerar tras cambios de esquema.
 export type Json =
   | string
   | number
@@ -511,7 +508,11 @@ export type Database = {
       item_estado: "conforme" | "no_conforme" | "no_aplica"
       item_modo: "estado" | "fotos"
       notificacion_tipo: "whatsapp" | "email"
-      rol_usuario: "supervisor" | "administrador" | "conductor"
+      rol_usuario:
+        | "supervisor"
+        | "administrador"
+        | "conductor"
+        | "administrador_contrato"
       ticket_estado:
         | "en_revision"
         | "finalizada_con_observaciones"
@@ -650,7 +651,12 @@ export const Constants = {
       item_estado: ["conforme", "no_conforme", "no_aplica"],
       item_modo: ["estado", "fotos"],
       notificacion_tipo: ["whatsapp", "email"],
-      rol_usuario: ["supervisor", "administrador", "conductor"],
+      rol_usuario: [
+        "supervisor",
+        "administrador",
+        "conductor",
+        "administrador_contrato",
+      ],
       ticket_estado: [
         "en_revision",
         "finalizada_con_observaciones",

@@ -152,10 +152,14 @@ type FilaBusqueda = {
 export function UsuariosTabla({
   usuarios,
   perfilId,
+  perfilRol,
   tiposPorSupervisor,
 }: {
   usuarios: Personal[];
   perfilId: string;
+  /** Rol de quien está usando este panel — decide qué rol puede ofrecer el
+   *  <select> del formulario (ver más abajo). */
+  perfilRol: RolUsuario;
   /** personal.id -> claves de tipos_inspeccion permitidos (vacío/ausente = SIN acceso a ninguno). */
   tiposPorSupervisor: Record<string, string[]>;
 }) {
@@ -252,20 +256,31 @@ export function UsuariosTabla({
     );
     return ordenados.map((u) => {
       const tiposClaves = u.rol === "supervisor" ? (tiposPorSupervisor[u.id] ?? []) : [];
-      const rolTexto = u.rol === "administrador" ? "Administrador" : "Supervisor";
+      const rolTexto =
+        u.rol === "administrador"
+          ? "Administrador"
+          : u.rol === "administrador_contrato"
+            ? "Administrador de contrato"
+            : "Supervisor";
       const estadoTexto = !u.activo
         ? "Inactivo"
         : !u.user_id
           ? "Invitación pendiente"
           : "Activo";
+      // administrador_contrato: el concepto "tipos permitidos" no aplica —
+      // no ejecuta inspecciones, asigna tipos a otros. Ni "Todos" (no es
+      // realmente un administrador de inspecciones) ni el badge rojo "Sin
+      // tipos" (esa alarma es real para un supervisor bloqueado, no acá).
       const tiposTexto =
         u.rol === "administrador"
           ? "Todos por ser administrador"
-          : tiposClaves.length === 0
-            ? "Sin tipos"
-            : tiposClaves.length === 4
-              ? `Los 4 tipos ${ORDEN_TIPOS_INSPECCION.map((c) => ETIQUETA_TIPO_INSPECCION[c]).join(" ")}`
-              : tiposClaves.map((c) => ETIQUETA_TIPO_INSPECCION[c]).join(" ");
+          : u.rol === "administrador_contrato"
+            ? "No aplica"
+            : tiposClaves.length === 0
+              ? "Sin tipos"
+              : tiposClaves.length === 4
+                ? `Los 4 tipos ${ORDEN_TIPOS_INSPECCION.map((c) => ETIQUETA_TIPO_INSPECCION[c]).join(" ")}`
+                : tiposClaves.map((c) => ETIQUETA_TIPO_INSPECCION[c]).join(" ");
       const textoGeneral = normalizar(
         [u.nombre, u.apellido ?? "", u.email ?? "", u.telefono ?? "", rolTexto, estadoTexto, tiposTexto].join(" "),
       );
@@ -432,7 +447,22 @@ export function UsuariosTabla({
                   className={nativeSelectClassName}
                 >
                   <option value="supervisor">Supervisor</option>
-                  <option value="administrador">Administrador</option>
+                  {/* Un administrador_contrato nunca puede dejar a nadie como
+                      administrador (RLS de personal_update, migración
+                      20260917030000) — no se le ofrece la opción, así el
+                      intento ni siquiera llega al servidor. Excepción: si la
+                      fila que se está editando YA es administrador, se
+                      mantiene la opción visible (aunque este rol tampoco
+                      pueda guardar ningún cambio ahí, bloqueado aparte por
+                      la RLS) para que el <select> no quede sin ninguna
+                      opción seleccionada. */}
+                  {(perfilRol !== "administrador_contrato" ||
+                    form.rol === "administrador") && (
+                    <option value="administrador">Administrador</option>
+                  )}
+                  <option value="administrador_contrato">
+                    Administrador de contrato
+                  </option>
                 </select>
               </div>
               <Campo
@@ -574,7 +604,13 @@ function FilaUsuario({
       <TableCell>{resaltar(u.email ?? "—", terminos)}</TableCell>
       <TableCell>{resaltar(u.telefono ?? "—", terminos)}</TableCell>
       <TableCell>
-        <Badge variant={u.rol === "administrador" ? "default" : "secondary"}>
+        <Badge
+          variant={
+            u.rol === "administrador" || u.rol === "administrador_contrato"
+              ? "default"
+              : "secondary"
+          }
+        >
           {resaltar(f.rolTexto, terminos)}
         </Badge>
       </TableCell>
@@ -668,10 +704,13 @@ function FilaUsuario({
 }
 
 /**
- * Celda "Tipos de inspección" — 4 formas visuales, a propósito distintas:
+ * Celda "Tipos de inspección" — 5 formas visuales, a propósito distintas:
  *  - Administrador: texto gris apagado, sin etiquetas — no es una asignación
  *    suya, es consecuencia del rol. Si se viera igual que una asignación
  *    real, alguien intentaría "editarla".
+ *  - Administrador de contrato: "No aplica" — no ejecuta inspecciones,
+ *    asigna tipos a otros. NUNCA el badge rojo "Sin tipos" (esa es una
+ *    alarma real de supervisor bloqueado, no corresponde acá).
  *  - Supervisor con los 4: UNA etiqueta gris colapsada — tras el backfill de
  *    la parte 4/4 este es el caso más común; repetir las 4 en cada fila
  *    ensancha la tabla sin decir nada. Se expande solo si la búsqueda apunta
@@ -696,6 +735,17 @@ function CeldaTipos({
     return (
       <span className="text-xs text-muted-foreground">
         {resaltar("Todos (por ser administrador)", terminos)}
+      </span>
+    );
+  }
+  // administrador_contrato: el concepto "tipos permitidos" no aplica — no
+  // ejecuta inspecciones, asigna tipos a otros. El badge rojo "Sin tipos"
+  // de más abajo es una alarma real (supervisor bloqueado) que acá no
+  // corresponde — mostrarla donde no aplica la desgasta.
+  if (rol === "administrador_contrato") {
+    return (
+      <span className="text-xs text-muted-foreground">
+        {resaltar("No aplica", terminos)}
       </span>
     );
   }
