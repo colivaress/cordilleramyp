@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { nativeSelectClassName } from "@/components/ui/native-select";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -433,7 +434,20 @@ export function UsuariosTabla({
               onChange={(v) => setForm((f) => ({ ...f, email: v }))}
             />
             <div className="grid gap-2 sm:grid-cols-2">
-              <div className="grid gap-1.5">
+              {/* min-w-0 (acá) + w-full/truncate (en el <select>, abajo):
+                  dos causas juntas producían el desborde. (1) Los hijos de
+                  grid tienen min-width:auto por defecto — esta celda no se
+                  encogía por debajo del ancho intrínseco de su contenido.
+                  (2) nativeSelectClassName no trae ancho a propósito (cada
+                  uso decide w-full/w-fit según el caso) — sin uno, un
+                  <select> nativo se dimensiona por su opción más ancha, no
+                  por su contenedor, así que aunque (1) se arregle solo, el
+                  <select> igual se sale de la celda ya encogida. Con las
+                  dos, "Administrador de contrato" se recorta con "…" en vez
+                  de tapar "Fecha de nacimiento" (bug real, visto en
+                  producción — las etiquetas cortas anteriores lo dejaban
+                  latente). */}
+              <div className="grid min-w-0 gap-1.5">
                 <Label htmlFor="u-rol">Rol</Label>
                 <select
                   id="u-rol"
@@ -444,7 +458,7 @@ export function UsuariosTabla({
                       rol: e.target.value as RolUsuario,
                     }))
                   }
-                  className={nativeSelectClassName}
+                  className={cn(nativeSelectClassName, "w-full truncate")}
                 >
                   <option value="supervisor">Supervisor</option>
                   {/* Un administrador_contrato nunca puede dejar a nadie como
