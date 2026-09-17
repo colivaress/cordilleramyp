@@ -120,7 +120,7 @@ export async function agregarDestinatario(input: {
   tipoInspeccion: string;
   canal: CanalCorreo;
 }): Promise<ResultadoAccion> {
-  await requireRol("administrador");
+  await requireRol("administrador", "administrador_contrato");
 
   const nombre = input.nombre.trim();
   const email = input.email.trim().toLowerCase();
@@ -174,7 +174,7 @@ export async function quitarDeTipo(input: {
   tipoInspeccion: string;
   canal: CanalCorreo;
 }): Promise<ResultadoAccion> {
-  await requireRol("administrador");
+  await requireRol("administrador", "administrador_contrato");
   const supabase = await createClient();
 
   const res = await apagarEnTipo(supabase, input.destinatarioId, input.tipoInspeccion, input.canal);
@@ -192,7 +192,7 @@ export async function cambiarActivoDestinatario(input: {
   id: string;
   activo: boolean;
 }): Promise<ResultadoAccion> {
-  await requireRol("administrador");
+  await requireRol("administrador", "administrador_contrato");
   const supabase = await createClient();
 
   const { error } = await supabase

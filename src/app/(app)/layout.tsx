@@ -11,6 +11,7 @@ export default async function AppLayout({
 }) {
   const { perfil } = await getSesion();
   const esAdmin = perfil.rol === "administrador";
+  const esAdminContrato = perfil.rol === "administrador_contrato";
   const esSupervisor = perfil.rol === "supervisor";
 
   return (
@@ -30,16 +31,22 @@ export default async function AppLayout({
             <Logo />
           </Link>
           <nav className="flex items-center gap-2 text-sm">
-            {/* §2.11: "Dashboard" = analítica; "Inspecciones" = el listado.
-                §2.6: el supervisor no ve ninguno de los dos. */}
+            {/* §2.11: "Dashboard" = analítica, exclusivo administrador —
+                administrador_contrato NO entra ahí (explícito en su
+                alcance), aunque sí ve "Inspecciones" (la tabla completa,
+                de solo lectura) y administra Usuarios/Configuración
+                correos igual que un administrador. El supervisor no ve
+                ninguno de los cuatro. */}
             {esAdmin && (
+              <Link
+                href="/dashboard/analitica"
+                className={buttonVariants({ variant: "ghost" })}
+              >
+                Dashboard
+              </Link>
+            )}
+            {(esAdmin || esAdminContrato) && (
               <>
-                <Link
-                  href="/dashboard/analitica"
-                  className={buttonVariants({ variant: "ghost" })}
-                >
-                  Dashboard
-                </Link>
                 <Link
                   href="/dashboard"
                   className={buttonVariants({ variant: "ghost" })}
@@ -76,8 +83,12 @@ export default async function AppLayout({
             <span className="max-w-[8rem] truncate text-muted-foreground sm:max-w-[14rem]">
               {perfil.nombre}
             </span>
-            <Badge variant={esAdmin ? "default" : "secondary"}>
-              {esAdmin ? "Administrador" : "Supervisor"}
+            <Badge variant={esAdmin || esAdminContrato ? "default" : "secondary"}>
+              {esAdmin
+                ? "Administrador"
+                : esAdminContrato
+                  ? "Administrador de contrato"
+                  : "Supervisor"}
             </Badge>
             <form action="/auth/signout" method="post">
               <Button type="submit" variant="outline">

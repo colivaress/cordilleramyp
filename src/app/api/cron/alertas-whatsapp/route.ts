@@ -31,9 +31,10 @@ export const dynamic = "force-dynamic";
  * §3.2: correo de vencimiento en 48h, 24h y al vencer (cada momento una sola
  *       vez por ciclo — `alerta_admin_*_enviada`), a DOS grupos separados,
  *       en dos envíos distintos (nunca mezclados en el mismo mensaje):
- *         - interno: administradores activos de `personal` + el supervisor
- *           del ticket si está activo. Plantilla con el link al informe y el
- *           nombre del supervisor (construirCorreoVencimientoAdmin).
+ *         - interno: administradores y administrador_contrato activos de
+ *           `personal` + el supervisor del ticket si está activo. Plantilla
+ *           con el link al informe y el nombre del supervisor
+ *           (construirCorreoVencimientoAdmin).
  *         - externo: `destinatarios_correo_tipos` con `recibe_vencimientos =
  *           true` PARA EL TIPO del ticket.
  *           Plantilla sin esos dos datos (construirCorreoVencimientoExterno)
@@ -109,10 +110,13 @@ export async function GET(req: NextRequest) {
   }
 
   // ===================== §3.2 — correo de vencimiento (48h / 24h / vencido) =======
+  // administrador_contrato recibe el grupo interno igual que administrador
+  // — explícito en el alcance del rol ("recibir las alertas de vencimiento
+  // en el grupo interno del cron, igual que un administrador").
   const { data: adminsData } = await supabase
     .from("personal")
     .select("email")
-    .eq("rol", "administrador")
+    .in("rol", ["administrador", "administrador_contrato"])
     .eq("activo", true);
   const adminEmails = (adminsData ?? [])
     .map((a) => (a.email ?? "").trim())

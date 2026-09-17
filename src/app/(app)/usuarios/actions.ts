@@ -29,7 +29,11 @@ function validar(input: UsuarioInput): ResultadoAccion {
     if (!String(valor ?? "").trim())
       return { ok: false, mensaje: `Falta completar "${campo}".` };
   }
-  if (input.rol !== "supervisor" && input.rol !== "administrador")
+  if (
+    input.rol !== "supervisor" &&
+    input.rol !== "administrador" &&
+    input.rol !== "administrador_contrato"
+  )
     return { ok: false, mensaje: "Rol inválido." };
   // §2.10/§3.1: el teléfono es obligatorio para un supervisor (lo usa el
   // WhatsApp automático y el manual).
@@ -73,7 +77,7 @@ async function invitar(input: {
 export async function agregarUsuario(
   input: UsuarioInput,
 ): Promise<ResultadoUsuario> {
-  await requireRol("administrador");
+  await requireRol("administrador", "administrador_contrato");
   const val = validar(input);
   if (!val.ok) return val;
   const supabase = await createClient();
@@ -115,13 +119,21 @@ export async function agregarUsuario(
 export async function editarUsuario(
   input: UsuarioInput & { id: string },
 ): Promise<ResultadoUsuario> {
-  await requireRol("administrador");
+  await requireRol("administrador", "administrador_contrato");
   const val = validar(input);
   if (!val.ok) return val;
   const supabase = await createClient();
 
   // El correo no se edita (es el vínculo con la cuenta de autenticación).
-  const { error } = await supabase
+  //
+  // "Ni tocar esas filas" (administrador_contrato sobre una fila
+  // administrador) y "no puede dejar una fila como administrador" se
+  // validan en la RLS de personal_update (migración 20260917030000: USING
+  // sobre la fila vieja, WITH CHECK sobre la fila nueva), no acá — por eso
+  // hace falta el .select().maybeSingle(): un update bloqueado por RLS no
+  // es un error de Postgres, es éxito con cero filas — sin este chequeo la
+  // función diría "ok" sin haber cambiado nada.
+  const { data: actualizado, error } = await supabase
     .from("personal")
     .update({
       nombre: input.nombre.trim(),
@@ -130,8 +142,15 @@ export async function editarUsuario(
       fecha_nacimiento: input.fechaNacimiento,
       rol: input.rol,
     })
-    .eq("id", input.id);
+    .eq("id", input.id)
+    .select("id")
+    .maybeSingle();
   if (error) return errorInesperado("editarUsuario.update", error);
+  if (!actualizado)
+    return {
+      ok: false,
+      mensaje: "No se pudo actualizar — no tienes permiso sobre este usuario.",
+    };
 
   revalidatePath("/usuarios");
   return { ok: true };
@@ -151,7 +170,7 @@ export async function actualizarTiposInspeccion(input: {
   personalId: string;
   tipos: string[];
 }): Promise<ResultadoUsuario> {
-  await requireRol("administrador");
+  await requireRol("administrador", "administrador_contrato");
   const validos = new Set<string>(ORDEN_TIPOS_INSPECCION);
   const tipos = [...new Set(input.tipos)].filter((t) => validos.has(t));
 
@@ -179,16 +198,30 @@ export async function cambiarActivo(input: {
   id: string;
   activo: boolean;
 }): Promise<ResultadoUsuario> {
-  const { perfil } = await requireRol("administrador");
+  const { perfil } = await requireRol("administrador", "administrador_contrato");
   if (!input.activo && input.id === perfil.id)
     return { ok: false, mensaje: "No puedes desactivar tu propia cuenta." };
 
   const supabase = await createClient();
-  const { error } = await supabase
+  // "Ni tocar esas filas" (administrador_contrato sobre una fila
+  // administrador) no se valida acá — lo hace la RLS de personal_update
+  // (migración 20260917030000, USING con rol <> 'administrador' para este
+  // rol). Por eso hace falta el .select().maybeSingle(): si la RLS bloquea
+  // el update, Postgres/PostgREST no devuelve error, devuelve éxito con
+  // cero filas afectadas — sin este chequeo, la función diría "ok" sin
+  // haber cambiado nada.
+  const { data: actualizado, error } = await supabase
     .from("personal")
     .update({ activo: input.activo })
-    .eq("id", input.id);
+    .eq("id", input.id)
+    .select("id")
+    .maybeSingle();
   if (error) return errorInesperado("cambiarActivo.update", error);
+  if (!actualizado)
+    return {
+      ok: false,
+      mensaje: "No se pudo actualizar — no tienes permiso sobre este usuario.",
+    };
 
   revalidatePath("/usuarios");
   return { ok: true };
@@ -197,7 +230,7 @@ export async function cambiarActivo(input: {
 export async function reenviarInvitacion(input: {
   id: string;
 }): Promise<ResultadoUsuario> {
-  await requireRol("administrador");
+  await requireRol("administrador", "administrador_contrato");
   const supabase = await createClient();
 
   const { data: u } = await supabase

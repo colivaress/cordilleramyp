@@ -53,8 +53,15 @@ async function preparar(
     };
   }
 
-  // §2.6: el informe lo pueden manejar tanto el supervisor como el administrador.
-  if (!perfil || (perfil.rol !== "supervisor" && perfil.rol !== "administrador")) {
+  // §2.6: el informe lo pueden manejar supervisor, administrador y
+  // administrador_contrato (este último: "enviar informes por correo",
+  // explícito en su alcance — puede enviar, nunca crear/editar/cerrar).
+  if (
+    !perfil ||
+    (perfil.rol !== "supervisor" &&
+      perfil.rol !== "administrador" &&
+      perfil.rol !== "administrador_contrato")
+  ) {
     return {
       error: NextResponse.json(
         { error: "Solo un supervisor o administrador puede acceder al informe." },
@@ -77,8 +84,10 @@ async function preparar(
     };
   }
 
-  // §2.6: el administrador ve/envía el informe de CUALQUIER ticket. Un supervisor
-  // puede el de los suyos, más los que estén "con observaciones" (o el legado
+  // §2.6: el administrador ve/envía el informe de CUALQUIER ticket —
+  // administrador_contrato también ("ver todas las inspecciones... como un
+  // administrador", "enviar informes por correo"). Un supervisor puede el
+  // de los suyos, más los que estén "con observaciones" (o el legado
   // "en reparación") — la segunda inspección la puede tomar otro supervisor.
   const { data: estadoTicket } = await supabase
     .from("tickets")
@@ -90,6 +99,7 @@ async function preparar(
     estadoTicket?.estado === "en_reparacion_de_observaciones";
   if (
     perfil.rol !== "administrador" &&
+    perfil.rol !== "administrador_contrato" &&
     informe.meta.supervisorId !== perfil.id &&
     !conObservaciones
   ) {

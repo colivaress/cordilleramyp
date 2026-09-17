@@ -6,7 +6,7 @@ import type { DestinatarioCorreo } from "@/lib/tipos";
 export const dynamic = "force-dynamic";
 
 export default async function AlertasPage() {
-  await requireRol("administrador");
+  await requireRol("administrador", "administrador_contrato");
   const supabase = await createClient();
 
   // §1: los tipos se leen de tipos_inspeccion, nunca de una lista fija en

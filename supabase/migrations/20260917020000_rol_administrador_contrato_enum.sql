@@ -1,0 +1,33 @@
+-- Rol nuevo: "Administrador de contrato" (administrador_contrato). Fase 1 del
+-- rollout — SOLO agrega el valor al enum. Los permisos (RLS, helper
+-- private.es_admin_contrato()) van en la migración siguiente
+-- (20260917030000), en un archivo aparte a propósito: Postgres no permite
+-- usar un valor de enum recién agregado en la MISMA transacción en la que se
+-- agrega (ALTER TYPE ... ADD VALUE tiene esa restricción incluso en
+-- versiones donde el resto del comando sí es transaccional) — separarlo en
+-- dos migraciones evita chocar con eso sin depender de que la CLI corra cada
+-- archivo en su propia transacción.
+--
+-- Qué puede el rol (decidido con el usuario, no se re-discute acá):
+--   - Ver TODAS las inspecciones, de todos los tipos, como un administrador.
+--     Solo ver: no crea, no edita, no cierra, no borra inspecciones.
+--   - Enviar informes por correo.
+--   - Crear y editar usuarios de cualquier rol EXCEPTO administrador.
+--     Desactivar sí (activo=false), incluso eso NO sobre una fila admin.
+--     Borrar la fila, nunca.
+--   - Asignar y quitar tipos de inspección a los usuarios que administra.
+--   - Administrar la configuración de correos (destinatarios y sus tipos).
+--   - Recibir las alertas de vencimiento en el grupo interno del cron.
+-- Qué NO puede:
+--   - Crear, editar ni borrar usuarios con rol administrador. Ni tocar esas
+--     filas (incluido activo).
+--   - Editar checklist_items ni tipos_inspeccion.
+--   - Entrar al dashboard de analítica (/dashboard/analitica).
+--
+-- 🔴 Este rol NUNCA entra a private.es_admin() — esa función está
+-- referenciada en 36 políticas RLS sobre 11 tablas; ensancharla le daría a
+-- este rol todo lo que tiene un administrador, incluido crear
+-- administradores. Cada permiso de este rol es una condición NUEVA y
+-- separada, nunca una ampliación de es_admin() — ver la migración
+-- 20260917030000.
+alter type public.rol_usuario add value if not exists 'administrador_contrato';

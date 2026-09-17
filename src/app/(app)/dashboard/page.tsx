@@ -49,6 +49,13 @@ export default async function DashboardPage({
   const { perfil } = await getSesion();
   const esAdmin = perfil.rol === "administrador";
   const esSupervisor = perfil.rol === "supervisor";
+  // administrador_contrato ve esta pantalla exactamente "como un
+  // administrador" (explícito en su alcance) — todas las inspecciones,
+  // todos los filtros, sin "Nueva inspección" ni el buscador de patentes
+  // (eso último ya queda excluido solo por depender de esSupervisor, no
+  // hace falta tocarlo). Una sola variable derivada para no repetir el OR
+  // en cada punto de esta página.
+  const puedeVerTodo = esAdmin || perfil.rol === "administrador_contrato";
   const supabase = await createClient();
 
   // §2.6: la RLS de `select` ya limita qué tickets ve cada rol (el admin todos;
@@ -79,14 +86,14 @@ export default async function DashboardPage({
   const resumen = calcularResumen(lista);
 
   // ---- Filtros de la tabla (§2.6): mes + supervisor solo admin; estado ambos ----
-  const mesesDisponibles = esAdmin
+  const mesesDisponibles = puedeVerTodo
     ? [...new Set(lista.map((t) => mesKey(t.created_at)))]
         .sort()
         .reverse()
         .map((k) => ({ valor: k, etiqueta: mesEtiqueta(k) }))
     : [];
   const mesSel =
-    esAdmin && mes && mesesDisponibles.some((o) => o.valor === mes) ? mes : "";
+    puedeVerTodo && mes && mesesDisponibles.some((o) => o.valor === mes) ? mes : "";
 
   const estadosValidos = new Set(ESTADOS_FILTRO.map((e) => e.valor));
   const estadoSel =
@@ -94,7 +101,7 @@ export default async function DashboardPage({
       ? (estado as TicketEstado)
       : "";
 
-  const supervisoresDisponibles = esAdmin
+  const supervisoresDisponibles = puedeVerTodo
     ? [
         ...new Map(
           lista
@@ -113,7 +120,7 @@ export default async function DashboardPage({
       ].sort((a, b) => a.etiqueta.localeCompare(b.etiqueta, "es"))
     : [];
   const supervisorSel =
-    esAdmin && supervisor && supervisoresDisponibles.some((o) => o.valor === supervisor)
+    puedeVerTodo && supervisor && supervisoresDisponibles.some((o) => o.valor === supervisor)
       ? supervisor
       : "";
 
@@ -146,7 +153,7 @@ export default async function DashboardPage({
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Inspecciones</h1>
           <p className="text-sm text-muted-foreground">
-            {esAdmin
+            {puedeVerTodo
               ? "Todas las inspecciones y alertas de vencimiento."
               : "Tus inspecciones y alertas de vencimiento."}
           </p>
@@ -158,7 +165,7 @@ export default async function DashboardPage({
         )}
       </div>
 
-      {esAdmin && <ResumenCards resumen={resumen} />}
+      {puedeVerTodo && <ResumenCards resumen={resumen} />}
 
       {/* §5: BuscadorPatente es un passthrough transparente cuando `activo`
           es false (admin) o mientras no hay una búsqueda activa — la tarjeta
@@ -178,8 +185,8 @@ export default async function DashboardPage({
                 </CardDescription>
               </div>
               <DashboardFilters
-                meses={esAdmin ? mesesDisponibles : null}
-                supervisores={esAdmin ? supervisoresDisponibles : null}
+                meses={puedeVerTodo ? mesesDisponibles : null}
+                supervisores={puedeVerTodo ? supervisoresDisponibles : null}
                 estados={ESTADOS_FILTRO}
               />
             </div>

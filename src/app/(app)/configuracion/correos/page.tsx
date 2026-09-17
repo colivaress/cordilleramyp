@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 // remitente en ningún punto de esta pantalla ni de sus dos vistas: la
 // contraseña SMTP sigue solo en la variable de entorno, nunca en la base.
 export default async function ConfiguracionCorreosPage() {
-  await requireRol("administrador");
+  await requireRol("administrador", "administrador_contrato");
 
   return (
     <div className="grid gap-6">
