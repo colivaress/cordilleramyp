@@ -112,7 +112,7 @@ export function EmailRecipientsSelect({
         <p className="text-sm text-muted-foreground">Cargando destinatarios…</p>
       ) : lista.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No hay destinatarios configurados. Pedile a un administrador que
+          No hay destinatarios configurados. Pídele a un administrador que
           cargue al menos uno para poder enviar el informe por correo.
         </p>
       ) : (
