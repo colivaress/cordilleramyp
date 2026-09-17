@@ -1140,26 +1140,33 @@ export async function finalizarReinspeccion(input: {
 /**
  * Estados que el buscador de patentes considera "relevantes" — los únicos
  * que puede mostrar el listado, y los únicos que cuenta el conteo sin RLS de
- * §5 (ver hayCoincidenciaOcultaPara). Los tres a propósito:
- *   - `en_revision`: trabajo en curso — encontrable y retomable (§ el
- *     buscador es también la forma de dar con una inspección a medio hacer
- *     y seguirla donde quedó, no solo con observaciones ya cerradas).
+ * §5 (ver hayCoincidenciaOcultaPara). SOLO los dos que el supervisor puede
+ * ACCIONAR:
  *   - `finalizada_con_observaciones`: recién detectada, todavía nadie la tomó.
  *   - `en_reparacion_de_observaciones`: alguien ya la está reparando — sigue
  *     siendo exactamente lo que el supervisor necesita saber (que ESE camión
  *     tiene algo pendiente), así que se queda adentro.
- * Fuera a propósito: solo `finalizada_sin_observaciones` (ya no hay nada
- * pendiente ni en curso).
+ * Fuera a propósito: `en_revision` y `finalizada_sin_observaciones`.
+ *
+ * 🔴 `en_revision` SÍ estuvo acá y se sacó de nuevo — no es un vaivén sin
+ * motivo. La razón para incluirlo (dar con una inspección a medio hacer y
+ * seguirla donde quedó) requiere una reanudación real: hoy "Ver" sobre un
+ * ticket `en_revision` lleva a `/report` (que ni siquiera avisa que está
+ * incompleta) y `/tickets/[id]` no tiene ningún botón de continuación para
+ * una revisión 1 sin firmar — la recuperación real (PR #41) vive en
+ * `localStorage` del navegador que abrió la inspección, no es alcanzable
+ * desde el buscador ni desde otro dispositivo/persona. Mostrarlo era un
+ * callejón sin salida disfrazado de resultado útil. Vuelve a esta lista
+ * recién cuando exista una reanudación del lado del servidor (PR aparte).
  *
  * Esta MISMA lista la usa `public.contar_tickets_con_patente_exacta`
- * (migración 20260916040000) en su propio WHERE, en SQL — no se puede
- * importar de acá. Si esta lista cambia, esa función tiene que cambiar en
- * la misma vuelta, o el conteo sin RLS y el conteo con RLS de
- * hayCoincidenciaOcultaPara dejan de compartir predicado y la resta que
- * calcula "hay algo oculto" puede mentir.
+ * (migración 20260916040000, redefinida en 20260917010000) en su propio
+ * WHERE, en SQL — no se puede importar de acá. Si esta lista cambia, esa
+ * función tiene que cambiar en la misma vuelta, o el conteo sin RLS y el
+ * conteo con RLS de hayCoincidenciaOcultaPara dejan de compartir predicado
+ * y la resta que calcula "hay algo oculto" puede mentir.
  */
 const ESTADOS_RELEVANTES_BUSQUEDA = [
-  "en_revision",
   "finalizada_con_observaciones",
   "en_reparacion_de_observaciones",
 ] as const;
@@ -1320,13 +1327,11 @@ async function hayCoincidenciaOcultaPara(
 }
 
 /**
- * Busca tickets pendientes o con observaciones por patente (camión o
- * rampla, ya normalizada), por coincidencia EXACTA — ver
- * ESTADOS_RELEVANTES_BUSQUEDA para los tres estados que cuentan como
- * "encontrable acá" (incluye `en_revision`: encontrar una inspección a
- * medio hacer y retomarla donde quedó es tan parte de esta pantalla como
- * encontrar una con observaciones). Solo `finalizada_sin_observaciones`
- * queda fuera.
+ * Busca tickets CON OBSERVACIONES PENDIENTES DE CORREGIR por patente (camión
+ * o rampla, ya normalizada), por coincidencia EXACTA — ver
+ * ESTADOS_RELEVANTES_BUSQUEDA para los dos estados que cuentan (y por qué
+ * `en_revision` NO es uno de ellos: sin una reanudación real, mostrarlo acá
+ * es un callejón sin salida, no un resultado accionable).
  *
  * UNA sola consulta a `tickets` sin importar cuántos coincidan — §5 sacó el
  * detalle de ítems no conformes de esta pantalla (queda solo detrás de
