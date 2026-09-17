@@ -32,8 +32,8 @@ import { ETIQUETA_TIPO_INSPECCION } from "@/lib/tipos";
 
 /**
  * Buscador de patentes — pensado para usarse ANTES de crear una inspección
- * nueva: el supervisor escribe (parte de) una patente y ve si ese camión
- * tiene inspecciones pendientes o con observaciones.
+ * nueva: el supervisor escribe (la patente exacta, ver `buscarPorPatente`)
+ * y ve si ese camión ya tiene observaciones pendientes de corregir.
  *
  * §5: el resultado va en la MISMA tabla de inspecciones que ya existe (no en
  * tarjetas propias) — mientras no haya una búsqueda activa, este componente
@@ -100,7 +100,7 @@ export function BuscadorPatente({
           <CardTitle>Buscar por patente</CardTitle>
           <CardDescription>
             Antes de cargar una inspección nueva, revisa si ese camión ya
-            tiene una pendiente o con observaciones.
+            tiene observaciones pendientes de corregir.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -161,8 +161,8 @@ export function BuscadorPatente({
         <AvisoLinea tono={resultado.tiposPermitidos.length > 0 ? "neutral" : "advertencia"}>
           {resultado.tiposPermitidos.length > 0 ? (
             <>
-              No se encontraron inspecciones pendientes ni con observaciones
-              para esa patente, en los tipos que puedes revisar (
+              No se encontraron observaciones pendientes de corregir para
+              esa patente, en los tipos que puedes revisar (
               {resultado.tiposPermitidos
                 .map((t) => ETIQUETA_TIPO_INSPECCION[t] ?? t)
                 .join(", ")}
