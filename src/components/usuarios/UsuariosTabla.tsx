@@ -387,6 +387,7 @@ export function UsuariosTabla({
                   key={f.usuario.id}
                   fila={f}
                   perfilId={perfilId}
+                  perfilRol={perfilRol}
                   terminos={terminos}
                   hayTerminoDeTipo={hayTerminoDeTipo}
                   onEditar={abrirEditar}
@@ -581,12 +582,14 @@ export function UsuariosTabla({
 function FilaUsuario({
   fila: f,
   perfilId,
+  perfilRol,
   terminos,
   hayTerminoDeTipo,
   onEditar,
 }: {
   fila: FilaBusqueda;
   perfilId: string;
+  perfilRol: RolUsuario;
   terminos: string[];
   hayTerminoDeTipo: boolean;
   onEditar: (u: Personal) => void;
@@ -594,6 +597,13 @@ function FilaUsuario({
   const u = f.usuario;
   const pendienteInvitacion = !u.user_id;
   const esYo = u.id === perfilId;
+  // Refleja la RLS de personal_update (migración 20260917030000): un
+  // administrador_contrato no puede tocar una fila administrador por
+  // ningún camino, ni siquiera activo. "Editar"/"Desactivar" no deben
+  // ofrecerse sobre esa fila — mismo patrón que el <select> de rol y el
+  // botón de reenviar invitación, más arriba: no dejar un botón que
+  // siempre va a fallar.
+  const puedeModificar = !(perfilRol === "administrador_contrato" && u.rol === "administrador");
   const guardado = useEstadoGuardado();
 
   async function accion(fn: () => Promise<ResultadoUsuario>, exito: string) {
@@ -658,39 +668,43 @@ function FilaUsuario({
               panel de administración de escritorio — el default de 44px
               infla cada fila sin necesidad (no es lo que usa el supervisor
               parado en el patio, ver button.tsx). */}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={guardado.pendiente}
-            onClick={() => onEditar(u)}
-          >
-            <PencilIcon />
-            Editar
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={guardado.pendiente || (esYo && u.activo)}
-            title={
-              esYo && u.activo
-                ? "No puedes desactivar tu propia cuenta"
-                : undefined
-            }
-            onClick={() =>
-              accion(
-                () => cambiarActivo({ id: u.id, activo: !u.activo }),
-                u.activo ? "Usuario desactivado." : "Usuario activado.",
-              )
-            }
-          >
-            <ContenidoBoton
-              pendiente={guardado.pendiente}
-              texto={u.activo ? "Desactivar" : "Activar"}
-              textoPendiente={u.activo ? "Desactivando…" : "Activando…"}
-            />
-          </Button>
+          {puedeModificar && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={guardado.pendiente}
+                onClick={() => onEditar(u)}
+              >
+                <PencilIcon />
+                Editar
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={guardado.pendiente || (esYo && u.activo)}
+                title={
+                  esYo && u.activo
+                    ? "No puedes desactivar tu propia cuenta"
+                    : undefined
+                }
+                onClick={() =>
+                  accion(
+                    () => cambiarActivo({ id: u.id, activo: !u.activo }),
+                    u.activo ? "Usuario desactivado." : "Usuario activado.",
+                  )
+                }
+              >
+                <ContenidoBoton
+                  pendiente={guardado.pendiente}
+                  texto={u.activo ? "Desactivar" : "Activar"}
+                  textoPendiente={u.activo ? "Desactivando…" : "Activando…"}
+                />
+              </Button>
+            </>
+          )}
           {/* Solo si está activa: con la fila desactivada, handle_new_user()
               (migración 20260918010000) rechaza el alta igual — reenviar el
               correo sería ofrecer una acción que ya no puede terminar bien
