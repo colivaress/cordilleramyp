@@ -12,7 +12,6 @@ import type { ItemEstado, TicketEstado } from "@/lib/tipos";
 import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
 import { firmarRutas } from "@/lib/storage";
 import { normalizarPatente } from "@/lib/patentes";
-import { nombreCompleto } from "@/lib/mensajes";
 
 type SupabaseServer = Awaited<ReturnType<typeof createClient>>;
 
@@ -142,7 +141,32 @@ async function prepararRevision(
       conductor: opts.conductor,
       fecha_vencimiento: opts.fechaVencimientoISO,
     });
-    if (error) return errorInesperado("prepararRevision.insert", error);
+    if (error) {
+      // Carrera real (reportada, no teórica): dos supervisores pueden abrir
+      // la re-inspección del mismo ticket casi al mismo tiempo, ninguno con
+      // la revisión asegurada todavía (conRevisionAsegurada, InspeccionForm.tsx)
+      // — el SELECT de arriba (`revExistente`) no la ve en ninguno de los dos
+      // porque todavía no existe para ninguno, así que los dos calculan el
+      // mismo `numeroRevision` y los dos intentan este mismo INSERT. La
+      // verdad final es el unique (ticket_id, numero_revision) de
+      // ticket_revisiones (§7 del blueprint): quien pierde la carrera choca
+      // acá con 23505. Reintentar el mismo guardado no sirve — la revisión
+      // ya existe, la creó el otro supervisor — así que el mensaje genérico
+      // de errorInesperado ("Intenta de nuevo") sería activamente engañoso.
+      // Recargar sí sirve: trae el numero_revision real y, según quién sea
+      // el supervisor que llama, o entra a la MISMA revisión (si es el dueño
+      // del ticket o de esa revisión — autorizarRevisionEnCurso ya lo
+      // permite) o el próximo intento de iniciarReinspeccion lo rechaza con
+      // el mensaje correcto ("Otro supervisor ya está realizando la
+      // re-inspección de este ticket.", más abajo en esta misma función).
+      if (error.code === "23505")
+        return {
+          ok: false,
+          mensaje:
+            "Otro supervisor ya tomó esta inspección. Recarga la pantalla para ver el estado actual.",
+        };
+      return errorInesperado("prepararRevision.insert", error);
+    }
   }
 
   const { data: items } = await supabase
@@ -421,6 +445,41 @@ export async function iniciarInspeccion(
  * O el supervisor que abrió esa revisión (`ticket_revisiones.supervisor_id`) —
  * una re-inspección la puede tomar un supervisor distinto al creador del ticket.
  */
+/**
+ * Gate de "esta revisión está abierta y este supervisor puede escribir en
+ * ella" — lo usan `guardarRespuestaItem`, `guardarFotoChecklistItem`,
+ * `guardarObservacionGeneral`, `guardarFirmaRevision` y `obtenerEstadoRevision`.
+ *
+ * 🔴 Ya NO depende de `tickets.estado === 'en_revision'`. Motivo: durante una
+ * reinspección, `tickets.estado` se queda en `en_reparacion_de_observaciones`
+ * TODO el tiempo que la revisión sigue abierta (no solo antes del primer
+ * guardado) — es lo que mantiene el ticket visible para el resto de los
+ * supervisores mientras se reinspecciona (RLS: `en_reparacion_de_observaciones`
+ * está en la misma rama "con observaciones" que `finalizada_con_observaciones`;
+ * `en_revision` es la única que restringe a un solo dueño). Si este gate
+ * siguiera pidiendo `en_revision`, cada guardado después del primero
+ * rechazaría con "La revisión ya fue finalizada" apenas alguien cambiara ese
+ * valor de vuelta a en_revision — que es justo lo que NO debe pasar.
+ *
+ * En cambio, "abierta" se decide mirando la revisión misma:
+ *   1. `tickets.revision_actual` tiene que apuntar a ESTA revisión (si
+ *      apunta a una anterior, esta ya fue superada o nunca se creó — ver
+ *      el punto 3 más abajo).
+ *   2. `ticket_revisiones.estado_resultante` de esa fila tiene que seguir
+ *      en `'en_revision'` (el valor con el que `prepararRevision` la siembra
+ *      al crearla; `cerrarRevision` lo reemplaza por el resultado real al
+ *      cerrar — nunca vuelve a `'en_revision'` después de eso).
+ *
+ * Consecuencia importante (pedida a propósito, no un efecto secundario): si
+ * un guardado llega para una revisión que todavía no existe (`iniciarInspeccion`/
+ * `iniciarReinspeccion` no corrieron todavía — antes de "conRevisionAsegurada"
+ * en InspeccionForm.tsx), `ticket.revision_actual` no va a matchear
+ * `revisionNumero` y esto rechaza con un mensaje claro, en vez de escribir
+ * en la fila equivocada o fallar en silencio. Es la misma barrera aunque
+ * alguien agregue un guardado nuevo y se olvide de pasar por el wrapper del
+ * cliente — el gate real vive acá, server-side, no en una convención que el
+ * cliente tiene que recordar.
+ */
 async function autorizarRevisionEnCurso(
   supabase: SupabaseServer,
   perfilId: string,
@@ -429,21 +488,24 @@ async function autorizarRevisionEnCurso(
 ): Promise<ResultadoAccion> {
   const { data: ticket } = await supabase
     .from("tickets")
-    .select("supervisor_id, estado")
+    .select("supervisor_id, revision_actual")
     .eq("id", ticketId)
     .maybeSingle();
   if (!ticket) return { ok: false, mensaje: "No se encontró la inspección." };
-  if (ticket.estado !== "en_revision")
+  if (ticket.revision_actual !== revisionNumero)
     return { ok: false, mensaje: "La revisión ya fue finalizada." };
-  if (ticket.supervisor_id === perfilId) return { ok: true };
 
   const { data: rev } = await supabase
     .from("ticket_revisiones")
-    .select("supervisor_id")
+    .select("supervisor_id, estado_resultante")
     .eq("ticket_id", ticketId)
     .eq("numero_revision", revisionNumero)
     .maybeSingle();
-  if (rev?.supervisor_id === perfilId) return { ok: true };
+  if (!rev || rev.estado_resultante !== "en_revision")
+    return { ok: false, mensaje: "La revisión ya fue finalizada." };
+
+  if (ticket.supervisor_id === perfilId) return { ok: true };
+  if (rev.supervisor_id === perfilId) return { ok: true };
 
   return {
     ok: false,
@@ -869,11 +931,36 @@ export async function finalizarInspeccion(input: {
  * §2.8: arranque de una re-inspección — mismo criterio que `iniciarInspeccion`.
  * §2.3/§2.6: se entra directo desde "Finalizada con observaciones" (o el legado
  * "En reparación de observaciones"), sin paso manual de "Iniciar reparación", y
- * la puede tomar CUALQUIER supervisor, no solo el que creó el ticket. Pasa el
- * ticket a `en_revision` con `revision_actual += 1`, deja lista la fila de
- * `ticket_revisiones` de la nueva revisión (con `supervisor_id` = quien hace
- * ESTA revisión) y siembra sus respuestas. Idempotente si el mismo supervisor
- * reingresa a la revisión en curso.
+ * la puede tomar CUALQUIER supervisor, no solo el que creó el ticket. Deja
+ * lista la fila de `ticket_revisiones` de la nueva revisión (con
+ * `supervisor_id` = quien hace ESTA revisión) y siembra sus respuestas.
+ * Idempotente si el mismo supervisor reingresa a la revisión en curso.
+ *
+ * "Abrir no debe escribir": esta función YA NO se llama al pasar de "Datos
+ * de esta revisión" al checklist (InspeccionForm.tsx, irAlChecklist) — se
+ * llama recién en el PRIMER guardado real (ver conRevisionAsegurada en
+ * InspeccionForm.tsx), para no dejar una revisión vacía si el supervisor
+ * sale de la pantalla sin guardar nada.
+ *
+ * 🔴 `tickets.estado` pasa a `en_reparacion_de_observaciones` — NO a
+ * `en_revision` — y se queda ahí DURANTE TODA la revisión, hasta que
+ * `finalizarReinspeccion` la cierre. Antes escribía `en_revision`
+ * incondicionalmente (mismo criterio que `iniciarInspeccion`, copiado sin
+ * pensarlo) y eso reintroducía el bug que "Tomar" existe para evitar, solo
+ * corrido del momento de abrir al momento del primer guardado: en cuanto
+ * alguien respondía un ítem, el ticket volvía a `en_revision` — visible
+ * SOLO para quien la está haciendo (`tickets_select` no incluye `en_revision`
+ * en la rama "con observaciones") — y el camión con una revisión a medias
+ * desaparecía otra vez para el resto de los supervisores. Con
+ * `en_reparacion_de_observaciones` sostenido, el ticket sigue en esa misma
+ * rama de RLS mientras dura la reinspección completa, no solo antes de
+ * empezarla.
+ *
+ * Consecuencia: "¿ya está en curso?" ya NO se lee de `tickets.estado`
+ * (nunca vuelve a decir `en_revision` en este flujo) — se lee de la última
+ * fila de `ticket_revisiones`: si su `estado_resultante` sigue en
+ * `'en_revision'`, esa revisión sigue abierta (mismo criterio que
+ * `autorizarRevisionEnCurso`, que usan los guardados por ítem/firma).
  *
  * El tipo de inspección NO se vuelve a pedir — es fijo desde que se creó el
  * ticket (`tickets.tipo_inspeccion`), se re-lee de ahí.
@@ -905,37 +992,36 @@ export async function iniciarReinspeccion(input: {
   if (!ticket.tipo_inspeccion)
     return { ok: false, mensaje: "Falta el tipo de inspección del ticket." };
 
-  // Puede venir desde "finalizada_con_observaciones" (o el legado
-  // "en_reparacion_de_observaciones") en el primer ingreso, o ya estar
-  // "en_revision" si el supervisor volvió a los datos y reingresó.
-  const yaEnCurso = ticket.estado === "en_revision";
+  // La última revisión de este ticket — si su estado_resultante sigue en
+  // 'en_revision', ESA es la revisión en curso (no hay que crear otra).
+  const { data: ultimaRev } = await supabase
+    .from("ticket_revisiones")
+    .select("numero_revision, estado_resultante, supervisor_id")
+    .eq("ticket_id", input.ticketId)
+    .order("numero_revision", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const yaEnCurso = ultimaRev?.estado_resultante === "en_revision";
+
   if (!yaEnCurso && !puedeReinspeccionar(ticket.estado))
     return {
       ok: false,
       mensaje: "Solo se puede re-inspeccionar un ticket con observaciones pendientes.",
     };
 
-  if (yaEnCurso) {
-    // Otra persona no puede continuar una re-inspección que ya arrancó otro.
-    const { data: revEnCurso } = await supabase
-      .from("ticket_revisiones")
-      .select("supervisor_id")
-      .eq("ticket_id", input.ticketId)
-      .eq("numero_revision", ticket.revision_actual)
-      .maybeSingle();
-    if (
-      revEnCurso &&
-      revEnCurso.supervisor_id !== perfil.id &&
-      ticket.supervisor_id !== perfil.id
-    )
-      return {
-        ok: false,
-        mensaje: "Otro supervisor ya está realizando la re-inspección de este ticket.",
-      };
-  }
+  // Otra persona no puede continuar una re-inspección que ya arrancó otro.
+  if (
+    yaEnCurso &&
+    ultimaRev!.supervisor_id !== perfil.id &&
+    ticket.supervisor_id !== perfil.id
+  )
+    return {
+      ok: false,
+      mensaje: "Otro supervisor ya está realizando la re-inspección de este ticket.",
+    };
 
   const numeroRevision = yaEnCurso
-    ? ticket.revision_actual
+    ? ultimaRev!.numero_revision
     : ticket.revision_actual + 1;
   const conductor = input.conductor.trim();
 
@@ -953,7 +1039,8 @@ export async function iniciarReinspeccion(input: {
     const { error } = await supabase
       .from("tickets")
       .update({
-        estado: "en_revision",
+        // NO 'en_revision' — ver el comentario grande de arriba.
+        estado: "en_reparacion_de_observaciones",
         revision_actual: numeroRevision,
         // §3.1/§3.2: nuevo ciclo de vencimiento → se rehabilitan todos los avisos
         // automáticos (WhatsApp al supervisor y correos a administradores).
@@ -986,22 +1073,27 @@ export async function finalizarReinspeccion(input: {
 
   const { data: ticket } = await supabase
     .from("tickets")
-    .select("estado, supervisor_id, tipo_inspeccion")
+    .select("supervisor_id, tipo_inspeccion")
     .eq("id", input.ticketId)
     .maybeSingle();
   if (!ticket) return { ok: false, mensaje: "Ticket no encontrado." };
-  if (ticket.estado !== "en_revision")
-    return { ok: false, mensaje: "Esta re-inspección ya fue finalizada." };
   if (!ticket.tipo_inspeccion)
     return { ok: false, mensaje: "Falta el tipo de inspección del ticket." };
 
+  // Ya no se chequea tickets.estado === 'en_revision' — durante una
+  // reinspección ese valor se queda en en_reparacion_de_observaciones
+  // (ver iniciarReinspeccion). "Abierta" se decide con el
+  // estado_resultante de la revisión misma, igual que en
+  // autorizarRevisionEnCurso.
   const { data: rev } = await supabase
     .from("ticket_revisiones")
-    .select("conductor, fecha_vencimiento, supervisor_id")
+    .select("conductor, fecha_vencimiento, supervisor_id, estado_resultante")
     .eq("ticket_id", input.ticketId)
     .eq("numero_revision", input.revisionNumero)
     .maybeSingle();
   if (!rev) return { ok: false, mensaje: "La revisión no está iniciada." };
+  if (rev.estado_resultante !== "en_revision")
+    return { ok: false, mensaje: "Esta re-inspección ya fue finalizada." };
   // §2.6: la finaliza quien la hizo (o el creador del ticket / un admin).
   if (ticket.supervisor_id !== perfil.id && rev.supervisor_id !== perfil.id)
     return {
@@ -1084,27 +1176,22 @@ function filtroPatenteExacta(normalizado: string): string {
  */
 const LIMITE_RESULTADOS_LISTADO = 30;
 
-export type ItemNoConformeResumen = {
-  itemKey: string;
-  nombre: string;
-  observacion: string | null;
-};
-
 export type ResultadoBusquedaTicket = {
   ticketId: string;
   numeroInspeccion: number;
+  numeroRevision: number;
   tipoInspeccion: string;
   estado: TicketEstado;
   patenteCamion: string;
   patenteRampla: string;
-  /** Fecha de la revisión más reciente (no la de creación del ticket). */
+  transporte: string;
+  /** Fecha de la inspección (tickets.fecha, §1) — no la de creación del ticket. */
   fecha: string;
-  quienLaHizoNombre: string;
-  /** Identidad del camión = patente_camion (§1). patente_rampla puede
-   *  coincidir también — se informa cuál, nunca se mezclan en un solo
-   *  veredicto. */
-  coincidioEn: ("camion" | "rampla")[];
-  itemsNoConformes: ItemNoConformeResumen[];
+  fechaVencimiento: string | null;
+  /** Nombre del supervisor DUEÑO del ticket (quien lo creó) — mismo dato que
+   *  la columna "Supervisor" de la tabla normal (dashboard/page.tsx), para
+   *  que sea la misma fila con los mismos datos en los dos lugares (§5). */
+  supervisorNombre: string;
 };
 
 export type ResultadoBusquedaPatente = {
@@ -1211,9 +1298,10 @@ async function hayCoincidenciaOcultaPara(
 
 /**
  * Busca tickets pendientes/con observaciones por patente (camión o rampla).
- * Sin N+1: como mucho 3 consultas sin importar cuántos tickets coincidan
- * (tickets, sus revisiones, sus respuestas no_conforme) — nunca una consulta
- * por resultado.
+ * UNA sola consulta a `tickets` sin importar cuántos coincidan — §5 sacó el
+ * detalle de ítems no conformes de esta pantalla (queda solo detrás de
+ * "Ver", igual que siempre), así que ya no hace falta traer revisiones ni
+ * respuestas del checklist acá.
  *
  * FUERA DE ALCANCE a propósito: no toca patente_rampla en ningún lado (vive
  * en `tickets`, no en `ticket_revisiones` — mover eso es un problema
@@ -1233,7 +1321,7 @@ export async function buscarPorPatente(
 
   const normalizado = normalizarPatente(termino);
   if (!normalizado)
-    return { ok: false, mensaje: "Escribí al menos parte de una patente." };
+    return { ok: false, mensaje: "Escribe al menos parte de una patente." };
   // Restringido a alfanumérico: el filtro .or() de PostgREST se arma
   // interpolando este string a mano (filtroPatente) — sin esta validación,
   // una coma o un paréntesis en el término permitiría inyectar condiciones
@@ -1248,7 +1336,7 @@ export async function buscarPorPatente(
   const { data: tickets, error } = await supabase
     .from("tickets")
     .select(
-      "id, numero_inspeccion, tipo_inspeccion, estado, patente_camion, patente_rampla, revision_actual, supervisor_id",
+      "id, numero_inspeccion, revision_actual, tipo_inspeccion, estado, patente_camion, patente_rampla, transporte, fecha, fecha_vencimiento, supervisor_id, supervisor:personal!tickets_supervisor_id_fkey(nombre)",
     )
     .in("estado", ESTADOS_RELEVANTES_BUSQUEDA)
     .or(filtroPatente(normalizado))
@@ -1258,84 +1346,23 @@ export async function buscarPorPatente(
   const traidos = tickets ?? [];
   const hayMasResultados = traidos.length > LIMITE_RESULTADOS_LISTADO;
   const lista = traidos.slice(0, LIMITE_RESULTADOS_LISTADO);
-  if (lista.length === 0) {
-    return {
-      ok: true,
-      misInspecciones: [],
-      conObservaciones: [],
-      hayCoincidenciaOculta: await hayCoincidenciaOcultaPara(supabase, normalizado),
-      hayMasResultados: false,
-      tiposPermitidos: await tiposPermitidosDe(supabase, perfil.id),
-    };
-  }
-
-  const ids = lista.map((t) => t.id);
-
-  // Todas las revisiones de los tickets encontrados — UNA consulta, se
-  // reduce a "la más reciente por ticket" en JS (no una consulta por
-  // ticket).
-  const { data: revisiones } = await supabase
-    .from("ticket_revisiones")
-    .select(
-      "ticket_id, numero_revision, created_at, supervisor:personal!ticket_revisiones_supervisor_id_fkey(nombre, apellido)",
-    )
-    .in("ticket_id", ids);
-
-  type FilaRevision = NonNullable<typeof revisiones>[number];
-  const ultimaRevisionPorTicket = new Map<string, FilaRevision>();
-  for (const r of revisiones ?? []) {
-    const actual = ultimaRevisionPorTicket.get(r.ticket_id);
-    if (!actual || r.numero_revision > actual.numero_revision)
-      ultimaRevisionPorTicket.set(r.ticket_id, r);
-  }
-
-  // Ítems no conformes de TODAS las revisiones de estos tickets — UNA
-  // consulta, filtrada en JS a la revisión más reciente de cada uno (ver
-  // arriba). Con esto y las dos consultas de arriba, son 3 en total sin
-  // importar cuántos tickets hayan coincidido.
-  const { data: respuestas } = await supabase
-    .from("ticket_checklist_respuestas")
-    .select(
-      "ticket_id, revision_numero, item_key, observacion, item:checklist_items(nombre)",
-    )
-    .in("ticket_id", ids)
-    .eq("estado", "no_conforme");
-
-  const itemsPorTicket = new Map<string, ItemNoConformeResumen[]>();
-  for (const r of respuestas ?? []) {
-    const ultima = ultimaRevisionPorTicket.get(r.ticket_id);
-    if (!ultima || r.revision_numero !== ultima.numero_revision) continue;
-    const arr = itemsPorTicket.get(r.ticket_id) ?? [];
-    arr.push({
-      itemKey: r.item_key,
-      nombre: r.item?.nombre ?? r.item_key,
-      observacion: r.observacion,
-    });
-    itemsPorTicket.set(r.ticket_id, arr);
-  }
 
   const misInspecciones: ResultadoBusquedaTicket[] = [];
   const conObservaciones: ResultadoBusquedaTicket[] = [];
 
   for (const t of lista) {
-    const ultima = ultimaRevisionPorTicket.get(t.id);
-    const coincidioEn: ("camion" | "rampla")[] = [];
-    if (t.patente_camion.includes(normalizado)) coincidioEn.push("camion");
-    if (t.patente_rampla.includes(normalizado)) coincidioEn.push("rampla");
-
     const resultado: ResultadoBusquedaTicket = {
       ticketId: t.id,
       numeroInspeccion: t.numero_inspeccion,
+      numeroRevision: t.revision_actual,
       tipoInspeccion: t.tipo_inspeccion ?? "",
       estado: t.estado,
       patenteCamion: t.patente_camion,
       patenteRampla: t.patente_rampla,
-      fecha: ultima?.created_at ?? "",
-      quienLaHizoNombre: ultima?.supervisor
-        ? nombreCompleto(ultima.supervisor.nombre, ultima.supervisor.apellido)
-        : "—",
-      coincidioEn,
-      itemsNoConformes: itemsPorTicket.get(t.id) ?? [],
+      transporte: t.transporte,
+      fecha: t.fecha,
+      fechaVencimiento: t.fecha_vencimiento,
+      supervisorNombre: t.supervisor?.nombre ?? "—",
     };
 
     if (t.supervisor_id === perfil.id) misInspecciones.push(resultado);
@@ -1352,58 +1379,3 @@ export async function buscarPorPatente(
   };
 }
 
-/**
- * "Tomar" una inspección con observaciones de OTRO supervisor, desde el
- * buscador de patentes. Transición ÚNICA y acotada a propósito: la RLS de
- * `tickets_update` permite más de lo que este flujo debería (un supervisor
- * con permiso de tipo podría, en teoría, escribir cualquier columna
- * permitida por la política — incluidas patentes, o saltar directo a
- * `finalizada_sin_observaciones` sin pasar por una revisión real). Este
- * action nunca expone esos campos: el único cambio posible es
- * `finalizada_con_observaciones` -> `en_reparacion_de_observaciones`, nada
- * más.
- *
- * No crea la fila de `ticket_revisiones` ni toca `revision_actual` — eso ya
- * lo hace `iniciarReinspeccion` (sin cambios) cuando el supervisor llega a
- * `/tickets/[id]/reinspeccion`: `puedeReinspeccionar` ya acepta
- * `en_reparacion_de_observaciones` como punto de partida válido, y esa
- * función ya registra `ticket_revisiones.supervisor_id` como quien llama
- * (nunca sobrescribe `tickets.supervisor_id`, que conserva el origen del
- * ticket) — no hacía falta tocar ese código.
- *
- * El doble filtro en el `update` (`.eq("estado", "finalizada_con_observaciones")`)
- * es la defensa real contra dos supervisores tomando la misma inspección a
- * la vez: si otro ya la tomó entre que este supervisor la vio en los
- * resultados y apretó "Tomar", el update no afecta ninguna fila y se avisa
- * en vez de fingir éxito.
- */
-export async function tomarInspeccionConObservaciones(input: {
-  ticketId: string;
-}): Promise<ResultadoAccion> {
-  const { perfil } = await getSesion();
-  if (perfil.rol !== "supervisor")
-    return { ok: false, mensaje: "Solo un supervisor puede tomar una inspección." };
-
-  const supabase = await createClient();
-
-  const { data: actualizado, error } = await supabase
-    .from("tickets")
-    .update({
-      estado: "en_reparacion_de_observaciones",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", input.ticketId)
-    .eq("estado", "finalizada_con_observaciones")
-    .select("id")
-    .maybeSingle();
-  if (error) return errorInesperado("tomarInspeccionConObservaciones.update", error);
-  if (!actualizado)
-    return {
-      ok: false,
-      mensaje:
-        "No se pudo tomar — puede que otro supervisor ya la haya tomado, o que ya no esté disponible. Volvé a buscar.",
-    };
-
-  revalidatePath("/dashboard");
-  return { ok: true };
-}
