@@ -369,16 +369,29 @@ export function UsuariosTabla({
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <Table>
+          {/* table-fixed + un ancho por columna (en el <th>, es el que manda
+              con table-layout:fixed): sin esto el navegador reparte el ancho
+              según el contenido más largo de cada columna — un correo largo
+              o "Todos (por ser administrador)" descuadraban toda la tabla.
+              Con anchos fijos el comportamiento es predecible, y es lo que
+              permite truncar el correo (§ celda Correo) y fijar la columna
+              Acciones (§ celda Acciones, sticky). */}
+          <Table className="table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead>Nombre</TableHead>
-                <TableHead>Correo</TableHead>
-                <TableHead>Teléfono</TableHead>
-                <TableHead>Rol</TableHead>
-                <TableHead>Tipos de inspección</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead className="text-right">Acciones</TableHead>
+                <TableHead className="w-[20%]">Nombre</TableHead>
+                <TableHead className="w-[23%]">Correo</TableHead>
+                <TableHead className="w-[12%]">Rol</TableHead>
+                <TableHead className="w-[20%]">Tipos de inspección</TableHead>
+                <TableHead className="w-[9%]">Estado</TableHead>
+                {/* sticky + bg-card propio: sin el fondo opaco, el contenido
+                    de las otras columnas se ve pasando por debajo al
+                    desplazar horizontalmente. La sombra a la izquierda marca
+                    el borde para que se lea como columna fija, no como un
+                    corte. */}
+                <TableHead className="sticky right-0 z-20 w-[16%] bg-card text-right shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.15)]">
+                  Acciones
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -611,12 +624,23 @@ function FilaUsuario({
   }
 
   return (
-    <TableRow>
+    <TableRow className="group">
       <TableCell className="font-medium">
-        {resaltar(`${u.nombre} ${u.apellido ?? ""}`.trim(), terminos)}
+        <div>{resaltar(`${u.nombre} ${u.apellido ?? ""}`.trim(), terminos)}</div>
+        {/* Antes columna propia — si no hay teléfono, hoy dejaba un "—"
+            suelto en su propia celda; acá simplemente no se muestra nada. */}
+        {u.telefono && (
+          <div className="text-xs font-normal text-muted-foreground">
+            {resaltar(u.telefono, terminos)}
+          </div>
+        )}
       </TableCell>
-      <TableCell>{resaltar(u.email ?? "—", terminos)}</TableCell>
-      <TableCell>{resaltar(u.telefono ?? "—", terminos)}</TableCell>
+      {/* truncate = overflow-hidden + text-ellipsis + whitespace-nowrap. El
+          dato completo nunca se pierde: sigue ahí para copiar/seleccionar,
+          y queda disponible en el `title` para leerlo al pasar el mouse. */}
+      <TableCell className="truncate" title={u.email ?? undefined}>
+        {resaltar(u.email ?? "—", terminos)}
+      </TableCell>
       <TableCell>
         <Badge
           variant={
@@ -651,8 +675,17 @@ function FilaUsuario({
           </Badge>
         )}
       </TableCell>
-      <TableCell>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+      {/* sticky + bg-card + group-hover: mismo fondo opaco del <th> (arriba),
+          pero además necesita seguir el hover de la fila a mano — el hover
+          de TableRow pinta el <tr>, que un fondo opaco en el <td> tapa por
+          diseño (es lo que la mantiene legible mientras se desplaza el
+          resto de la fila por debajo). `group` en el <tr> + `group-hover`
+          acá sincroniza los dos. */}
+      <TableCell className="sticky right-0 z-10 bg-card shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.15)] group-hover:bg-muted/50">
+        {/* flex-nowrap a propósito: con el ancho que libera sacar la columna
+            Teléfono, "Editar" + "Desactivar"/"Activar" caben en una sola
+            fila — antes se apilaban porque la columna quedaba angosta. */}
+        <div className="flex flex-nowrap items-center justify-end gap-1.5">
           <IndicadorGuardado estado={guardado.estado} />
           {/* size="sm" explícito a propósito: hasta 3 acciones por fila en un
               panel de administración de escritorio — el default de 44px
@@ -752,9 +785,12 @@ function CeldaTipos({
   expandirLos4: boolean;
 }) {
   if (rol === "administrador") {
+    // Sin el paréntesis "(por ser administrador)": la columna Rol ya dice
+    // "Administrador" en la misma fila — repetirlo acá solo ensanchaba la
+    // celda más ancha de la tabla sin agregar información.
     return (
       <span className="text-xs text-muted-foreground">
-        {resaltar("Todos (por ser administrador)", terminos)}
+        {resaltar("Todos", terminos)}
       </span>
     );
   }
