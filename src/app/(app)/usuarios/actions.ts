@@ -34,6 +34,33 @@ function esViolacionRLS(error: { code?: string } | null | undefined): boolean {
   return error?.code === "42501";
 }
 
+/**
+ * Cuando un UPDATE gobernado por RLS afecta cero filas sin error de
+ * Postgres, hay dos causas indistinguibles a simple vista: (a) el USING de
+ * la política no dejó ver la fila — un rechazo de permiso real, por
+ * ejemplo administrador_contrato intentando tocar una fila que ya es
+ * administrador — o (b) la fila ya no existe (alguien la borró mientras
+ * tanto). Se distinguen consultando si el id todavía existe: la política
+ * de SELECT sobre personal es incondicional (auth_read_personal,
+ * qual = true, verificado contra la base), así que esta consulta no
+ * depende del mismo permiso que acaba de fallar en el UPDATE.
+ */
+async function mensajeUpdateSinFilas(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  id: string,
+): Promise<{ ok: false; mensaje: string }> {
+  const { data: existe } = await supabase
+    .from("personal")
+    .select("id")
+    .eq("id", id)
+    .maybeSingle();
+  if (!existe) return { ok: false, mensaje: "Este usuario ya no existe." };
+  return {
+    ok: false,
+    mensaje: "No tienes permiso para modificar a este usuario.",
+  };
+}
+
 function validar(input: UsuarioInput): ResultadoAccion {
   const req: [string, string][] = [
     ["nombre", input.nombre],
@@ -173,11 +200,7 @@ export async function editarUsuario(
       };
     return errorInesperado("editarUsuario.update", error);
   }
-  if (!actualizado)
-    return {
-      ok: false,
-      mensaje: "No se pudo actualizar — no tienes permiso sobre este usuario.",
-    };
+  if (!actualizado) return await mensajeUpdateSinFilas(supabase, input.id);
 
   revalidatePath("/usuarios");
   return { ok: true };
@@ -244,11 +267,7 @@ export async function cambiarActivo(input: {
     .select("id")
     .maybeSingle();
   if (error) return errorInesperado("cambiarActivo.update", error);
-  if (!actualizado)
-    return {
-      ok: false,
-      mensaje: "No se pudo actualizar — no tienes permiso sobre este usuario.",
-    };
+  if (!actualizado) return await mensajeUpdateSinFilas(supabase, input.id);
 
   revalidatePath("/usuarios");
   return { ok: true };
