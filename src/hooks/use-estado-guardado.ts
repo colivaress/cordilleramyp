@@ -68,6 +68,14 @@ export function useEstadoGuardado({ duracionGuardadoMs = 2000 }: Opciones = {}) 
         if (montadoRef.current) {
           setEstado("error");
           setError(e instanceof Error ? e.message : "No se pudo guardar.");
+          // Mismo auto-retorno a "idle" que ya tiene "guardado" — sin esto,
+          // el indicador de la fila queda con "Error al guardar" pegado para
+          // siempre (el mensaje específico ya lo dio el toast del llamador;
+          // este indicador es solo un ícono genérico, nunca mostró el texto
+          // real de `error`, así que no hay nada que perder al limpiarlo).
+          timerRef.current = setTimeout(() => {
+            if (montadoRef.current) setEstado("idle");
+          }, duracionGuardadoMs);
         }
         throw e;
       }
@@ -144,6 +152,12 @@ export function useEstadoGuardadoPorClave({ duracionGuardadoMs = 2000 }: Opcione
             ...er,
             [clave]: e instanceof Error ? e.message : "No se pudo guardar.",
           }));
+          // Mismo auto-retorno a "idle" que ya tiene "guardado" — ver el
+          // comentario equivalente en useEstadoGuardado, arriba.
+          timersRef.current[clave] = setTimeout(() => {
+            if (montadoRef.current)
+              setEstados((s) => ({ ...s, [clave]: "idle" }));
+          }, duracionGuardadoMs);
         }
         throw e;
       }
