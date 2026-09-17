@@ -691,7 +691,13 @@ function FilaUsuario({
               textoPendiente={u.activo ? "Desactivando…" : "Activando…"}
             />
           </Button>
-          {pendienteInvitacion && (
+          {/* Solo si está activa: con la fila desactivada, handle_new_user()
+              (migración 20260918010000) rechaza el alta igual — reenviar el
+              correo sería ofrecer una acción que ya no puede terminar bien
+              (mismo patrón que el <select> de rol, más arriba en este mismo
+              archivo). La Server Action también lo rechaza, por si acaso
+              (defensa en profundidad). */}
+          {pendienteInvitacion && u.activo && (
             <Button
               type="button"
               variant="outline"

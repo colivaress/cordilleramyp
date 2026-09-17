@@ -262,7 +262,7 @@ export async function reenviarInvitacion(input: {
 
   const { data: u } = await supabase
     .from("personal")
-    .select("email, nombre, apellido, rol, telefono, fecha_nacimiento, user_id")
+    .select("email, nombre, apellido, rol, telefono, fecha_nacimiento, user_id, activo")
     .eq("id", input.id)
     .maybeSingle();
   if (!u) return { ok: false, mensaje: "Usuario no encontrado." };
@@ -270,6 +270,16 @@ export async function reenviarInvitacion(input: {
     return {
       ok: false,
       mensaje: "Este usuario ya activó su cuenta; no hay invitación pendiente.",
+    };
+  // handle_new_user() (migración 20260918010000) exige activo = true para
+  // vincular una cuenta nueva — reenviar el correo sobre una fila desactivada
+  // sería una acción que nunca puede terminar bien: el correo sale, pero al
+  // completar el registro el trigger rechaza el alta.
+  if (!u.activo)
+    return {
+      ok: false,
+      mensaje:
+        "Este usuario está desactivado; reactívalo antes de reenviar la invitación.",
     };
 
   const aviso = await invitar({
