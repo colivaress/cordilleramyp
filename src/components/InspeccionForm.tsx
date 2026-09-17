@@ -47,6 +47,7 @@ import {
   guardarObservacionGeneral,
   obtenerEstadoRevision,
 } from "@/app/(app)/tickets/actions";
+import type { ResultadoAccion } from "@/lib/resultado-accion";
 import {
   ETIQUETA_TIPO_INSPECCION,
   ORDEN_TIPOS_INSPECCION,
@@ -286,6 +287,14 @@ export function InspeccionForm({
     () => isoADatetimeLocal(fechaVencimientoInicial) || vencimientoPorDefecto(10),
   );
 
+  // "Abrir no debe escribir": en reinspección, la fila de ticket_revisiones
+  // NO se crea al pasar de "Datos de esta revisión" al checklist — se crea
+  // recién en el PRIMER guardado real (ver conRevisionAsegurada más abajo).
+  // Este ref evita llamar iniciarReinspeccion en cada guardado posterior una
+  // vez que ya se confirmó que la revisión existe (es idempotente igual,
+  // pero llamarlo de nuevo sería un viaje de red de más en cada ítem).
+  const revisionAseguradaRef = useRef(modo === "nueva");
+
   const opcionesTipo = useMemo(() => {
     if (!tipos || tipos.length === 0) return ORDEN_TIPOS_INSPECCION;
     const claves = new Set(tipos.map((t) => t.clave));
@@ -417,6 +426,12 @@ export function InspeccionForm({
       const res = await obtenerEstadoRevision({ ticketId, revisionNumero: rev });
       if (cancelado || !res.ok) return;
 
+      // Si esto tuvo éxito, autorizarRevisionEnCurso (adentro de
+      // obtenerEstadoRevision) ya confirmó que la fila de ticket_revisiones
+      // existe y el ticket está en_revision — no hace falta (ni corresponde)
+      // volver a llamar iniciarReinspeccion en el próximo guardado.
+      revisionAseguradaRef.current = true;
+
       const itemsDeEsteTipo = items
         .filter((i) => i.tipo === res.tipoInspeccion)
         .sort((a, b) => a.orden - b.orden);
@@ -539,6 +554,50 @@ export function InspeccionForm({
     [],
   );
 
+  /**
+   * "Abrir no debe escribir": en reinspección, iniciarReinspeccion (crea la
+   * fila de ticket_revisiones + siembra el checklist) ya NO se llama al
+   * pasar de "Datos de esta revisión" al checklist (ver irAlChecklist) — se
+   * llama acá, envolviendo el PRIMER guardado real (el primer ítem
+   * respondido o la primera firma), nunca antes. Si el supervisor sale de
+   * la pantalla sin guardar nada, no queda ninguna revisión a medias.
+   *
+   * `iniciarReinspeccion` deja `tickets.estado` en
+   * `en_reparacion_de_observaciones` — NO en `en_revision` — y se queda ahí
+   * durante TODA la revisión (ver el comentario grande en esa función,
+   * tickets/actions.ts): es lo que mantiene el ticket visible para el
+   * resto de los supervisores mientras dura, no solo antes del primer
+   * guardado. Este wrapper no decide ESE valor, solo cuándo se llama a la
+   * función que lo escribe.
+   *
+   * Idempotente por partida doble: iniciarReinspeccion en sí ya lo es
+   * (prepararRevision hace upsert/insert-ignore), y este wrapper además
+   * evita el viaje de red de más en cada guardado siguiente una vez que
+   * revisionAseguradaRef ya está en true (seteado acá al confirmar éxito, o
+   * en el efecto de recuperación al montar si ya existía).
+   *
+   * Este wrapper es una conveniencia, no la barrera real: si algún guardado
+   * futuro se agrega sin pasar por acá, `autorizarRevisionEnCurso`
+   * (server-side, dentro de cada guardarX) igual lo rechaza con un mensaje
+   * claro en vez de escribir mal — compara `tickets.revision_actual` contra
+   * el número de revisión recibido, que no va a coincidir si la revisión
+   * nunca se creó. Ver el comentario de esa función.
+   */
+  async function conRevisionAsegurada<T>(
+    fn: () => Promise<ResultadoAccion<T>>,
+  ): Promise<ResultadoAccion<T>> {
+    if (modo === "reinspeccion" && !revisionAseguradaRef.current) {
+      const res = await iniciarReinspeccion({
+        ticketId,
+        conductor: conductorRevision.trim(),
+        fechaVencimientoISO: new Date(vencRevision).toISOString(),
+      });
+      if (!res.ok) return res;
+      revisionAseguradaRef.current = true;
+    }
+    return fn();
+  }
+
   const patchFotoSlot = useCallback(
     (key: string, orden: number, patch: Partial<FotoSlot>) => {
       setRespuestas((prev) => {
@@ -574,12 +633,14 @@ export function InspeccionForm({
       }
       // §2.8: la ruta queda en ticket_revisiones al instante — sobrevive a una
       // falla de "Finalizar revisión".
-      const res = await guardarFirmaRevision({
-        ticketId,
-        revisionNumero: rev,
-        quien,
-        path,
-      });
+      const res = await conRevisionAsegurada(() =>
+        guardarFirmaRevision({
+          ticketId,
+          revisionNumero: rev,
+          quien,
+          path,
+        }),
+      );
       if (!res.ok) throw new Error(res.mensaje);
     } catch {
       // Subida diferida: se reintenta sí o sí en onSubmit antes de cerrar.
@@ -621,44 +682,48 @@ export function InspeccionForm({
 
   async function irAlChecklist() {
     if (!puedeAvanzar || guardadoIniciar.pendiente) return;
+    // "Abrir no debe escribir" (reinspección): a diferencia de "nueva" (que
+    // sí necesita crear el ticket acá — §2.6/§2.8, el numero_inspeccion
+    // tiene que existir para subir firmas/fotos), en reinspección el ticket
+    // YA EXISTE. Avanzar de paso es puro estado de cliente — conductor y
+    // fecha de vencimiento quedan en memoria (conductorRevision/vencRevision)
+    // y se mandan recién en el primer guardado real, vía
+    // conRevisionAsegurada. Si el supervisor entra y sale sin tocar nada, no
+    // se escribe ni una fila.
+    if (modo === "reinspeccion") {
+      setPaso(2);
+      setPasoMaxVisto(2);
+      return;
+    }
     try {
       await guardadoIniciar.ejecutar(async () => {
-        if (modo === "nueva") {
-          // §2.6/§2.8: crea la fila en `tickets`, la revisión #1 y siembra las
-          // respuestas del checklist del tipo elegido — así numero_inspeccion
-          // existe y se puede guardar por ítem.
-          const res = await iniciarInspeccion({
-            ticketId,
-            cabecera: {
-              transporte: cabecera.transporte,
-              conductor: cabecera.conductor,
-              fecha: new Date(cabecera.fecha).toISOString(),
-              procedencia: cabecera.procedencia,
-              tipo_camion: cabecera.tipo_camion,
-              patente_camion: cabecera.patente_camion,
-              patente_rampla: cabecera.patente_rampla,
-            },
-            fechaVencimientoISO: new Date(
-              cabecera.fechaVencimiento,
-            ).toISOString(),
-            tipoInspeccion: tipoSeleccionado,
-            nombreEncarpador:
-              tipoSeleccionado === "control_salida" ? nombreEncarpador : null,
-            nombreGuardia:
-              tipoSeleccionado === "control_salida" ? nombreGuardia : null,
-            nroContenedor:
-              tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
-          });
-          if (!res.ok) throw new Error(res.mensaje);
-          setNumInsp(res.numeroInspeccion);
-        } else {
-          const res = await iniciarReinspeccion({
-            ticketId,
-            conductor: conductorRevision.trim(),
-            fechaVencimientoISO: new Date(vencRevision).toISOString(),
-          });
-          if (!res.ok) throw new Error(res.mensaje);
-        }
+        // §2.6/§2.8: crea la fila en `tickets`, la revisión #1 y siembra las
+        // respuestas del checklist del tipo elegido — así numero_inspeccion
+        // existe y se puede guardar por ítem.
+        const res = await iniciarInspeccion({
+          ticketId,
+          cabecera: {
+            transporte: cabecera.transporte,
+            conductor: cabecera.conductor,
+            fecha: new Date(cabecera.fecha).toISOString(),
+            procedencia: cabecera.procedencia,
+            tipo_camion: cabecera.tipo_camion,
+            patente_camion: cabecera.patente_camion,
+            patente_rampla: cabecera.patente_rampla,
+          },
+          fechaVencimientoISO: new Date(
+            cabecera.fechaVencimiento,
+          ).toISOString(),
+          tipoInspeccion: tipoSeleccionado,
+          nombreEncarpador:
+            tipoSeleccionado === "control_salida" ? nombreEncarpador : null,
+          nombreGuardia:
+            tipoSeleccionado === "control_salida" ? nombreGuardia : null,
+          nroContenedor:
+            tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
+        });
+        if (!res.ok) throw new Error(res.mensaje);
+        setNumInsp(res.numeroInspeccion);
         setPaso(2);
         setPasoMaxVisto(2);
       });
@@ -678,14 +743,16 @@ export function InspeccionForm({
     const actual = respuestasRef.current[key];
     try {
       await guardadoItems.ejecutar(key, async () => {
-        const res = await guardarRespuestaItem({
-          ticketId,
-          revisionNumero: rev,
-          itemKey: key,
-          estado,
-          observacion: actual.observacion,
-          fotoPath: actual.fotoPath,
-        });
+        const res = await conRevisionAsegurada(() =>
+          guardarRespuestaItem({
+            ticketId,
+            revisionNumero: rev,
+            itemKey: key,
+            estado,
+            observacion: actual.observacion,
+            fotoPath: actual.fotoPath,
+          }),
+        );
         if (!res.ok) throw new Error(res.mensaje);
       });
     } catch (e) {
@@ -727,17 +794,19 @@ export function InspeccionForm({
       }
       try {
         await guardadoItems.ejecutar(key, async () => {
-          const res = await guardarRespuestaItem({
-            ticketId,
-            revisionNumero: rev,
-            itemKey: key,
-            // El guard de arriba ya garantiza no_conforme — literal en vez
-            // de r.estado para no depender de que el narrowing sobreviva el
-            // cierre de la arrow function pasada a ejecutar().
-            estado: "no_conforme",
-            observacion: texto,
-            fotoPath: r.fotoPath,
-          });
+          const res = await conRevisionAsegurada(() =>
+            guardarRespuestaItem({
+              ticketId,
+              revisionNumero: rev,
+              itemKey: key,
+              // El guard de arriba ya garantiza no_conforme — literal en vez
+              // de r.estado para no depender de que el narrowing sobreviva
+              // el cierre de la arrow function pasada a ejecutar().
+              estado: "no_conforme",
+              observacion: texto,
+              fotoPath: r.fotoPath,
+            }),
+          );
           if (!res.ok) throw new Error(res.mensaje);
         });
       } catch (e) {
@@ -772,14 +841,16 @@ export function InspeccionForm({
         });
         // Ya con foto, la fila no_conforme completa se puede persistir.
         const r = respuestasRef.current[key];
-        const res = await guardarRespuestaItem({
-          ticketId,
-          revisionNumero: rev,
-          itemKey: key,
-          estado: "no_conforme",
-          observacion: r.observacion,
-          fotoPath: path,
-        });
+        const res = await conRevisionAsegurada(() =>
+          guardarRespuestaItem({
+            ticketId,
+            revisionNumero: rev,
+            itemKey: key,
+            estado: "no_conforme",
+            observacion: r.observacion,
+            fotoPath: path,
+          }),
+        );
         if (!res.ok) throw new Error(res.mensaje);
       });
     } catch (e) {
@@ -807,14 +878,16 @@ export function InspeccionForm({
           fotoPreviewUrl: null,
         });
         // Sin foto, la fila no_conforme deja de ser válida: se borra en la BD.
-        const res = await guardarRespuestaItem({
-          ticketId,
-          revisionNumero: rev,
-          itemKey: key,
-          estado: "no_conforme",
-          observacion: r.observacion,
-          fotoPath: null,
-        });
+        const res = await conRevisionAsegurada(() =>
+          guardarRespuestaItem({
+            ticketId,
+            revisionNumero: rev,
+            itemKey: key,
+            estado: "no_conforme",
+            observacion: r.observacion,
+            fotoPath: null,
+          }),
+        );
         if (!res.ok) throw new Error(res.mensaje);
       });
     } catch {
@@ -844,13 +917,15 @@ export function InspeccionForm({
         );
         const previewUrl = URL.createObjectURL(blob);
         patchFotoSlot(key, orden, { path, nombre: file.name, previewUrl });
-        const res = await guardarFotoChecklistItem({
-          ticketId,
-          revisionNumero: rev,
-          itemKey: key,
-          orden,
-          path,
-        });
+        const res = await conRevisionAsegurada(() =>
+          guardarFotoChecklistItem({
+            ticketId,
+            revisionNumero: rev,
+            itemKey: key,
+            orden,
+            path,
+          }),
+        );
         if (!res.ok) throw new Error(res.mensaje);
       });
     } catch (e) {
@@ -873,13 +948,15 @@ export function InspeccionForm({
             .catch(() => {});
         }
         patchFotoSlot(key, orden, { path: null, nombre: null, previewUrl: null });
-        const res = await guardarFotoChecklistItem({
-          ticketId,
-          revisionNumero: rev,
-          itemKey: key,
-          orden,
-          path: null,
-        });
+        const res = await conRevisionAsegurada(() =>
+          guardarFotoChecklistItem({
+            ticketId,
+            revisionNumero: rev,
+            itemKey: key,
+            orden,
+            path: null,
+          }),
+        );
         if (!res.ok) throw new Error(res.mensaje);
       });
     } catch {
@@ -897,11 +974,13 @@ export function InspeccionForm({
     obsGeneralTimer.current = setTimeout(async () => {
       try {
         await guardadoObsGeneral.ejecutar(async () => {
-          const res = await guardarObservacionGeneral({
-            ticketId,
-            revisionNumero: rev,
-            texto,
-          });
+          const res = await conRevisionAsegurada(() =>
+            guardarObservacionGeneral({
+              ticketId,
+              revisionNumero: rev,
+              texto,
+            }),
+          );
           if (!res.ok) throw new Error(res.mensaje);
         });
       } catch (e) {
@@ -995,19 +1074,29 @@ export function InspeccionForm({
             await dataUrlABlob(firmaFiscalizadorUrl as string),
             "image/png",
           );
-          const resFirmaConductor = await guardarFirmaRevision({
-            ticketId,
-            revisionNumero: rev,
-            quien: "conductor",
-            path: firmaConductorPath,
-          });
+          // conRevisionAsegurada acá es defensa en profundidad, no el camino
+          // esperado: para llegar hasta acá, validarChecklist() ya exigió
+          // ambas firmas y todos los ítems respondidos, así que algún
+          // guardado anterior (onEstadoItem/persistirFirma/...) ya debería
+          // haber asegurado la revisión. Si por lo que sea no fue así, esto
+          // la asegura igual antes de re-guardar las firmas.
+          const resFirmaConductor = await conRevisionAsegurada(() =>
+            guardarFirmaRevision({
+              ticketId,
+              revisionNumero: rev,
+              quien: "conductor",
+              path: firmaConductorPath,
+            }),
+          );
           if (!resFirmaConductor.ok) throw new Error(resFirmaConductor.mensaje);
-          const resFirmaFiscalizador = await guardarFirmaRevision({
-            ticketId,
-            revisionNumero: rev,
-            quien: "fiscalizador",
-            path: firmaFiscalizadorPath,
-          });
+          const resFirmaFiscalizador = await conRevisionAsegurada(() =>
+            guardarFirmaRevision({
+              ticketId,
+              revisionNumero: rev,
+              quien: "fiscalizador",
+              path: firmaFiscalizadorPath,
+            }),
+          );
           if (!resFirmaFiscalizador.ok)
             throw new Error(resFirmaFiscalizador.mensaje);
 
