@@ -1,8 +1,27 @@
+import type { Metadata } from "next";
 import { Barlow_Condensed, Inter } from "next/font/google";
 import Image from "next/image";
 import { Header } from "@/components/landing/Header";
 import { Reveal } from "@/components/landing/Reveal";
 import { ScrollToButton } from "@/components/landing/ScrollToButton";
+
+/**
+ * Metadata de la portada — sobrescribe la del root layout (src/app/layout.tsx)
+ * SOLO para esta ruta ("/"), que es como funciona `metadata` por segmento en
+ * el App Router; no hace falta tocar el layout raíz ni usar
+ * `generateMetadata` condicional. El resto de la app (login, dashboard,
+ * tickets) sigue heredando la metadata genérica del root layout.
+ *
+ * Nota verificada en Search Console: Google está mostrando el párrafo del
+ * hero en vez de esta `description` en el resultado — el buscador puede
+ * reescribir la description libremente, pero respeta el <title> literal.
+ * Por eso el title es la prioridad real acá.
+ */
+export const metadata: Metadata = {
+  title: "Encarpe, Desencarpe y Transporte Terrestre – RM, Chile",
+  description:
+    "Encarpe, desencarpe y transporte terrestre de carga para la gran industria en la Región Metropolitana. Seguridad y cumplimiento normativo en cada tramo.",
+};
 
 /**
  * Portada pública de Cordillera M&P. Tipografía propia de la portada
@@ -50,9 +69,12 @@ export default function Home() {
           <div className="mb-3.5 max-w-[520px] text-[14.5px] font-semibold text-white [text-shadow:0_1px_4px_rgba(0,0,0,0.55)]">
             Puente Alto, Región Metropolitana · Operando desde 2019
           </div>
-          <h1 className="mb-5 max-w-[760px] font-landing-heading text-[clamp(40px,6.2vw,74px)] font-bold leading-[1.02] tracking-[0.01em] text-white">
+          <h1 className="mb-4 max-w-[760px] font-landing-heading text-[clamp(40px,6.2vw,74px)] font-bold leading-[1.02] tracking-[0.01em] text-white">
             Su carga, asegurada de planta a destino.
           </h1>
+          <h2 className="mb-3.5 max-w-[560px] font-landing-heading text-[19px] font-semibold text-landing-orange min-[880px]:text-[21px]">
+            Encarpe, desencarpe y transporte terrestre de cargas
+          </h2>
           <p className="mb-[30px] max-w-[520px] text-[17px] text-[#DCD8CE]">
             Encarpe, amarre técnico y transporte terrestre para la gran industria — con el
             estándar de seguridad que exige cada tramo de la ruta.
@@ -243,17 +265,31 @@ export default function Home() {
                 Soporte a plantas industriales
               </div>
               <h3 className="mb-3.5 font-landing-heading text-[30px] font-bold text-landing-charcoal">
-                Encarpe y amarre técnico
+                Encarpe, desencarpe y amarre técnico
               </h3>
+              <p className="mb-3.5 text-[15.5px] text-landing-steel">
+                Cubrimos el ciclo completo de aseguramiento de su carga, de planta a destino.
+                En origen hacemos el <strong className="text-landing-charcoal">encarpe</strong>:
+                cubrimos y sujetamos la carga con lonas de alta resistencia, eslingas
+                certificadas, fajas y cadenas calculadas según el tipo y volumen de cada
+                despacho, para que resista lluvia, humedad, radiación solar y el movimiento
+                propio de la ruta. Al llegar a destino hacemos el{" "}
+                <strong className="text-landing-charcoal">desencarpe</strong>: retiramos el
+                sistema de sujeción de forma ordenada, dejando la carga lista para su
+                descarga sin daños ni tiempos muertos.
+              </p>
               <p className="mb-[18px] text-[15.5px] text-landing-steel">
-                Aseguramiento físico de cargas para terceros directamente en sus centros de
-                distribución o plantas de producción, incluyendo plantas de alta producción
-                como La Papelera (CMPC).
+                Prestamos este servicio directamente en centros de distribución y plantas de
+                producción de alta exigencia, incluyendo faenas continuas como las de La
+                Papelera (CMPC). Protegemos bobinas, fardos y cargas a granel que necesitan
+                sujeción certificada y trazabilidad de cada maniobra, con personal calificado
+                in-situ y EPP completo.
               </p>
               <ul className="list-none">
                 {[
                   "Encarpe industrial con lonas de alta resistencia ante lluvia, humedad y radiación solar",
                   "Amarre y trincaje con eslingas certificadas, fajas y cadenas calculados según el tipo de carga",
+                  "Desencarpe en destino, con el mismo estándar de seguridad y sin daños a la carga",
                   "Personal calificado in-situ, con EPP completo y entrenamiento específico",
                 ].map((item, i) => (
                   <li
@@ -286,9 +322,20 @@ export default function Home() {
               <h3 className="mb-3.5 font-landing-heading text-[30px] font-bold text-landing-charcoal">
                 Fletes y transporte terrestre
               </h3>
+              <p className="mb-3.5 text-[15.5px] text-landing-steel">
+                Contamos con una flota propia preparada para el traslado de mercancías con
+                máxima puntualidad, ya sea como servicio independiente o en conjunto con el
+                encarpe y desencarpe de la carga. Cada camión opera bajo estricto
+                cumplimiento del peso, las dimensiones y las condiciones mecánicas exigidas
+                por la ley de tránsito chilena, con monitoreo constante del trayecto de
+                principio a fin.
+              </p>
               <p className="mb-[18px] text-[15.5px] text-landing-steel">
-                Una flota preparada para el traslado de mercancías con máxima puntualidad y
-                cobertura geográfica flexible.
+                Cubrimos fletes locales en todas las comunas de la Región Metropolitana y
+                fletes interurbanos a regiones, con rutas optimizadas según el destino y el
+                tipo de carga — la misma exigencia de seguridad que aplicamos en planta:
+                prevención activa de riesgos, conductores capacitados y respeto absoluto de
+                los protocolos viales.
               </p>
               <ul className="list-none">
                 {[
