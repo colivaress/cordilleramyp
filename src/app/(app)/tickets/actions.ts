@@ -1140,25 +1140,26 @@ export async function finalizarReinspeccion(input: {
 /**
  * Estados que el buscador de patentes considera "relevantes" — los únicos
  * que puede mostrar el listado, y los únicos que cuenta el conteo sin RLS de
- * §5 (ver hayCoincidenciaOcultaPara). Es SOLO "con observaciones pendientes
- * de corregir":
+ * §5 (ver hayCoincidenciaOcultaPara). Los tres a propósito:
+ *   - `en_revision`: trabajo en curso — encontrable y retomable (§ el
+ *     buscador es también la forma de dar con una inspección a medio hacer
+ *     y seguirla donde quedó, no solo con observaciones ya cerradas).
  *   - `finalizada_con_observaciones`: recién detectada, todavía nadie la tomó.
  *   - `en_reparacion_de_observaciones`: alguien ya la está reparando — sigue
  *     siendo exactamente lo que el supervisor necesita saber (que ESE camión
  *     tiene algo pendiente), así que se queda adentro.
- * Fuera a propósito: `en_revision` (trabajo en curso normal, no una
- * observación) y `finalizada_sin_observaciones` (ya no hay nada pendiente).
+ * Fuera a propósito: solo `finalizada_sin_observaciones` (ya no hay nada
+ * pendiente ni en curso).
  *
- * 🔴 `public.contar_tickets_con_patente_exacta` (migración
- * 20260916040000, redefinida en 20260917000000) tiene su PROPIA lista de
- * estados en SQL — no puede importar esta constante. Si esta lista cambia,
- * esa migración tiene que cambiar en la misma vuelta o el aviso de
- * "coincidencia oculta" (que compara el conteo de esa función contra el de
- * esta lista) queda comparando dos conjuntos distintos y puede disparar en
- * falso. No hay (todavía) una forma automática de detectar el desvío —
- * quien toque una de las dos listas tiene que acordarse de la otra.
+ * Esta MISMA lista la usa `public.contar_tickets_con_patente_exacta`
+ * (migración 20260916040000) en su propio WHERE, en SQL — no se puede
+ * importar de acá. Si esta lista cambia, esa función tiene que cambiar en
+ * la misma vuelta, o el conteo sin RLS y el conteo con RLS de
+ * hayCoincidenciaOcultaPara dejan de compartir predicado y la resta que
+ * calcula "hay algo oculto" puede mentir.
  */
 const ESTADOS_RELEVANTES_BUSQUEDA = [
+  "en_revision",
   "finalizada_con_observaciones",
   "en_reparacion_de_observaciones",
 ] as const;
@@ -1319,12 +1320,13 @@ async function hayCoincidenciaOcultaPara(
 }
 
 /**
- * Busca tickets con observaciones pendientes de corregir (`finalizada_con_
- * observaciones` o `en_reparacion_de_observaciones` — ver
- * ESTADOS_RELEVANTES_BUSQUEDA), por coincidencia EXACTA de patente (camión o
- * rampla, ya normalizada). `en_revision` y `finalizada_sin_observaciones`
- * quedan fuera a propósito: acá no importa "qué está en curso", importa
- * "qué camión tiene algo pendiente de corregir".
+ * Busca tickets pendientes o con observaciones por patente (camión o
+ * rampla, ya normalizada), por coincidencia EXACTA — ver
+ * ESTADOS_RELEVANTES_BUSQUEDA para los tres estados que cuentan como
+ * "encontrable acá" (incluye `en_revision`: encontrar una inspección a
+ * medio hacer y retomarla donde quedó es tan parte de esta pantalla como
+ * encontrar una con observaciones). Solo `finalizada_sin_observaciones`
+ * queda fuera.
  *
  * UNA sola consulta a `tickets` sin importar cuántos coincidan — §5 sacó el
  * detalle de ítems no conformes de esta pantalla (queda solo detrás de
