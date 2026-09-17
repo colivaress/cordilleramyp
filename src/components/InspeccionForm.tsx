@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
@@ -17,9 +18,23 @@ import { cn } from "@/lib/utils";
 import {
   ChecklistItemRow,
   respuestaVacia,
+  type FotoSlot,
   type RespuestaEditable,
 } from "@/components/ChecklistItemRow";
 import { SignaturePad } from "@/components/SignaturePad";
+import { ChecklistProgreso } from "@/components/ChecklistProgreso";
+import { ContenidoBoton, IndicadorGuardado } from "@/components/ui/estado-accion";
+import { OverlayBloqueante } from "@/components/ui/overlay-bloqueante";
+import { nativeSelectClassName } from "@/components/ui/native-select";
+import {
+  useEstadoGuardado,
+  useEstadoGuardadoPorClave,
+} from "@/hooks/use-estado-guardado";
+import { useAccionLarga } from "@/hooks/use-accion-larga";
+import {
+  NavegacionNoConfirmadaError,
+  useEsperaNavegacion,
+} from "@/hooks/use-espera-navegacion";
 import { createClient } from "@/lib/supabase/client";
 import {
   iniciarInspeccion,
@@ -28,8 +43,18 @@ import {
   finalizarReinspeccion,
   guardarRespuestaItem,
   guardarFirmaRevision,
+  guardarFotoChecklistItem,
+  guardarObservacionGeneral,
+  obtenerEstadoRevision,
 } from "@/app/(app)/tickets/actions";
-import type { ChecklistItem, ItemEstado } from "@/lib/tipos";
+import type { ResultadoAccion } from "@/lib/resultado-accion";
+import {
+  ETIQUETA_TIPO_INSPECCION,
+  ORDEN_TIPOS_INSPECCION,
+  type ChecklistItem,
+  type ItemEstado,
+  type TipoInspeccion,
+} from "@/lib/tipos";
 
 type Cabecera = {
   transporte: string;
@@ -46,9 +71,10 @@ const cabeceraVacia = (): Cabecera => ({
   transporte: "",
   conductor: "",
   // §1: la fecha/hora de inspección NO es editable — se fija al abrir el
-  // formulario. `fechaVencimiento` se precarga como fecha + 10 días (editable).
+  // formulario. `fechaVencimiento` se precarga según el tipo elegido (§8 de
+  // la fase "tipos de inspección"), editable siempre.
   fecha: aDatetimeLocal(new Date()),
-  fechaVencimiento: vencimientoPorDefecto(),
+  fechaVencimiento: vencimientoPorDefecto(10),
   procedencia: "",
   tipo_camion: "",
   patente_camion: "",
@@ -85,7 +111,25 @@ function sumarDias(datetimeLocal: string, dias: number): string {
   d.setDate(d.getDate() + dias);
   return aDatetimeLocal(d);
 }
-const vencimientoPorDefecto = () => sumarDias(aDatetimeLocal(new Date()), 10);
+const vencimientoPorDefecto = (dias: number) => sumarDias(aDatetimeLocal(new Date()), dias);
+
+/**
+ * Fase "tipos de inspección" — parte 2/4, §8. Control de Salida vence en 1
+ * día; los otros tres tipos siguen con 10 días, como hasta ahora. Solo cambia
+ * el valor precargado — el campo sigue siendo editable por el supervisor.
+ */
+function diasVencimientoPorTipo(tipo: string): number {
+  return tipo === "control_salida" ? 1 : 10;
+}
+
+/**
+ * Fase "tipos de inspección" — cantidad de fotos obligatorias de un ítem de
+ * modo 'fotos', leída de checklist_items.fotos_requeridas — ya no es una
+ * constante del código (algunos ítems piden 1, otros 2).
+ */
+function cantidadFotosItem(item: ChecklistItem): number {
+  return item.modo === "fotos" ? item.fotos_requeridas ?? 0 : 0;
+}
 
 async function subirArchivo(
   bucket: string,
@@ -147,52 +191,148 @@ async function comprimirImagen(
   }
 }
 
+// §2.8 — recuperación tras recargar: en modo "nueva" el ticketId nace como un
+// UUID generado en el cliente, sin URL propia (a diferencia de reinspección,
+// que vive en /tickets/[id]/reinspeccion). Sin esto, una recarga a mitad de
+// camino generaba un UUID NUEVO, dejando el ticket ya creado (con checklist,
+// firmas, todo) inalcanzable desde este formulario — no es "se pierde lo que
+// no se guardó", es "el ticket entero queda huérfano". Se persiste apenas se
+// genera (no recién al crear el ticket) para cubrir también una recarga en
+// el paso 1, antes de "Realizar revisión".
+const CLAVE_TICKET_EN_PROGRESO = "cordillera-inspeccion-en-progreso";
+
+function ticketIdRecuperadoONuevo(): string {
+  if (typeof window === "undefined") return crypto.randomUUID();
+  try {
+    const guardado = window.localStorage.getItem(CLAVE_TICKET_EN_PROGRESO);
+    if (guardado) return guardado;
+  } catch {
+    // localStorage puede fallar (modo privado, cuota) — degradar a "sin
+    // recuperación" en vez de romper la creación de la inspección.
+  }
+  const nuevo = crypto.randomUUID();
+  try {
+    window.localStorage.setItem(CLAVE_TICKET_EN_PROGRESO, nuevo);
+  } catch {
+    /* ver arriba */
+  }
+  return nuevo;
+}
+
 export function InspeccionForm({
   modo,
   items,
+  tipos,
   ticketId: ticketIdProp,
   numeroRevision = 1,
   numeroInspeccion = null,
   conductorInicial = "",
   fechaVencimientoInicial = null,
+  tipoInspeccionInicial = null,
 }: {
   modo: "nueva" | "reinspeccion";
+  /**
+   * En modo "nueva": TODOS los ítems del checklist, de los 4 tipos, sin
+   * filtrar — se filtra acá según el tipo que elija el supervisor. En modo
+   * "reinspeccion": ya vienen filtrados por el tipo fijo del ticket.
+   */
   items: ChecklistItem[];
+  /** Solo modo "nueva" — puebla el combo "Tipo de inspección". */
+  tipos?: TipoInspeccion[];
   ticketId?: string;
   numeroRevision?: number;
   /** §2.6: correlativo legible del ticket (solo lectura). Null en inspección nueva sin guardar. */
   numeroInspeccion?: number | null;
   conductorInicial?: string;
   fechaVencimientoInicial?: string | null;
+  /** Solo modo "reinspeccion" — el tipo es fijo desde que se creó el ticket. */
+  tipoInspeccionInicial?: string | null;
 }) {
   const router = useRouter();
 
   // §2.8: el id del ticket y el nro de revisión se fijan al montar, así cada
   // firma/foto/respuesta se guarda con una ruta estable ANTES de "Finalizar
   // revisión".
-  const [ticketId] = useState(() => ticketIdProp ?? crypto.randomUUID());
+  const [ticketId] = useState(
+    () => ticketIdProp ?? ticketIdRecuperadoONuevo(),
+  );
   const rev = modo === "nueva" ? 1 : numeroRevision;
 
   const [paso, setPaso] = useState<1 | 2>(1);
   // El paso 2 se monta una sola vez y NO se desmonta al volver atrás (§2.8) — se
   // oculta con CSS para que el <canvas> de las firmas conserve su contenido.
   const [pasoMaxVisto, setPasoMaxVisto] = useState<1 | 2>(1);
-  const [iniciando, setIniciando] = useState(false);
+  // Nivel 1 — "Realizar revisión" es rápido (una fila), no necesita overlay.
+  const guardadoIniciar = useEstadoGuardado();
   // §2.6: en inspección nueva el numero_inspeccion se conoce recién al crear el
   // ticket (al pasar de la cabecera al checklist). En re-inspección viene por prop.
   const [numInsp, setNumInsp] = useState<number | null>(numeroInspeccion);
 
   const [cabecera, setCabecera] = useState<Cabecera>(cabeceraVacia);
 
+  // Fase "tipos de inspección" — parte 2/4. Combo obligatorio, arranca sin
+  // preseleccionar ("Seleccionar…"). Solo aplica en modo "nueva" — en
+  // reinspección el tipo es fijo (tipoInspeccionInicial, §3 de la fase).
+  const [tipoSeleccionado, setTipoSeleccionado] = useState("");
+  const tipoInspeccion =
+    modo === "nueva" ? tipoSeleccionado : tipoInspeccionInicial ?? "";
+  const [nombreEncarpador, setNombreEncarpador] = useState("");
+  const [nombreGuardia, setNombreGuardia] = useState("");
+  const [nroContenedor, setNroContenedor] = useState("");
+
   // §2.6: conductor de ESTA revisión (solo re-inspección), prellenado con el de
   // la revisión anterior. §2.7: la fecha de vencimiento también es por revisión.
   const [conductorRevision, setConductorRevision] = useState(conductorInicial);
   const [vencRevision, setVencRevision] = useState(
-    () => isoADatetimeLocal(fechaVencimientoInicial) || vencimientoPorDefecto(),
+    () => isoADatetimeLocal(fechaVencimientoInicial) || vencimientoPorDefecto(10),
+  );
+
+  // "Abrir no debe escribir" — en los DOS modos: ni el ticket (modo "nueva")
+  // ni la fila de ticket_revisiones (modo "reinspeccion") se crean al pasar
+  // de la cabecera al checklist — se crean recién en el PRIMER guardado real
+  // (ver asegurarRevision más abajo). Arranca en `false` siempre; el efecto
+  // de recuperación al montar lo pone en `true` si ya existía (ticket
+  // recuperado de localStorage con progreso real, o revisión de reinspección
+  // ya abierta). Evita llamar iniciarInspeccion/iniciarReinspeccion en cada
+  // guardado posterior una vez que ya se confirmó que existe (son
+  // idempotentes igual, pero llamarlos de nuevo sería un viaje de red de más
+  // en cada ítem).
+  const revisionAseguradaRef = useRef(false);
+
+  const opcionesTipo = useMemo(() => {
+    if (!tipos || tipos.length === 0) return ORDEN_TIPOS_INSPECCION;
+    const claves = new Set(tipos.map((t) => t.clave));
+    return ORDEN_TIPOS_INSPECCION.filter((c) => claves.has(c));
+  }, [tipos]);
+
+  // Ítems del checklist DEL TIPO elegido, ordenados — §4 de la fase.
+  const itemsDelTipo = useMemo(() => {
+    if (modo === "reinspeccion")
+      return [...items].sort((a, b) => a.orden - b.orden);
+    if (!tipoSeleccionado) return [];
+    return items
+      .filter((i) => i.tipo === tipoSeleccionado)
+      .sort((a, b) => a.orden - b.orden);
+  }, [items, modo, tipoSeleccionado]);
+
+  // §7 de la fase: si TODO el checklist de este tipo es modo 'fotos' (hoy,
+  // solo exportacion_chimolsa), no hay Conforme/No conforme por ítem — la
+  // observación general (declarada más abajo, ahora común a los 4 tipos) es
+  // el único canal para señalar un problema, y por eso ahí sí define el
+  // estado resultante (ver cerrarRevision). En el resto de los tipos es solo
+  // una nota libre que no toca el estado.
+  const esSoloFotos = useMemo(
+    () =>
+      itemsDelTipo.length > 0 &&
+      itemsDelTipo.every((i) => i.modo === "fotos"),
+    [itemsDelTipo],
   );
 
   const [respuestas, setRespuestas] = useState<Record<string, RespuestaEditable>>(
-    () => Object.fromEntries(items.map((i) => [i.key, respuestaVacia()])),
+    () =>
+      Object.fromEntries(
+        itemsDelTipo.map((i) => [i.key, respuestaVacia(cantidadFotosItem(i))]),
+      ),
   );
   // Espejo para leer el estado más reciente dentro de callbacks async.
   const respuestasRef = useRef(respuestas);
@@ -200,7 +340,70 @@ export function InspeccionForm({
     respuestasRef.current = respuestas;
   }, [respuestas]);
 
-  const [enviando, setEnviando] = useState(false);
+  // Para ChecklistProgreso y la validación de "Finalizar revisión" — cuenta
+  // ítems modo 'estado' con `estado` real (no null), no una heurística de
+  // foco. Con el valor preseleccionado eliminado (§2.7), esto es un hecho:
+  // "respondido" significa que hay un valor guardado. Los ítems modo 'fotos'
+  // no tienen este campo (se validan por cantidad de fotos, no por estado) —
+  // se excluyen acá para no contarlos como "pendientes" para siempre.
+  const itemsPendientes = useMemo(
+    () =>
+      itemsDelTipo.filter(
+        (i) => i.modo !== "fotos" && respuestas[i.key]?.estado == null,
+      ),
+    [itemsDelTipo, respuestas],
+  );
+
+  const [observacionGeneral, setObservacionGeneral] = useState("");
+
+  // Retroalimentación visual — nivel 1. Una sola pieza reutilizable
+  // (useEstadoGuardado/useEstadoGuardadoPorClave, ver src/hooks): `guardadoItems`
+  // cubre los 18 ítems del checklist (una clave por ítem para el select +
+  // observación + foto única de modo 'estado'; clave compuesta `key:orden`
+  // para cada foto de un ítem modo 'fotos'), y `guardadoObsGeneral` cubre el
+  // textarea de observación general — antes no tenía NINGUNA retroalimentación.
+  const guardadoItems = useEstadoGuardadoPorClave();
+  const guardadoObsGeneral = useEstadoGuardado();
+  const guardadoPendientes = useEstadoGuardado();
+  const claveFotoModo = (key: string, orden: number) => `${key}:${orden}`;
+
+  // El checklist a mostrar depende del tipo elegido — mientras el supervisor
+  // no haya avanzado al paso 2, cambiar el tipo reinicia las respuestas
+  // locales (nada se persistió todavía) y vuelve a precargar el vencimiento
+  // por defecto de ese tipo (§8 de la fase). Se hace en el propio handler del
+  // combo, no en un efecto — es una reacción directa a la elección del
+  // usuario, no una sincronización con un sistema externo.
+  function onCambiarTipo(nuevoTipo: string) {
+    setTipoSeleccionado(nuevoTipo);
+    const nuevosItems = nuevoTipo
+      ? items
+          .filter((i) => i.tipo === nuevoTipo)
+          .sort((a, b) => a.orden - b.orden)
+      : [];
+    setRespuestas(
+      Object.fromEntries(
+        nuevosItems.map((i) => [i.key, respuestaVacia(cantidadFotosItem(i))]),
+      ),
+    );
+    setObservacionGeneral("");
+    if (nuevoTipo) {
+      setCabecera((prev) => ({
+        ...prev,
+        fechaVencimiento: sumarDias(
+          prev.fecha,
+          diasVencimientoPorTipo(nuevoTipo),
+        ),
+      }));
+    }
+  }
+
+  // Nivel 1 (botón) + nivel 2 (overlay bloqueante, no descartable): "Finalizar
+  // revisión" puede tardar en el teléfono con mala señal — el overlay evita
+  // que el supervisor toque cualquier otra cosa mientras tanto. Un segundo
+  // envío acá cerraría la inspección dos veces, no solo un correo de más.
+  const guardadoFinalizar = useEstadoGuardado();
+  const overlayFinalizar = useAccionLarga();
+  const esperarNavegacionInforme = useEsperaNavegacion();
 
   // §2.8: firmas persistidas en el estado del formulario (sobreviven a navegar
   // entre pasos) + subidas a Storage y a ticket_revisiones apenas se capturan.
@@ -209,11 +412,119 @@ export function InspeccionForm({
     null,
   );
 
+  // Recuperación tras recargar — ver ticketIdRecuperadoONuevo() y el
+  // comentario de obtenerEstadoRevision(). Corre una sola vez al montar: si
+  // el ticket ya existe con progreso guardado (se creó en una carga anterior
+  // de esta misma sesión, o es una re-inspección ya empezada antes de esta
+  // recarga), reconstruye cabecera, checklist, observación general y firmas
+  // — y salta directo al paso 2 si había algo real que mostrar, en vez de
+  // forzar a re-completar "Datos de Inspección" para algo que ya existe.
+  //
+  // Si no hay nada que recuperar (ticket recién creado en esta misma carga,
+  // o no existe todavía porque nunca se llegó a "Realizar revisión"),
+  // `obtenerEstadoRevision` devuelve `ok: false` y no se toca nada — ese no
+  // es un error que el supervisor deba ver.
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const res = await obtenerEstadoRevision({ ticketId, revisionNumero: rev });
+      if (cancelado || !res.ok) return;
+
+      // Si esto tuvo éxito, autorizarRevisionEnCurso (adentro de
+      // obtenerEstadoRevision) ya confirmó que la fila de ticket_revisiones
+      // existe y el ticket está en_revision — no hace falta (ni corresponde)
+      // volver a llamar iniciarReinspeccion en el próximo guardado.
+      revisionAseguradaRef.current = true;
+
+      const itemsDeEsteTipo = items
+        .filter((i) => i.tipo === res.tipoInspeccion)
+        .sort((a, b) => a.orden - b.orden);
+      const nuevasRespuestas: Record<string, RespuestaEditable> = Object.fromEntries(
+        itemsDeEsteTipo.map((i) => [i.key, respuestaVacia(cantidadFotosItem(i))]),
+      );
+
+      let huboAlgo = false;
+      for (const it of res.items) {
+        const base = nuevasRespuestas[it.itemKey];
+        if (!base) continue;
+        if (it.estado != null || it.observacion || it.fotoPath || it.fotos.length > 0)
+          huboAlgo = true;
+        nuevasRespuestas[it.itemKey] = {
+          ...base,
+          estado: it.estado,
+          observacion: it.observacion,
+          fotoPath: it.fotoPath,
+          fotoNombre: it.fotoPath ? "Foto guardada" : null,
+          fotoPreviewUrl: it.fotoUrlFirmada,
+          fotos: base.fotos.map((slot, idx) => {
+            const guardada = it.fotos.find((f) => f.orden === idx + 1);
+            return guardada
+              ? {
+                  path: guardada.path,
+                  nombre: "Foto guardada",
+                  previewUrl: guardada.urlFirmada,
+                }
+              : slot;
+          }),
+        };
+      }
+      setRespuestas(nuevasRespuestas);
+
+      if (res.observacionGeneral) {
+        setObservacionGeneral(res.observacionGeneral);
+        huboAlgo = true;
+      }
+      if (res.firmaConductorUrl) {
+        setFirmaConductorUrl(res.firmaConductorUrl);
+        huboAlgo = true;
+      }
+      if (res.firmaFiscalizadorUrl) {
+        setFirmaFiscalizadorUrl(res.firmaFiscalizadorUrl);
+        huboAlgo = true;
+      }
+
+      if (modo === "nueva") {
+        setTipoSeleccionado(res.tipoInspeccion);
+        setNumInsp(res.numeroInspeccion);
+        // Sin esto, "Volver a los datos" tras recuperar la sesión mostraría
+        // el paso 1 en blanco, y reenviarlo pisaría con blancos la cabecera
+        // real del ticket (mismo upsert que lo creó) — ver el comentario en
+        // obtenerEstadoRevision.
+        setCabecera({
+          transporte: res.cabecera.transporte,
+          conductor: res.cabecera.conductor,
+          fecha: isoADatetimeLocal(res.cabecera.fecha),
+          fechaVencimiento: isoADatetimeLocal(res.fechaVencimientoRevision),
+          procedencia: res.cabecera.procedencia,
+          tipo_camion: res.cabecera.tipo_camion,
+          patente_camion: res.cabecera.patente_camion,
+          patente_rampla: res.cabecera.patente_rampla,
+        });
+        setNombreEncarpador(res.nombreEncarpador ?? "");
+        setNombreGuardia(res.nombreGuardia ?? "");
+        setNroContenedor(res.nroContenedor ?? "");
+      }
+
+      if (huboAlgo) {
+        setPaso(2);
+        setPasoMaxVisto(2);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+    // Deliberadamente solo al montar — ticketId/rev son estables durante toda
+    // la vida del formulario (§2.8), no hace falta re-ejecutar esto.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const obsTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const obsGeneralTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const timers = obsTimers.current;
     return () => {
       Object.values(timers).forEach(clearTimeout);
+      if (obsGeneralTimer.current) clearTimeout(obsGeneralTimer.current);
     };
   }, []);
 
@@ -247,6 +558,133 @@ export function InspeccionForm({
     [],
   );
 
+  /**
+   * "Abrir no debe escribir" — ahora en LOS DOS modos, no solo reinspección:
+   * ni `iniciarInspeccion` (crea `tickets` + revisión #1 + siembra el
+   * checklist) ni `iniciarReinspeccion` (crea la revisión siguiente) se
+   * llaman al avanzar de paso (ver irAlChecklist, que en los dos modos es
+   * ahora un simple cambio de paso de cliente). Se llaman acá, envolviendo
+   * el PRIMER guardado real (el primer ítem respondido o la primera firma),
+   * nunca antes. Si el supervisor entra y sale sin guardar nada, no queda
+   * ticket ni revisión a medias — en modo "nueva" eso significa además que
+   * `numero_inspeccion` (bigint identity) no avanza: la secuencia solo se
+   * consume cuando el INSERT realmente ocurre.
+   *
+   * `iniciarReinspeccion` deja `tickets.estado` en
+   * `en_reparacion_de_observaciones` — NO en `en_revision` — y se queda ahí
+   * durante TODA la revisión (ver el comentario grande en esa función,
+   * tickets/actions.ts): es lo que mantiene el ticket visible para el
+   * resto de los supervisores mientras dura, no solo antes del primer
+   * guardado. `iniciarInspeccion` no tiene ese problema — nace en
+   * `en_revision` y no hay "otro supervisor" que pueda tomarlo antes de que
+   * exista.
+   *
+   * Idempotente por partida doble: las dos funciones ya lo son
+   * (`iniciarInspeccion` hace upsert sobre `tickets` con
+   * `onConflict:"id"`; `prepararRevision` hace upsert/insert-ignore sobre
+   * `ticket_revisiones`), y este wrapper además evita el viaje de red de
+   * más en cada guardado siguiente una vez que revisionAseguradaRef ya está
+   * en true (seteado acá al confirmar éxito, o en el efecto de recuperación
+   * al montar si ya existía).
+   *
+   * Este wrapper es una conveniencia, no la barrera real: si algún guardado
+   * futuro se agrega sin pasar por acá, `autorizarRevisionEnCurso`
+   * (server-side, dentro de cada guardarX) igual lo rechaza con un mensaje
+   * claro en vez de escribir mal — compara `tickets.revision_actual` contra
+   * el número de revisión recibido, que no va a coincidir si la revisión
+   * nunca se creó. Ver el comentario de esa función.
+   *
+   * 🔴 Storage es la excepción — no la cubre este wrapper. Las políticas RLS
+   * de `storage.objects` (migración 20260908210559,
+   * `private.puede_editar_ticket`) exigen que la fila de `tickets` YA EXISTA
+   * para permitir el INSERT del objeto — si el ticket no existe todavía, la
+   * subida misma falla por RLS, antes de llegar a ningún guardarX. En
+   * reinspección esto nunca fue un problema (el ticket ya existe desde la
+   * inspección original), pero en "nueva" con creación diferida, si el
+   * PRIMER guardado real es una foto o una firma, hay que asegurar el
+   * ticket ANTES de subir, no después. Por eso `persistirFirma`,
+   * `onFotoItem`, `onFotoModoItem` y el re-guardado de firmas en `onSubmit`
+   * NO llaman `subirArchivo` directo — usan `subirArchivoAsegurando` (ver
+   * más abajo), que llama `asegurarRevision()` primero.
+   */
+  async function asegurarRevision(): Promise<ResultadoAccion> {
+    if (revisionAseguradaRef.current) return { ok: true };
+    if (modo === "nueva") {
+      const res = await iniciarInspeccion({
+        ticketId,
+        cabecera: {
+          transporte: cabecera.transporte,
+          conductor: cabecera.conductor,
+          fecha: new Date(cabecera.fecha).toISOString(),
+          procedencia: cabecera.procedencia,
+          tipo_camion: cabecera.tipo_camion,
+          patente_camion: cabecera.patente_camion,
+          patente_rampla: cabecera.patente_rampla,
+        },
+        fechaVencimientoISO: new Date(cabecera.fechaVencimiento).toISOString(),
+        tipoInspeccion: tipoSeleccionado,
+        nombreEncarpador:
+          tipoSeleccionado === "control_salida" ? nombreEncarpador : null,
+        nombreGuardia:
+          tipoSeleccionado === "control_salida" ? nombreGuardia : null,
+        nroContenedor:
+          tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
+      });
+      if (!res.ok) return res;
+      revisionAseguradaRef.current = true;
+      setNumInsp(res.numeroInspeccion);
+      return { ok: true };
+    }
+    const res = await iniciarReinspeccion({
+      ticketId,
+      conductor: conductorRevision.trim(),
+      fechaVencimientoISO: new Date(vencRevision).toISOString(),
+    });
+    if (!res.ok) return res;
+    revisionAseguradaRef.current = true;
+    return { ok: true };
+  }
+
+  async function conRevisionAsegurada<T>(
+    fn: () => Promise<ResultadoAccion<T>>,
+  ): Promise<ResultadoAccion<T>> {
+    const aseg = await asegurarRevision();
+    if (!aseg.ok) return aseg;
+    return fn();
+  }
+
+  /**
+   * `subirArchivo`, pero asegurando el ticket/revisión ANTES de subir — ver
+   * el comentario grande de arriba (asegurarRevision). Usar SIEMPRE esta
+   * función para subir a Storage desde este formulario, nunca `subirArchivo`
+   * directo — es la única forma de que el orden (asegurar → subir) no
+   * dependa de que cada call site se acuerde de hacerlo en el orden
+   * correcto.
+   */
+  async function subirArchivoAsegurando(
+    bucket: string,
+    path: string,
+    file: Blob,
+    contentType: string,
+  ): Promise<string> {
+    const aseg = await asegurarRevision();
+    if (!aseg.ok) throw new Error(aseg.mensaje);
+    return subirArchivo(bucket, path, file, contentType);
+  }
+
+  const patchFotoSlot = useCallback(
+    (key: string, orden: number, patch: Partial<FotoSlot>) => {
+      setRespuestas((prev) => {
+        const actual = prev[key];
+        if (!actual) return prev;
+        const fotos = [...actual.fotos];
+        fotos[orden - 1] = { ...fotos[orden - 1], ...patch };
+        return { ...prev, [key]: { ...actual, fotos } };
+      });
+    },
+    [],
+  );
+
   async function persistirFirma(
     quien: "conductor" | "fiscalizador",
     dataUrl: string | null,
@@ -257,7 +695,7 @@ export function InspeccionForm({
     try {
       let path: string | null = null;
       if (dataUrl) {
-        path = await subirArchivo(
+        path = await subirArchivoAsegurando(
           "firmas",
           rutaFirma(quien),
           await dataUrlABlob(dataUrl),
@@ -269,12 +707,15 @@ export function InspeccionForm({
       }
       // §2.8: la ruta queda en ticket_revisiones al instante — sobrevive a una
       // falla de "Finalizar revisión".
-      await guardarFirmaRevision({
-        ticketId,
-        revisionNumero: rev,
-        quien,
-        path,
-      });
+      const res = await conRevisionAsegurada(() =>
+        guardarFirmaRevision({
+          ticketId,
+          revisionNumero: rev,
+          quien,
+          path,
+        }),
+      );
+      if (!res.ok) throw new Error(res.mensaje);
     } catch {
       // Subida diferida: se reintenta sí o sí en onSubmit antes de cerrar.
       toast.warning(
@@ -284,104 +725,123 @@ export function InspeccionForm({
   }
 
   // §2.7: validación de cliente real — todos los campos deben estar completos.
-  const cabeceraCompleta = useMemo(
-    () => CAMPOS_CABECERA.every((c) => cabecera[c.key].trim() !== ""),
-    [cabecera],
-  );
+  // Fase "tipos de inspección": además, el tipo es obligatorio y los campos
+  // condicionales de su tipo (§3 de la fase) también.
+  const cabeceraCompleta = useMemo(() => {
+    if (modo !== "nueva") return true;
+    if (!tipoSeleccionado) return false;
+    if (!CAMPOS_CABECERA.every((c) => cabecera[c.key].trim() !== "")) return false;
+    if (tipoSeleccionado === "control_salida")
+      return nombreEncarpador.trim() !== "" && nombreGuardia.trim() !== "";
+    if (tipoSeleccionado === "exportacion_chimolsa")
+      return nroContenedor.trim() !== "";
+    return true;
+  }, [modo, tipoSeleccionado, cabecera, nombreEncarpador, nombreGuardia, nroContenedor]);
   const datosRevisionCompletos =
     conductorRevision.trim() !== "" && vencRevision.trim() !== "";
   const puedeAvanzar =
     modo === "nueva" ? cabeceraCompleta : datosRevisionCompletos;
 
   const noConformes = useMemo(
-    () => Object.values(respuestas).filter((r) => r.estado === "no_conforme"),
-    [respuestas],
+    () =>
+      itemsDelTipo.filter(
+        (i) => i.modo === "estado" && respuestas[i.key]?.estado === "no_conforme",
+      ),
+    [itemsDelTipo, respuestas],
   );
 
   function setCampoCabecera(key: keyof Cabecera, value: string) {
     setCabecera((prev) => ({ ...prev, [key]: value }));
   }
 
-  async function irAlChecklist() {
-    if (!puedeAvanzar || iniciando) return;
-    setIniciando(true);
-    try {
-      if (modo === "nueva") {
-        // §2.6/§2.8: crea la fila en `tickets`, la revisión #1 y siembra las 18
-        // respuestas — así numero_inspeccion existe y se puede guardar por ítem.
-        const res = await iniciarInspeccion({
-          ticketId,
-          cabecera: {
-            transporte: cabecera.transporte,
-            conductor: cabecera.conductor,
-            fecha: new Date(cabecera.fecha).toISOString(),
-            procedencia: cabecera.procedencia,
-            tipo_camion: cabecera.tipo_camion,
-            patente_camion: cabecera.patente_camion,
-            patente_rampla: cabecera.patente_rampla,
-          },
-          fechaVencimientoISO: new Date(
-            cabecera.fechaVencimiento,
-          ).toISOString(),
-        });
-        setNumInsp(res.numeroInspeccion);
-      } else {
-        await iniciarReinspeccion({
-          ticketId,
-          conductor: conductorRevision.trim(),
-          fechaVencimientoISO: new Date(vencRevision).toISOString(),
-        });
-      }
-      setPaso(2);
-      setPasoMaxVisto(2);
-    } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : "No se pudo iniciar la revisión.",
-      );
-    } finally {
-      setIniciando(false);
-    }
+  function irAlChecklist() {
+    if (!puedeAvanzar || guardadoIniciar.pendiente) return;
+    // "Abrir no debe escribir" — en LOS DOS modos ahora: avanzar de paso es
+    // puro estado de cliente, sin llamada de red. En modo "nueva", la
+    // cabecera completa queda en memoria (`cabecera`, `tipoSeleccionado`,
+    // etc.) y se manda recién en el primer guardado real, vía
+    // asegurarRevision/conRevisionAsegurada — igual que conductor/vencimiento
+    // en reinspección. Si el supervisor entra y sale sin tocar nada, no se
+    // escribe ni una fila (ni se consume un numero_inspeccion).
+    setPaso(2);
+    setPasoMaxVisto(2);
   }
 
   // §2.8: cada respuesta se guarda apenas se marca — no todas juntas al final.
+  // Solo para ítems de modo 'estado'. Retroalimentación visual: el select es
+  // un control sin debounce, así que arranca directo en "guardando" — no
+  // hace falta pasar por marcarCambio().
   async function onEstadoItem(key: string, estado: ItemEstado) {
     patchResp(key, { estado });
     const actual = respuestasRef.current[key];
     try {
-      const res = await guardarRespuestaItem({
-        ticketId,
-        revisionNumero: rev,
-        itemKey: key,
-        estado,
-        observacion: actual.observacion,
-        fotoPath: actual.fotoPath,
+      await guardadoItems.ejecutar(key, async () => {
+        const res = await conRevisionAsegurada(() =>
+          guardarRespuestaItem({
+            ticketId,
+            revisionNumero: rev,
+            itemKey: key,
+            estado,
+            observacion: actual.observacion,
+            fotoPath: actual.fotoPath,
+          }),
+        );
+        if (!res.ok) throw new Error(res.mensaje);
       });
-      patchResp(key, { guardado: res.guardado });
     } catch (e) {
-      patchResp(key, { guardado: false });
       toast.error(
         e instanceof Error ? e.message : "No se pudo guardar el elemento.",
       );
     }
   }
 
+  /**
+   * Para no obligar a 18 toques cuando lo normal es que todo esté bien.
+   * 🔴 Solo rellena los que están SIN responder (itemsPendientes) — nunca
+   * toca un ítem que ya tiene valor, así sea "no conforme". Que este botón
+   * pudiera pisar un hallazgo ya registrado sería peor que el problema que
+   * viene a resolver (§2.7 de la fase).
+   */
+  async function marcarPendientesConforme() {
+    const claves = itemsPendientes.map((i) => i.key);
+    if (claves.length === 0) return;
+    await guardadoPendientes.ejecutar(() =>
+      Promise.all(claves.map((key) => onEstadoItem(key, "conforme"))),
+    );
+  }
+
   function onObservacionItem(key: string, texto: string) {
-    patchResp(key, { observacion: texto, guardado: false });
+    // Instantáneo: responde "registré tu toque" antes de programar el
+    // debounce, no cuando la request sale (esa es la queja que originó esto).
+    guardadoItems.marcarCambio(key);
+    patchResp(key, { observacion: texto });
     clearTimeout(obsTimers.current[key]);
     obsTimers.current[key] = setTimeout(async () => {
       const r = respuestasRef.current[key];
       // Solo se persiste si el ítem es no_conforme y ya tiene foto (constraint).
-      if (r.estado !== "no_conforme" || !r.fotoPath) return;
+      // Si no, no hay nada que guardar todavía — limpiar el indicador en vez
+      // de dejarlo pegado en "cambiando" para siempre.
+      if (r.estado !== "no_conforme" || !r.fotoPath) {
+        guardadoItems.limpiar(key);
+        return;
+      }
       try {
-        await guardarRespuestaItem({
-          ticketId,
-          revisionNumero: rev,
-          itemKey: key,
-          estado: r.estado,
-          observacion: texto,
-          fotoPath: r.fotoPath,
+        await guardadoItems.ejecutar(key, async () => {
+          const res = await conRevisionAsegurada(() =>
+            guardarRespuestaItem({
+              ticketId,
+              revisionNumero: rev,
+              itemKey: key,
+              // El guard de arriba ya garantiza no_conforme — literal en vez
+              // de r.estado para no depender de que el narrowing sobreviva
+              // el cierre de la arrow function pasada a ejecutar().
+              estado: "no_conforme",
+              observacion: texto,
+              fotoPath: r.fotoPath,
+            }),
+          );
+          if (!res.ok) throw new Error(res.mensaje);
         });
-        patchResp(key, { guardado: true });
       } catch (e) {
         toast.error(
           e instanceof Error ? e.message : "No se pudo guardar la observación.",
@@ -397,35 +857,36 @@ export function InspeccionForm({
       toast.error("El archivo debe ser una imagen (JPG, PNG, WEBP o HEIC).");
       return;
     }
-    patchResp(key, { subiendoFoto: true });
     try {
-      const { blob, ext } = await comprimirImagen(file);
-      const path = await subirArchivo(
-        "fallas",
-        `${ticketId}/${key}/${nombreFoto(ext)}`,
-        blob,
-        blob.type || "image/jpeg",
-      );
-      const previewUrl = URL.createObjectURL(blob);
-      patchResp(key, {
-        fotoPath: path,
-        fotoNombre: file.name,
-        fotoPreviewUrl: previewUrl,
-        subiendoFoto: false,
+      await guardadoItems.ejecutar(key, async () => {
+        const { blob, ext } = await comprimirImagen(file);
+        const path = await subirArchivoAsegurando(
+          "fallas",
+          `${ticketId}/${key}/${nombreFoto(ext)}`,
+          blob,
+          blob.type || "image/jpeg",
+        );
+        const previewUrl = URL.createObjectURL(blob);
+        patchResp(key, {
+          fotoPath: path,
+          fotoNombre: file.name,
+          fotoPreviewUrl: previewUrl,
+        });
+        // Ya con foto, la fila no_conforme completa se puede persistir.
+        const r = respuestasRef.current[key];
+        const res = await conRevisionAsegurada(() =>
+          guardarRespuestaItem({
+            ticketId,
+            revisionNumero: rev,
+            itemKey: key,
+            estado: "no_conforme",
+            observacion: r.observacion,
+            fotoPath: path,
+          }),
+        );
+        if (!res.ok) throw new Error(res.mensaje);
       });
-      // Ya con foto, la fila no_conforme completa se puede persistir.
-      const r = respuestasRef.current[key];
-      await guardarRespuestaItem({
-        ticketId,
-        revisionNumero: rev,
-        itemKey: key,
-        estado: "no_conforme",
-        observacion: r.observacion,
-        fotoPath: path,
-      });
-      patchResp(key, { guardado: true });
     } catch (e) {
-      patchResp(key, { subiendoFoto: false });
       toast.error(
         e instanceof Error ? e.message : "No se pudo subir la foto.",
       );
@@ -435,111 +896,314 @@ export function InspeccionForm({
   async function onQuitarFotoItem(key: string) {
     const r = respuestasRef.current[key];
     if (r.fotoPreviewUrl) URL.revokeObjectURL(r.fotoPreviewUrl);
-    if (r.fotoPath) {
-      const supabase = createClient();
-      await supabase.storage
-        .from("fallas")
-        .remove([r.fotoPath])
-        .catch(() => {});
-    }
-    patchResp(key, {
-      fotoPath: null,
-      fotoNombre: null,
-      fotoPreviewUrl: null,
-      guardado: false,
-    });
-    // Sin foto, la fila no_conforme deja de ser válida: se borra en la BD.
     try {
-      await guardarRespuestaItem({
-        ticketId,
-        revisionNumero: rev,
-        itemKey: key,
-        estado: "no_conforme",
-        observacion: r.observacion,
-        fotoPath: null,
+      await guardadoItems.ejecutar(key, async () => {
+        if (r.fotoPath) {
+          const supabase = createClient();
+          await supabase.storage
+            .from("fallas")
+            .remove([r.fotoPath])
+            .catch(() => {});
+        }
+        patchResp(key, {
+          fotoPath: null,
+          fotoNombre: null,
+          fotoPreviewUrl: null,
+        });
+        // Sin foto, la fila no_conforme deja de ser válida: se borra en la BD.
+        const res = await conRevisionAsegurada(() =>
+          guardarRespuestaItem({
+            ticketId,
+            revisionNumero: rev,
+            itemKey: key,
+            estado: "no_conforme",
+            observacion: r.observacion,
+            fotoPath: null,
+          }),
+        );
+        if (!res.ok) throw new Error(res.mensaje);
       });
     } catch {
       /* no bloquea: "Finalizar revisión" vuelve a validar */
     }
   }
 
-  function validarChecklist(): string | null {
-    for (const item of items) {
+  // Fase "tipos de inspección" — parte 2/4. Fotos de un ítem modo 'fotos':
+  // misma lógica de subida inmediata que onFotoItem, pero contra
+  // ticket_checklist_fotos (orden explícito, de 1 a fotos_requeridas del
+  // ítem), no contra foto_url directamente.
+  async function onFotoModoItem(key: string, orden: number, file: File | null) {
+    if (!file) return;
+    if (file.type && !file.type.startsWith("image/")) {
+      toast.error("El archivo debe ser una imagen (JPG, PNG, WEBP o HEIC).");
+      return;
+    }
+    const clave = claveFotoModo(key, orden);
+    try {
+      await guardadoItems.ejecutar(clave, async () => {
+        const { blob, ext } = await comprimirImagen(file);
+        const path = await subirArchivoAsegurando(
+          "fallas",
+          `${ticketId}/${key}/${orden}-${nombreFoto(ext)}`,
+          blob,
+          blob.type || "image/jpeg",
+        );
+        const previewUrl = URL.createObjectURL(blob);
+        patchFotoSlot(key, orden, { path, nombre: file.name, previewUrl });
+        const res = await conRevisionAsegurada(() =>
+          guardarFotoChecklistItem({
+            ticketId,
+            revisionNumero: rev,
+            itemKey: key,
+            orden,
+            path,
+          }),
+        );
+        if (!res.ok) throw new Error(res.mensaje);
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo subir la foto.");
+    }
+  }
+
+  async function onQuitarFotoModoItem(key: string, orden: number) {
+    const slot = respuestasRef.current[key]?.fotos[orden - 1];
+    if (!slot) return;
+    if (slot.previewUrl) URL.revokeObjectURL(slot.previewUrl);
+    const clave = claveFotoModo(key, orden);
+    try {
+      await guardadoItems.ejecutar(clave, async () => {
+        if (slot.path) {
+          const supabase = createClient();
+          await supabase.storage
+            .from("fallas")
+            .remove([slot.path])
+            .catch(() => {});
+        }
+        patchFotoSlot(key, orden, { path: null, nombre: null, previewUrl: null });
+        const res = await conRevisionAsegurada(() =>
+          guardarFotoChecklistItem({
+            ticketId,
+            revisionNumero: rev,
+            itemKey: key,
+            orden,
+            path: null,
+          }),
+        );
+        if (!res.ok) throw new Error(res.mensaje);
+      });
+    } catch {
+      /* no bloquea: "Finalizar revisión" vuelve a validar */
+    }
+  }
+
+  // Observación general — una sola por revisión, para los 4 tipos. Mismo
+  // patrón cambiando→guardando→guardado que el checklist por ítem — antes
+  // este campo no tenía ninguna retroalimentación, ni durante ni después.
+  function onObservacionGeneral(texto: string) {
+    guardadoObsGeneral.marcarCambio();
+    setObservacionGeneral(texto);
+    if (obsGeneralTimer.current) clearTimeout(obsGeneralTimer.current);
+    obsGeneralTimer.current = setTimeout(async () => {
+      try {
+        await guardadoObsGeneral.ejecutar(async () => {
+          const res = await conRevisionAsegurada(() =>
+            guardarObservacionGeneral({
+              ticketId,
+              revisionNumero: rev,
+              texto,
+            }),
+          );
+          if (!res.ok) throw new Error(res.mensaje);
+        });
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? e.message : "No se pudo guardar la observación.",
+        );
+      }
+    }, 700);
+  }
+
+  /**
+   * Devuelve el mensaje de error Y la clave del ítem que lo causó (cuando
+   * aplica), para que onSubmit pueda desplazar hasta ahí — con 18 ítems en
+   * ~4,5 pantallas, decir "falta uno" no alcanza si el supervisor tiene que
+   * buscarlo bajando a mano (ver §9 de la fase).
+   */
+  function validarChecklist(): { mensaje: string; itemKey?: string } | null {
+    // Primero: ¿queda algún ítem modo 'estado' sin responder? Antes esto no
+    // existía como caso — todo ítem arrancaba en "Conforme" (§2.7). Se
+    // revisa antes que el resto porque lógicamente precede: no tiene sentido
+    // validar la observación de un no_conforme si ni siquiera se respondió.
+    if (itemsPendientes.length > 0) {
+      const primero = itemsPendientes[0];
+      return {
+        mensaje:
+          itemsPendientes.length === 1
+            ? `Falta responder "${primero.nombre}".`
+            : `Faltan ${itemsPendientes.length} elementos por responder — te llevamos al primero.`,
+        itemKey: primero.key,
+      };
+    }
+    for (const item of itemsDelTipo) {
       const r = respuestas[item.key];
-      if (r.estado === "no_conforme") {
+      if (!r) return { mensaje: `Falta completar "${item.nombre}".`, itemKey: item.key };
+      if (item.modo === "fotos") {
+        const requeridas = cantidadFotosItem(item);
+        if (r.fotos.length < requeridas || r.fotos.some((f) => !f.path))
+          return {
+            mensaje: `Faltan fotos en "${item.nombre}" (se requiere${requeridas === 1 ? "" : "n"} ${requeridas}).`,
+            itemKey: item.key,
+          };
+      } else if (r.estado === "no_conforme") {
         if (!r.observacion.trim())
-          return `Falta la observación en "${item.nombre}".`;
-        if (!r.fotoPath) return `Falta la foto de la falla en "${item.nombre}".`;
+          return { mensaje: `Falta la observación en "${item.nombre}".`, itemKey: item.key };
+        if (!r.fotoPath)
+          return { mensaje: `Falta la foto de la falla en "${item.nombre}".`, itemKey: item.key };
       }
     }
-    if (!firmaConductorUrl) return "Falta la firma del conductor.";
+    if (!firmaConductorUrl) return { mensaje: "Falta la firma del conductor." };
     if (!firmaFiscalizadorUrl)
-      return "Falta la firma del fiscalizador/supervisor.";
+      return { mensaje: "Falta la firma del fiscalizador/supervisor." };
     return null;
+  }
+
+  /** Baja hasta el ítem y enfoca su select — ver validarChecklist. */
+  function irAlItemPendiente(itemKey: string) {
+    const fila = document.getElementById(`checklist-item-${itemKey}`);
+    if (!fila) return;
+    fila.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "center",
+    });
+    fila.querySelector("select")?.focus();
   }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const err = validarChecklist();
     if (err) {
-      toast.error(err);
+      toast.error(err.mensaje);
+      if (err.itemKey) irAlItemPendiente(err.itemKey);
       return;
     }
-    setEnviando(true);
     try {
-      // §2.8: las firmas ya se subieron al capturarse; acá se re-suben con el
-      // trazo actual y se re-guarda la ruta, para dejar todo consistente sí o sí
-      // antes de cerrar.
-      const firmaConductorPath = await subirArchivo(
-        "firmas",
-        rutaFirma("conductor"),
-        await dataUrlABlob(firmaConductorUrl as string),
-        "image/png",
-      );
-      const firmaFiscalizadorPath = await subirArchivo(
-        "firmas",
-        rutaFirma("fiscalizador"),
-        await dataUrlABlob(firmaFiscalizadorUrl as string),
-        "image/png",
-      );
-      await guardarFirmaRevision({
-        ticketId,
-        revisionNumero: rev,
-        quien: "conductor",
-        path: firmaConductorPath,
-      });
-      await guardarFirmaRevision({
-        ticketId,
-        revisionNumero: rev,
-        quien: "fiscalizador",
-        path: firmaFiscalizadorPath,
-      });
+      await guardadoFinalizar.ejecutar(() =>
+        overlayFinalizar.ejecutar(async () => {
+          // §2.8: las firmas ya se subieron al capturarse; acá se re-suben con
+          // el trazo actual y se re-guarda la ruta, para dejar todo
+          // consistente sí o sí antes de cerrar.
+          //
+          // subirArchivoAsegurando (no subirArchivo directo) acá es defensa en
+          // profundidad, no el camino esperado: para llegar hasta acá,
+          // validarChecklist() ya exigió ambas firmas y todos los ítems
+          // respondidos, así que algún guardado anterior (onEstadoItem/
+          // persistirFirma/...) ya debería haber asegurado el ticket/revisión.
+          // Pero esos campos son estado de CLIENTE (firmaConductorUrl/
+          // firmaFiscalizadorUrl se setean antes del guardado real, no
+          // después) — si todos los guardados anteriores fallaron en red
+          // (ej. el supervisor trabajó offline y recién ahora hay señal) es
+          // posible llegar hasta acá con el ticket todavía sin crear. Sin
+          // asegurar primero, esta subida chocaría contra la RLS de
+          // storage.objects (exige que `tickets` ya exista, ver el comentario
+          // grande en asegurarRevision) antes de llegar a ningún guardarX.
+          const firmaConductorPath = await subirArchivoAsegurando(
+            "firmas",
+            rutaFirma("conductor"),
+            await dataUrlABlob(firmaConductorUrl as string),
+            "image/png",
+          );
+          const firmaFiscalizadorPath = await subirArchivoAsegurando(
+            "firmas",
+            rutaFirma("fiscalizador"),
+            await dataUrlABlob(firmaFiscalizadorUrl as string),
+            "image/png",
+          );
+          const resFirmaConductor = await conRevisionAsegurada(() =>
+            guardarFirmaRevision({
+              ticketId,
+              revisionNumero: rev,
+              quien: "conductor",
+              path: firmaConductorPath,
+            }),
+          );
+          if (!resFirmaConductor.ok) throw new Error(resFirmaConductor.mensaje);
+          const resFirmaFiscalizador = await conRevisionAsegurada(() =>
+            guardarFirmaRevision({
+              ticketId,
+              revisionNumero: rev,
+              quien: "fiscalizador",
+              path: firmaFiscalizadorPath,
+            }),
+          );
+          if (!resFirmaFiscalizador.ok)
+            throw new Error(resFirmaFiscalizador.mensaje);
 
-      // §2.8: "Finalizar revisión" solo CIERRA sobre datos ya guardados.
-      if (modo === "nueva") {
-        const res = await finalizarInspeccion({ ticketId });
-        toast.success(
-          `Inspección guardada (Nro ${res.numeroInspeccion}). Generar y enviar el informe.`,
-        );
-        router.push(`/tickets/${res.ticketId}/report`);
-      } else {
-        const res = await finalizarReinspeccion({
-          ticketId,
-          revisionNumero: rev,
-        });
-        toast.success("Revisión guardada. Generar y enviar el informe.");
-        router.push(`/tickets/${res.ticketId}/report`);
-      }
-      router.refresh();
-    } catch (error) {
-      setEnviando(false);
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Error al cerrar la revisión. El checklist ya quedó guardado; se puede reintentar desde el ticket.",
+          // §2.8: "Finalizar revisión" solo CIERRA sobre datos ya guardados.
+          // finalizarInspeccion/finalizarReinspeccion ya llaman revalidatePath
+          // en el servidor sobre /dashboard y /tickets/[id] — un router.refresh()
+          // acá duplicaría la carga completa de /report (dos requests a la
+          // misma ruta, cada una con su propia revalidación de sesión) sin
+          // invalidar nada que no esté invalidado ya.
+          let ticketIdInforme: string;
+          if (modo === "nueva") {
+            const res = await finalizarInspeccion({ ticketId });
+            if (!res.ok) throw new Error(res.mensaje);
+            // Ya cerrada — dejar de intentar recuperarla en la próxima
+            // "Nueva inspección" (ver ticketIdRecuperadoONuevo()).
+            try {
+              window.localStorage.removeItem(CLAVE_TICKET_EN_PROGRESO);
+            } catch {
+              /* no crítico: en el peor caso, la próxima carga intenta
+                 recuperar un ticket ya cerrado y obtenerEstadoRevision
+                 devuelve ok:false — no rompe nada, solo no hidrata. */
+            }
+            toast.success(
+              `Inspección guardada (Nro ${res.numeroInspeccion}). Generar y enviar el informe.`,
+            );
+            ticketIdInforme = res.ticketId;
+          } else {
+            const res = await finalizarReinspeccion({
+              ticketId,
+              revisionNumero: rev,
+            });
+            if (!res.ok) throw new Error(res.mensaje);
+            toast.success("Revisión guardada. Generar y enviar el informe.");
+            ticketIdInforme = res.ticketId;
+          }
+          router.push(`/tickets/${ticketIdInforme}/report`);
+          // El overlay se queda visible hasta que el informe esté en
+          // pantalla, no hasta acá — ver useEsperaNavegacion: esta promesa
+          // no se resuelve sola, la abandona el desmontaje de este
+          // componente cuando la navegación real se confirma. Si nunca se
+          // confirma, el timeout de adentro se encarga de rendirse.
+          await esperarNavegacionInforme();
+        }, "Finalizando inspección…"),
       );
+    } catch (error) {
+      // NavegacionNoConfirmadaError: la inspección SÍ se cerró bien — solo
+      // falló mostrar el informe. Un toast.error con lenguaje de "falló"
+      // acá haría que el supervisor reintente "Finalizar revisión", y el
+      // guard del servidor lo rechazaría con "ya fue finalizada" — dos
+      // avisos seguidos por algo que en realidad salió bien.
+      if (error instanceof NavegacionNoConfirmadaError) {
+        toast.warning(error.message, { duration: 10000 });
+      } else {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Error al cerrar la revisión. El checklist ya quedó guardado; se puede reintentar desde el ticket.",
+        );
+      }
     }
   }
+
+  // Fase "tipos de inspección" — §2: el resto de los campos queda
+  // deshabilitado hasta elegir un tipo (solo aplica a modo "nueva").
+  const camposDeshabilitados =
+    paso === 2 || (modo === "nueva" && !tipoSeleccionado);
 
   return (
     <form ref={formRef} onSubmit={onSubmit} className="grid gap-6">
@@ -555,6 +1219,36 @@ export function InspeccionForm({
               {/* §2.6: el "Nro de Inspección" NO se muestra en este paso — el
                   ticket todavía no existe. Aparece recién en el paso 2 (título
                   "Inspección Nro X"), en el detalle, el informe y la tabla. */}
+              {/* Fase "tipos de inspección": primer campo de esta sección,
+                  obligatorio, sin valor preseleccionado. */}
+              <div className="grid gap-1.5 sm:col-span-2">
+                <Label htmlFor="tipo-inspeccion">Tipo de inspección</Label>
+                {/* w-fit + justify-self-start: en una grilla CSS los <select>
+                    se estiran a ocupar toda la columna por defecto
+                    (justify-items: stretch) — acá se lo dimensiona según su
+                    contenido (la opción más larga, "Exportación (Chimolsa)")
+                    en vez de a las dos columnas de la grilla. El padding
+                    derecho (pr-8) deja lugar cómodo para la flecha nativa
+                    del combo, que no debe quedar pegada al texto. */}
+                <select
+                  id="tipo-inspeccion"
+                  required
+                  disabled={paso === 2}
+                  value={tipoSeleccionado}
+                  onChange={(e) => onCambiarTipo(e.target.value)}
+                  className={cn(
+                    nativeSelectClassName,
+                    "w-fit min-w-0 justify-self-start pr-8",
+                  )}
+                >
+                  <option value="">Seleccionar…</option>
+                  {opcionesTipo.map((clave) => (
+                    <option key={clave} value={clave}>
+                      {ETIQUETA_TIPO_INSPECCION[clave]}
+                    </option>
+                  ))}
+                </select>
+              </div>
               {/* §1: la fecha/hora de inspección se registra sola, solo lectura. */}
               <div className="grid gap-1.5">
                 <Label htmlFor="fecha-inspeccion">
@@ -585,17 +1279,65 @@ export function InspeccionForm({
                     id={c.key}
                     type={c.type ?? "text"}
                     required
-                    disabled={paso === 2}
+                    disabled={camposDeshabilitados}
                     value={cabecera[c.key]}
                     onChange={(e) => setCampoCabecera(c.key, e.target.value)}
+                    // Solo visual — la normalización real (mayúsculas, sin
+                    // guiones/puntos, espacios colapsados) la hace el
+                    // servidor en iniciarInspeccion (src/lib/patentes.ts),
+                    // esto no cambia el valor que se envía.
+                    className={
+                      c.key === "patente_camion" || c.key === "patente_rampla"
+                        ? "uppercase"
+                        : undefined
+                    }
                   />
                   {c.key === "fechaVencimiento" && (
                     <span className="text-xs text-muted-foreground">
-                      Se precarga como la fecha de inspección + 10 días. Editable.
+                      {tipoSeleccionado === "control_salida"
+                        ? "Se precarga como la fecha de inspección + 1 día. Editable."
+                        : "Se precarga como la fecha de inspección + 10 días. Editable."}
                     </span>
                   )}
                 </div>
               ))}
+              {/* Fase "tipos de inspección" — §3: campos condicionales por tipo. */}
+              {tipoSeleccionado === "control_salida" && (
+                <>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="nombre-encarpador">Nombre Encarpador</Label>
+                    <Input
+                      id="nombre-encarpador"
+                      required
+                      disabled={camposDeshabilitados}
+                      value={nombreEncarpador}
+                      onChange={(e) => setNombreEncarpador(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="nombre-guardia">Nombre Guardia</Label>
+                    <Input
+                      id="nombre-guardia"
+                      required
+                      disabled={camposDeshabilitados}
+                      value={nombreGuardia}
+                      onChange={(e) => setNombreGuardia(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+              {tipoSeleccionado === "exportacion_chimolsa" && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="nro-contenedor">Nro de Contenedor</Label>
+                  <Input
+                    id="nro-contenedor"
+                    required
+                    disabled={camposDeshabilitados}
+                    value={nroContenedor}
+                    onChange={(e) => setNroContenedor(e.target.value)}
+                  />
+                </div>
+              )}
             </>
           ) : (
             <>
@@ -607,6 +1349,20 @@ export function InspeccionForm({
                     readOnly
                     disabled
                     value={String(numeroInspeccion)}
+                  />
+                </div>
+              )}
+              {tipoInspeccionInicial && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="tipo-inspeccion-re">Tipo de inspección</Label>
+                  <Input
+                    id="tipo-inspeccion-re"
+                    readOnly
+                    disabled
+                    value={
+                      ETIQUETA_TIPO_INSPECCION[tipoInspeccionInicial] ??
+                      tipoInspeccionInicial
+                    }
                   />
                 </div>
               )}
@@ -643,19 +1399,32 @@ export function InspeccionForm({
           <div className="sm:col-span-2">
             <Button
               type="button"
-              disabled={!puedeAvanzar || iniciando}
+              disabled={!puedeAvanzar || guardadoIniciar.pendiente}
               onClick={irAlChecklist}
             >
-              {iniciando ? "Preparando revisión…" : "Realizar revisión"}
+              <ContenidoBoton
+                pendiente={guardadoIniciar.pendiente}
+                texto="Realizar revisión"
+                textoPendiente="Preparando revisión…"
+              />
             </Button>
             {!puedeAvanzar && (
               <p className="mt-1.5 text-xs text-muted-foreground">
-                Completar todos los campos para avanzar.
+                {modo === "nueva" && !tipoSeleccionado
+                  ? "Elegir un tipo de inspección para continuar."
+                  : "Completar todos los campos para avanzar."}
               </p>
             )}
           </div>
         </CardContent>
       </Card>
+
+      {paso === 2 && !esSoloFotos && itemsDelTipo.length > 0 && (
+        <ChecklistProgreso
+          respondidos={itemsDelTipo.length - itemsPendientes.length}
+          total={itemsDelTipo.length}
+        />
+      )}
 
       {pasoMaxVisto === 2 && (
         <div className={cn("grid gap-6", paso === 1 && "hidden")}>
@@ -667,36 +1436,91 @@ export function InspeccionForm({
               </CardTitle>
               {/* §2.13: el Nro de Inspección se conoce apenas se crea el ticket
                   ("Realizar revisión") — se muestra acá de inmediato. */}
-              {numInsp != null && (
-                <CardDescription>Inspección Nro {numInsp}</CardDescription>
+              {(numInsp != null || tipoInspeccion) && (
+                <CardDescription>
+                  {numInsp != null ? `Inspección Nro ${numInsp}` : ""}
+                  {numInsp != null && tipoInspeccion ? " — " : ""}
+                  {tipoInspeccion ? ETIQUETA_TIPO_INSPECCION[tipoInspeccion] : ""}
+                </CardDescription>
+              )}
+              {itemsPendientes.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-2 w-fit"
+                  disabled={guardadoPendientes.pendiente}
+                  onClick={marcarPendientesConforme}
+                >
+                  <ContenidoBoton
+                    pendiente={guardadoPendientes.pendiente}
+                    texto="Marcar los pendientes como conforme"
+                    textoPendiente="Marcando…"
+                  />
+                </Button>
               )}
             </CardHeader>
             <CardContent>
               <div className="rounded-lg border">
                 <div className="px-3">
-                  {items.map((item, idx) => (
+                  {itemsDelTipo.map((item, idx) => (
                     <ChecklistItemRow
                       key={item.key}
                       indice={idx + 1}
                       item={item}
                       valor={respuestas[item.key]}
+                      estadoGuardado={guardadoItems.estadoDe(item.key)}
                       onEstado={(v) => onEstadoItem(item.key, v)}
                       onObservacion={(t) => onObservacionItem(item.key, t)}
                       onFoto={(f) => onFotoItem(item.key, f)}
                       onQuitarFoto={() => onQuitarFotoItem(item.key)}
+                      onFotoModo={(orden, f) => onFotoModoItem(item.key, orden, f)}
+                      onQuitarFotoModo={(orden) =>
+                        onQuitarFotoModoItem(item.key, orden)
+                      }
+                      estadoGuardadoFoto={(orden) =>
+                        guardadoItems.estadoDe(claveFotoModo(item.key, orden))
+                      }
                     />
                   ))}
                 </div>
               </div>
-              <p className="mt-3 text-sm text-muted-foreground">
-                {noConformes.length === 0
-                  ? "Sin elementos no conformes: la revisión finalizará sin observaciones."
-                  : `${noConformes.length} elemento(s) no conforme(s): la revisión finalizará con observaciones.`}
-              </p>
+
+              {!esSoloFotos && (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  {noConformes.length === 0
+                    ? "Sin elementos no conformes: la revisión finalizará sin observaciones."
+                    : `${noConformes.length} elemento(s) no conforme(s): la revisión finalizará con observaciones.`}
+                </p>
+              )}
               <p className="mt-1 text-xs text-muted-foreground">
                 Cada elemento se guarda apenas se marca — si algo falla al
                 finalizar, el checklist no se pierde.
               </p>
+
+              {/* Observación general — siempre visible, uno por inspección
+                  (no por ítem), opcional. Para lo que no encaja en ningún
+                  ítem del checklist: algo raro, un detalle del camión o del
+                  contenedor, una anotación para quien lea el informe
+                  después. NO es el resumen de las fallas — eso ya lo dan
+                  las observaciones por ítem (obligatorias en los
+                  no_conforme, arriba). Su efecto sobre el estado resultante
+                  es asimétrico entre tipos — ver guardarObservacionGeneral /
+                  cerrarRevision, no acá. */}
+              <div className="mt-4 grid gap-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label htmlFor="observacion-general">
+                    Observación general (opcional)
+                  </Label>
+                  <IndicadorGuardado estado={guardadoObsGeneral.estado} />
+                </div>
+                <Textarea
+                  id="observacion-general"
+                  rows={3}
+                  value={observacionGeneral}
+                  onChange={(e) => onObservacionGeneral(e.target.value)}
+                  placeholder="Algo fuera del checklist: un detalle del camión, de la carga, una anotación para quien lea el informe. No es el resumen de las fallas."
+                />
+              </div>
             </CardContent>
           </Card>
 
@@ -721,13 +1545,17 @@ export function InspeccionForm({
           </Card>
 
           <div className="flex gap-2">
-            <Button type="submit" disabled={enviando}>
-              {enviando ? "Guardando…" : "Finalizar revisión"}
+            <Button type="submit" disabled={guardadoFinalizar.pendiente}>
+              <ContenidoBoton
+                pendiente={guardadoFinalizar.pendiente}
+                texto="Finalizar revisión"
+                textoPendiente="Guardando…"
+              />
             </Button>
             <Button
               type="button"
               variant="ghost"
-              disabled={enviando}
+              disabled={guardadoFinalizar.pendiente}
               onClick={() => setPaso(1)}
             >
               Volver a los datos
@@ -735,6 +1563,10 @@ export function InspeccionForm({
           </div>
         </div>
       )}
+      <OverlayBloqueante
+        visible={overlayFinalizar.visible}
+        mensaje={overlayFinalizar.mensaje}
+      />
     </form>
   );
 }

@@ -7,30 +7,58 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { IndicadorGuardado } from "@/components/ui/estado-accion";
+import { nativeSelectClassName } from "@/components/ui/native-select";
 import { cn } from "@/lib/utils";
 import type { ChecklistItem, ItemEstado } from "@/lib/tipos";
+import type { EstadoGuardado } from "@/hooks/use-estado-guardado";
+
+export type FotoSlot = {
+  path: string | null;
+  nombre: string | null;
+  previewUrl: string | null;
+};
+
+const slotVacio = (): FotoSlot => ({
+  path: null,
+  nombre: null,
+  previewUrl: null,
+});
 
 export type RespuestaEditable = {
-  estado: ItemEstado;
+  // Solo relevante para ítems de modo 'estado' — un ítem de modo 'fotos'
+  // nunca tiene Conforme/No conforme/No aplica, este campo queda sin usar.
+  // `null` = todavía sin responder. Antes arrancaba en "conforme" — eso
+  // hacía que un ítem nunca tocado quedara igual, en los datos, a uno que
+  // el supervisor sí revisó y confirmó: el informe afirmaba algo que nadie
+  // miró. Ahora el supervisor elige, ítem por ítem (o de una con "Marcar
+  // los pendientes como conforme" — ver InspeccionForm).
+  estado: ItemEstado | null;
+  // Observación POR ÍTEM — solo modo 'estado'. Los ítems de modo 'fotos'
+  // comparten una única observación general para toda la revisión, aparte
+  // (ver InspeccionForm, sección "Observaciones" debajo del checklist).
   observacion: string;
   // §2.8: la foto se sube a Storage apenas se selecciona. Se guarda su ruta y
   // una vista previa local; `fotoFile` ya no se acumula para subir al final.
+  // Solo modo 'estado' (un ítem no conforme, una sola foto).
   fotoPath: string | null;
   fotoNombre: string | null;
   fotoPreviewUrl: string | null;
-  subiendoFoto: boolean;
-  // ¿la fila ya está persistida en ticket_checklist_respuestas?
-  guardado: boolean;
+  // Solo modo 'fotos': una fila por foto obligatoria del ítem (cantidad =
+  // checklist_items.fotos_requeridas — ya no es una constante fija de 2;
+  // varía por ítem). Índice 0 = orden 1 en ticket_checklist_fotos, índice 1
+  // = orden 2, etc.
+  fotos: FotoSlot[];
 };
 
-export const respuestaVacia = (): RespuestaEditable => ({
-  estado: "conforme",
+/** `cantidadFotos` = checklist_items.fotos_requeridas del ítem (0 si modo 'estado'). */
+export const respuestaVacia = (cantidadFotos = 0): RespuestaEditable => ({
+  estado: null,
   observacion: "",
   fotoPath: null,
   fotoNombre: null,
   fotoPreviewUrl: null,
-  subiendoFoto: false,
-  guardado: false,
+  fotos: Array.from({ length: cantidadFotos }, slotVacio),
 });
 
 const OPCIONES: { value: ItemEstado; label: string }[] = [
@@ -46,43 +74,121 @@ export function ChecklistItemRow({
   indice,
   item,
   valor,
+  estadoGuardado,
   onEstado,
   onObservacion,
   onFoto,
   onQuitarFoto,
+  onFotoModo,
+  onQuitarFotoModo,
+  estadoGuardadoFoto,
 }: {
   indice: number;
   item: ChecklistItem;
   valor: RespuestaEditable;
+  /** Nivel 1 (retroalimentación visual) — cubre el select de estado, la
+   *  observación y (modo 'estado') su única foto: un solo indicador por
+   *  fila, igual granularidad que antes. */
+  estadoGuardado: EstadoGuardado;
   onEstado: (estado: ItemEstado) => void;
   onObservacion: (texto: string) => void;
   onFoto: (file: File | null) => void;
   onQuitarFoto: () => void;
+  /** Solo se usa (y solo hace falta pasarlo) para ítems de modo 'fotos'. */
+  onFotoModo?: (orden: number, file: File | null) => void;
+  onQuitarFotoModo?: (orden: number) => void;
+  /** Solo modo 'fotos': un indicador independiente por cada foto obligatoria. */
+  estadoGuardadoFoto?: (orden: number) => EstadoGuardado;
 }) {
+  if (item.modo === "fotos") {
+    // checklist_items.fotos_requeridas manda la cantidad de espacios de
+    // carga — un ítem de una sola foto muestra un solo espacio, no dos con
+    // uno opcional.
+    return (
+      <div className="grid gap-3 border-b py-3 last:border-b-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-muted-foreground tabular-nums">
+            {indice.toString().padStart(2, "0")}
+          </span>
+          <span className="text-sm font-medium">{item.nombre}</span>
+          {/* Sin InfoPopover: los ítems de modo 'fotos' no tienen exigencia
+              (piden solo foto(s), no una evaluación contra un criterio). */}
+        </div>
+        <div
+          className={cn(
+            "grid gap-3",
+            valor.fotos.length > 1 && "sm:grid-cols-2",
+          )}
+        >
+          {valor.fotos.map((slot, idx) => (
+            <FotoSlotInput
+              key={idx}
+              label={
+                valor.fotos.length > 1
+                  ? `Foto ${idx + 1} (obligatoria)`
+                  : "Foto (obligatoria)"
+              }
+              slot={slot}
+              disabled={!onFotoModo}
+              estadoGuardado={estadoGuardadoFoto?.(idx + 1) ?? "idle"}
+              onFoto={(f) => onFotoModo?.(idx + 1, f)}
+              onQuitar={() => onQuitarFotoModo?.(idx + 1)}
+              alt={`${item.nombre} — foto ${idx + 1}`}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   const noConforme = valor.estado === "no_conforme";
+  const sinResponder = valor.estado == null;
 
   return (
     <div
+      id={`checklist-item-${item.key}`}
       className={cn(
         "grid gap-3 border-b py-3 last:border-b-0",
         noConforme && "rounded-lg bg-danger-50 px-3",
+        sinResponder && "rounded-lg bg-warning-50 px-3",
       )}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground tabular-nums">
-          {indice.toString().padStart(2, "0")}
-        </span>
-        <span className="text-sm font-medium">{item.nombre}</span>
-        <InfoPopover titulo={item.nombre} exigencia={item.exigencia} />
-        {valor.guardado && (
-          <span className="text-xs text-success-700">✓ Guardado</span>
-        )}
+      {/*
+        Antes de la escala táctil, todo iba en una sola fila (flex-wrap) —
+        con el ícono de info y el select a 44px, esa fila dejó de entrar en
+        360px de ancho para la mitad de los ítems (el nombre más largo, p.
+        ej. "Slider (Broches sujeta cortina)") y el select caía a una
+        segunda línea de forma inconsistente ítem por ítem: algunas filas de
+        44px, otras de 96px, sin ningún patrón visible para quien scrollea.
+        Dos filas fijas, siempre — parejo para los 18 ítems, no depende del
+        largo del nombre.
+      */}
+      <div className="grid gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-muted-foreground tabular-nums">
+            {indice.toString().padStart(2, "0")}
+          </span>
+          <span className="text-sm font-medium">{item.nombre}</span>
+          <InfoPopover titulo={item.nombre} exigencia={item.exigencia ?? ""} />
+          <IndicadorGuardado estado={estadoGuardado} />
+        </div>
         <select
           aria-label={`Estado de ${item.nombre}`}
-          value={valor.estado}
+          value={valor.estado ?? ""}
           onChange={(e) => onEstado(e.target.value as ItemEstado)}
-          className="ml-auto h-8 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className={cn(
+            nativeSelectClassName,
+            "w-full",
+            sinResponder && "border-warning-400 text-muted-foreground",
+          )}
         >
+          {/* Sin valor preseleccionado (§2.7, mismo criterio que "Tipo de
+              inspección") — el supervisor elige. Esta opción solo existe
+              para representar "sin responder"; no es un valor real, por eso
+              el select no puede quedarse en ella una vez elegido algo. */}
+          <option value="" disabled>
+            Sin responder
+          </option>
           {OPCIONES.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
@@ -109,32 +215,33 @@ export function ChecklistItemRow({
             </Label>
 
             {valor.fotoPreviewUrl ? (
-              <div className="flex items-start gap-3">
-                <Image
-                  src={valor.fotoPreviewUrl}
-                  alt={`Foto de la falla en ${item.nombre}`}
-                  width={160}
-                  height={120}
-                  unoptimized
-                  className="h-24 w-32 rounded-md border bg-white object-cover"
-                />
-                <div className="grid gap-1">
+              <div className="grid gap-2">
+                <div className="flex items-start gap-3">
+                  <Image
+                    src={valor.fotoPreviewUrl}
+                    alt={`Foto de la falla en ${item.nombre}`}
+                    width={160}
+                    height={120}
+                    unoptimized
+                    className="h-24 w-32 rounded-md border bg-white object-cover"
+                  />
                   {valor.fotoNombre && (
                     <span className="text-xs text-muted-foreground">
                       {valor.fotoNombre}
                     </span>
                   )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    className="w-fit"
-                    onClick={onQuitarFoto}
-                  >
-                    <Trash2Icon />
-                    Eliminar y volver a tomar
-                  </Button>
                 </div>
+                {/* Fila propia, separada de la miniatura — no debe quedar al
+                    lado de la foto que el dedo está por tocar (ver §9). */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-1 w-fit"
+                  onClick={onQuitarFoto}
+                >
+                  <Trash2Icon />
+                  Eliminar y volver a tomar
+                </Button>
               </div>
             ) : (
               <>
@@ -143,18 +250,99 @@ export function ChecklistItemRow({
                   type="file"
                   accept={FORMATOS_FOTO}
                   capture="environment"
-                  disabled={valor.subiendoFoto}
+                  disabled={estadoGuardado === "guardando"}
                   onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
                 />
-                <span className="text-xs text-muted-foreground">
-                  {valor.subiendoFoto
-                    ? "Subiendo foto…"
-                    : "Elegir una imagen o tomarla con la cámara. Se guarda al instante."}
-                </span>
+                {estadoGuardado === "guardando" ? (
+                  <IndicadorGuardado
+                    estado={estadoGuardado}
+                    textoGuardando="Subiendo foto…"
+                  />
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    Elegir una imagen o tomarla con la cámara. Se guarda al
+                    instante.
+                  </span>
+                )}
               </>
             )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Un slot de foto (de los dos) de un ítem de modo 'fotos'. */
+function FotoSlotInput({
+  label,
+  slot,
+  disabled,
+  estadoGuardado,
+  onFoto,
+  onQuitar,
+  alt,
+}: {
+  label: string;
+  slot: FotoSlot;
+  disabled: boolean;
+  estadoGuardado: EstadoGuardado;
+  onFoto: (file: File | null) => void;
+  onQuitar: () => void;
+  alt: string;
+}) {
+  const inputId = `foto-modo-${alt.replace(/\s+/g, "-")}`;
+  return (
+    <div className="grid gap-1.5">
+      <Label htmlFor={inputId}>{label}</Label>
+      {slot.previewUrl ? (
+        <div className="grid gap-2">
+          <div className="flex items-start gap-3">
+            <Image
+              src={slot.previewUrl}
+              alt={alt}
+              width={160}
+              height={120}
+              unoptimized
+              className="h-24 w-32 rounded-md border bg-white object-cover"
+            />
+            {slot.nombre && (
+              <span className="text-xs text-muted-foreground">{slot.nombre}</span>
+            )}
+          </div>
+          {/* Fila propia, separada de la miniatura — ver ChecklistItemRow. */}
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-1 w-fit"
+            onClick={onQuitar}
+          >
+            <Trash2Icon />
+            Eliminar y volver a tomar
+          </Button>
+        </div>
+      ) : (
+        <>
+          <Input
+            id={inputId}
+            type="file"
+            accept={FORMATOS_FOTO}
+            capture="environment"
+            disabled={disabled || estadoGuardado === "guardando"}
+            onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
+          />
+          {estadoGuardado === "guardando" ? (
+            <IndicadorGuardado
+              estado={estadoGuardado}
+              textoGuardando="Subiendo foto…"
+            />
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              Elegir una imagen o tomarla con la cámara. Se guarda al
+              instante.
+            </span>
+          )}
+        </>
       )}
     </div>
   );

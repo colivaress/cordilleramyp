@@ -14,6 +14,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ContenidoBoton } from "@/components/ui/estado-accion";
+import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
 
 export default function RegistroPage() {
   const router = useRouter();
@@ -25,47 +27,52 @@ export default function RegistroPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
-  const [cargando, setCargando] = useState(false);
+  const guardado = useEstadoGuardado();
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setOk(null);
-    setCargando(true);
-    const supabase = createClient();
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        // §2.10: el rol NO se elige acá — lo definió el administrador al invitar.
-        data: { nombre, apellido, telefono, fecha_nacimiento: fechaNacimiento },
-        emailRedirectTo:
-          typeof window !== "undefined"
-            ? `${window.location.origin}/auth/callback`
-            : undefined,
-      },
-    });
-    setCargando(false);
-    if (error) {
-      // §2.10: si el correo no tiene una invitación pendiente, el trigger
-      // handle_new_user rechaza el alta (Supabase lo devuelve como error
-      // genérico de base de datos).
-      const noAutorizada = /database error saving new user|not authorized|no está autorizada/i.test(
-        error.message,
-      );
-      setError(
-        noAutorizada
-          ? "Este correo no está autorizado. Pídele a un administrador de Cordillera M&P que cree tu cuenta."
-          : error.message,
-      );
-      return;
+    try {
+      await guardado.ejecutar(async () => {
+        const supabase = createClient();
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            // §2.10: el rol NO se elige acá — lo definió el administrador al invitar.
+            data: { nombre, apellido, telefono, fecha_nacimiento: fechaNacimiento },
+            emailRedirectTo:
+              typeof window !== "undefined"
+                ? `${window.location.origin}/auth/callback`
+                : undefined,
+          },
+        });
+        if (error) {
+          // §2.10: si el correo no tiene una invitación pendiente, el trigger
+          // handle_new_user rechaza el alta (Supabase lo devuelve como error
+          // genérico de base de datos).
+          const noAutorizada =
+            /database error saving new user|not authorized|no está autorizada/i.test(
+              error.message,
+            );
+          setError(
+            noAutorizada
+              ? "Este correo no está autorizado. Pídele a un administrador de Cordillera M&P que cree tu cuenta."
+              : error.message,
+          );
+          throw error;
+        }
+        if (data.session) {
+          router.replace("/dashboard");
+          router.refresh();
+          return;
+        }
+        setOk("Cuenta activada. Ya puedes iniciar sesión.");
+      });
+    } catch {
+      /* el error ya quedó mostrado en pantalla vía setError() arriba */
     }
-    if (data.session) {
-      router.replace("/dashboard");
-      router.refresh();
-      return;
-    }
-    setOk("Cuenta activada. Ya puedes iniciar sesión.");
   }
 
   return (
@@ -149,8 +156,12 @@ export default function RegistroPage() {
               </p>
             )}
             {ok && <p className="text-sm text-success-700">{ok}</p>}
-            <Button type="submit" disabled={cargando}>
-              {cargando ? "Creando…" : "Crear cuenta"}
+            <Button type="submit" disabled={guardado.pendiente}>
+              <ContenidoBoton
+                pendiente={guardado.pendiente}
+                texto="Crear cuenta"
+                textoPendiente="Creando…"
+              />
             </Button>
             <p className="text-center text-sm text-muted-foreground">
               ¿Ya tiene cuenta?{" "}

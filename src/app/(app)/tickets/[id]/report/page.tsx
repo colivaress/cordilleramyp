@@ -7,16 +7,23 @@ import { createClient } from "@/lib/supabase/server";
 import { firmarRutas } from "@/lib/storage";
 import { buttonVariants } from "@/components/ui/button";
 import { PrintButton } from "@/components/PrintButton";
+import { VerPdfButton } from "@/components/VerPdfButton";
 import { EmailRecipientsSelect } from "@/components/EmailRecipientsSelect";
-import { WhatsAppShareButton } from "@/components/WhatsAppShareButton";
 import { RevisionInformeSelector } from "@/components/RevisionInformeSelector";
 import { puedeReinspeccionar } from "@/lib/ticket-state-machine";
 import { ETIQUETA_ESTADO, ETIQUETA_ITEM } from "@/lib/tipos";
 
 export const dynamic = "force-dynamic";
 
-// §4: "Informe de Inspección" (sin "de Flota") — también en la pestaña.
+// §4: "Informe de Inspección" (sin "de Flota") — también en la pestaña. Queda
+// genérico a propósito: el título real (según tipo) se muestra en el cuerpo
+// de la página, no en la pestaña del navegador.
 export const metadata: Metadata = { title: "Informe de Inspección" };
+
+// Fase "tipos de inspección" §2 — SOLO Control de Salida, SOLO cuando la
+// revisión no tiene ningún ítem no conforme. Texto literal.
+const DECLARACION_CONTROL_SALIDA =
+  "Declaro que el aseguramiento de la carga esta realizado conforme al instructivo de encarpe y amarre, por tanto certifico que se puede realizar el traslado seguro de esta carga a destino.";
 
 const fmt = (v: string | null) =>
   v ? new Date(v).toLocaleString("es-CL", { dateStyle: "medium", timeStyle: "short" }) : "—";
@@ -44,12 +51,18 @@ export default async function InformePage({
   const esSupervisor = perfil.rol === "supervisor";
   const supabase = await createClient();
 
+  // Fase "tipos de inspección" §1: el título del informe sale de
+  // tipos_inspeccion.titulo, nunca compuesto en código.
   const { data: ticket } = await supabase
     .from("tickets")
-    .select("*, supervisor:personal!tickets_supervisor_id_fkey(nombre)")
+    .select(
+      "*, supervisor:personal!tickets_supervisor_id_fkey(nombre), tipo:tipos_inspeccion(titulo)",
+    )
     .eq("id", id)
     .maybeSingle();
   if (!ticket) notFound();
+  const tipoInspeccion = ticket.tipo_inspeccion ?? "encarpe";
+  const tituloInforme = ticket.tipo?.titulo ?? "Informe de Inspección";
 
   const { data: revisionesData } = await supabase
     .from("ticket_revisiones")
@@ -80,9 +93,13 @@ export default async function InformePage({
   const revsAMostrar = modoTodas ? revisiones : [revSel];
 
   // Firmar en lote las fotos y firmas de todas las revisiones que se muestran.
+  // Fase "tipos de inspección" §4: `item` trae modo/fotos_requeridas y
+  // `fotos` las filas de ticket_checklist_fotos (ítems modo 'fotos').
   const { data: respuestasData } = await supabase
     .from("ticket_checklist_respuestas")
-    .select("*, item:checklist_items(nombre, orden)")
+    .select(
+      "*, item:checklist_items(nombre, orden, modo, fotos_requeridas), fotos:ticket_checklist_fotos(url, orden)",
+    )
     .eq("ticket_id", id)
     .in(
       "revision_numero",
@@ -90,20 +107,15 @@ export default async function InformePage({
     );
   const respuestas = respuestasData ?? [];
 
-  const urlFotos = await firmarRutas(
-    supabase,
-    "fallas",
-    respuestas.map((r) => r.foto_url),
-  );
+  const urlFotos = await firmarRutas(supabase, "fallas", [
+    ...respuestas.map((r) => r.foto_url),
+    ...respuestas.flatMap((r) => (r.fotos ?? []).map((f) => f.url)),
+  ]);
   const urlFirmas = await firmarRutas(
     supabase,
     "firmas",
     revsAMostrar.flatMap((r) => [r.firma_conductor_url, r.firma_fiscalizador_url]),
   );
-
-  const nombreArchivo = modoTodas
-    ? `informe-inspeccion-${ticket.numero_inspeccion}-todas-las-revisiones.pdf`
-    : `informe-inspeccion-${ticket.numero_inspeccion}-rev-${revSel.numero_revision}.pdf`;
 
   const supervisorNombre = ticket.supervisor?.nombre ?? "—";
 
@@ -117,14 +129,14 @@ export default async function InformePage({
           {esSupervisor && puedeReinspeccionar(ticket.estado) && (
             <Link
               href={`/tickets/${id}/reinspeccion`}
-              className={buttonVariants({ size: "sm" })}
+              className={buttonVariants({})}
             >
               Registrar re-inspección
             </Link>
           )}
           <Link
             href={`/tickets/${id}`}
-            className={buttonVariants({ variant: "outline", size: "sm" })}
+            className={buttonVariants({ variant: "outline" })}
           >
             Ver historial completo
           </Link>
@@ -152,9 +164,9 @@ export default async function InformePage({
         <header className="mb-6 flex items-center justify-between gap-4 border-b pb-4">
           {/* §8: título + datos a la izquierda; logo a la derecha (no clicable). */}
           <div className="min-w-0">
-            {/* §4: título en texto plano, sin "Cordillera M&P —" (la marca ya
-                está en el logo del encabezado). */}
-            <p className="text-lg font-semibold">Informe de Inspección</p>
+            {/* Fase "tipos de inspección" §1: título según el tipo del ticket,
+                sin "Cordillera M&P —" (la marca ya está en el logo). */}
+            <p className="text-lg font-semibold">{tituloInforme}</p>
             <p className="text-muted-foreground">
             Nro de Inspección{" "}
             <span className="font-mono font-medium text-foreground">
@@ -207,12 +219,23 @@ export default async function InformePage({
               v={fmt(revSel.fecha_vencimiento ?? ticket.fecha_vencimiento)}
             />
           )}
+          {/* Fase "tipos de inspección" §3: campos condicionales por tipo. */}
+          {tipoInspeccion === "control_salida" && (
+            <>
+              <Dato k="Nombre Encarpador" v={ticket.nombre_encarpador ?? "—"} />
+              <Dato k="Nombre Guardia" v={ticket.nombre_guardia ?? "—"} />
+            </>
+          )}
+          {tipoInspeccion === "exportacion_chimolsa" && (
+            <Dato k="Nro de Contenedor" v={ticket.nro_contenedor ?? "—"} />
+          )}
         </section>
 
         {revsAMostrar.map((r) => (
           <BloqueRevision
             key={r.id}
             revision={r}
+            tipoInspeccion={tipoInspeccion}
             conductorFallback={ticket.conductor}
             vencimientoFallback={ticket.fecha_vencimiento}
             supervisorNombre={supervisorNombre}
@@ -230,55 +253,50 @@ export default async function InformePage({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm font-medium">Enviar el informe</p>
           <div className="flex flex-wrap items-center gap-3">
-            {/* §4 / §4.2: el PDF corresponde a lo seleccionado en pantalla. */}
-            <WhatsAppShareButton
-              ticketId={ticket.id}
-              rev={valorSelector}
-              transporte={ticket.transporte}
-              patenteCamion={ticket.patente_camion}
-              nombreArchivo={nombreArchivo}
-            />
             {/* §4.3: volver al listado — admin y supervisor van a /dashboard,
                 que se renderiza según el rol. */}
             <Link
               href="/dashboard"
-              className={buttonVariants({ variant: "outline", size: "sm" })}
+              className={buttonVariants({ variant: "outline" })}
             >
               Volver a las inspecciones
             </Link>
-            <a
-              href={`/api/informe/${ticket.id}/enviar?rev=${valorSelector}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-primary underline"
-            >
-              Ver / descargar PDF
-            </a>
+            <VerPdfButton ticketId={ticket.id} rev={valorSelector} />
           </div>
         </div>
-        <EmailRecipientsSelect ticketId={ticket.id} rev={valorSelector} />
+        <EmailRecipientsSelect
+          ticketId={ticket.id}
+          tipoInspeccion={tipoInspeccion}
+          rev={valorSelector}
+        />
         <p className="mt-2 text-xs text-muted-foreground">
           {modoTodas
             ? "El PDF adjunto trae el historial completo de revisiones, una tras otra."
             : `El PDF adjunto corresponde a la revisión ${revSel.numero_revision}.`}{" "}
           Por correo: se genera en el servidor y va adjunto en un solo envío
           (cuerpo HTML con el resumen de observaciones; las fotos van en el PDF).
-          Por WhatsApp: abre el panel de “Compartir” del dispositivo con el PDF
-          adjunto — funciona desde el celular.
         </p>
       </div>
     </div>
   );
 }
 
+type ItemInfo = {
+  nombre: string;
+  orden: number;
+  modo: "estado" | "fotos";
+  fotos_requeridas: number | null;
+} | null;
+
 type RespuestaConItem = {
   id: string;
   revision_numero: number;
   item_key: string;
-  estado: "conforme" | "no_conforme" | "no_aplica";
+  estado: "conforme" | "no_conforme" | "no_aplica" | null;
   observacion: string | null;
   foto_url: string | null;
-  item: { nombre: string; orden: number } | null;
+  item: ItemInfo;
+  fotos: { url: string; orden: number }[] | null;
 };
 
 type RevisionRow = {
@@ -290,10 +308,12 @@ type RevisionRow = {
   fecha_vencimiento: string | null;
   firma_conductor_url: string | null;
   firma_fiscalizador_url: string | null;
+  observacion_general: string | null;
 };
 
 function BloqueRevision({
   revision,
+  tipoInspeccion,
   conductorFallback,
   vencimientoFallback,
   supervisorNombre,
@@ -303,6 +323,7 @@ function BloqueRevision({
   conSubtitulo,
 }: {
   revision: RevisionRow;
+  tipoInspeccion: string;
   conductorFallback: string;
   vencimientoFallback: string | null;
   supervisorNombre: string;
@@ -313,6 +334,17 @@ function BloqueRevision({
 }) {
   const conductor = revision.conductor ?? conductorFallback;
   const vencimiento = revision.fecha_vencimiento ?? vencimientoFallback;
+
+  // Derivado de los ítems (no de la clave del tipo): un checklist es "todo
+  // fotos" cuando ninguno de sus ítems tiene Conforme/No conforme/No aplica.
+  const esSoloFotos =
+    respuestas.length > 0 && respuestas.every((r) => r.item?.modo === "fotos");
+  const itemsEstado = respuestas.filter((r) => r.item?.modo !== "fotos");
+
+  const mostrarDeclaracion =
+    tipoInspeccion === "control_salida" &&
+    !esSoloFotos &&
+    !itemsEstado.some((r) => r.estado === "no_conforme");
 
   return (
     <section className="mb-8 last:mb-0">
@@ -330,44 +362,103 @@ function BloqueRevision({
       )}
 
       <h3 className="mb-2 font-semibold">Elementos a Fiscalizar</h3>
-      <table className="w-full border-collapse text-left">
-        <thead>
-          <tr className="border-b text-xs text-muted-foreground">
-            <th className="py-1 pr-2">#</th>
-            <th className="py-1 pr-2">Elemento</th>
-            <th className="py-1 pr-2">Resultado</th>
-            <th className="py-1">Observación</th>
-          </tr>
-        </thead>
-        <tbody>
-          {respuestas.map((r, i) => (
-            <tr key={r.id} className="border-b align-top">
-              <td className="py-1.5 pr-2 tabular-nums">{i + 1}</td>
-              <td className="py-1.5 pr-2">{r.item?.nombre}</td>
-              <td className="py-1.5 pr-2">{ETIQUETA_ITEM[r.estado]}</td>
-              <td className="py-1.5">
-                {r.estado === "no_conforme" ? (
-                  <div className="grid gap-1">
-                    <span>{r.observacion}</span>
-                    {r.foto_url && urlFotos[r.foto_url] && (
+
+      {esSoloFotos ? (
+        <div className="grid gap-4">
+          {respuestas.map((r, i) => {
+            const fotosOrdenadas = (r.fotos ?? []).sort(
+              (a, b) => a.orden - b.orden,
+            );
+            return (
+              <div key={r.id}>
+                <p className="mb-1.5 text-sm font-medium">
+                  {i + 1}. {r.item?.nombre}
+                </p>
+                {fotosOrdenadas.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {fotosOrdenadas.map((f, j) => (
                       <Image
-                        src={urlFotos[r.foto_url]}
-                        alt={`Falla ${r.item?.nombre}`}
-                        width={200}
-                        height={150}
+                        key={j}
+                        src={urlFotos[f.url] ?? ""}
+                        alt={`${r.item?.nombre} — foto ${j + 1}`}
+                        width={220}
+                        height={165}
                         unoptimized
-                        className="mt-1 h-32 w-44 rounded border object-cover"
+                        className="h-32 w-44 rounded border object-cover"
                       />
-                    )}
+                    ))}
                   </div>
                 ) : (
-                  "—"
+                  <p className="text-xs text-muted-foreground">Sin fotos</p>
                 )}
-              </td>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <table className="w-full border-collapse text-left">
+          <thead>
+            <tr className="border-b text-xs text-muted-foreground">
+              <th className="py-1 pr-2">#</th>
+              <th className="py-1 pr-2">Elemento</th>
+              <th className="py-1 pr-2">Resultado</th>
+              <th className="py-1">Observación</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {itemsEstado.map((r, i) => (
+              <tr key={r.id} className="border-b align-top">
+                <td className="py-1.5 pr-2 tabular-nums">{i + 1}</td>
+                <td className="py-1.5 pr-2">{r.item?.nombre}</td>
+                <td className="py-1.5 pr-2">
+                  {/* cerrarRevision ya no permite cerrar una revisión con
+                      ítems sin responder (§2.7/§9 de la fase) — r.estado
+                      null acá sería un dato viejo o un caso no debería
+                      pasar. Si aparece, mejor decir la verdad que asumir
+                      "Conforme" sin que nadie lo haya confirmado. */}
+                  {r.estado ? ETIQUETA_ITEM[r.estado] : "Sin responder"}
+                </td>
+                <td className="py-1.5">
+                  {r.estado === "no_conforme" ? (
+                    <div className="grid gap-1">
+                      <span>{r.observacion}</span>
+                      {r.foto_url && urlFotos[r.foto_url] && (
+                        <Image
+                          src={urlFotos[r.foto_url]}
+                          alt={`Falla ${r.item?.nombre}`}
+                          width={200}
+                          height={150}
+                          unoptimized
+                          className="mt-1 h-32 w-44 rounded border object-cover"
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {mostrarDeclaracion && (
+        <div className="mt-3 rounded-lg border border-brand-200 bg-brand-50 p-3 text-sm italic">
+          {DECLARACION_CONTROL_SALIDA}
+        </div>
+      )}
+
+      {/* Observación general — común a los 4 tipos, encabezado propio,
+          separada de las observaciones por ítem. Se omite si está vacía. */}
+      {revision.observacion_general?.trim() && (
+        <div className="mt-4">
+          <h4 className="mb-1 font-semibold">Observación general</h4>
+          <p className="rounded border bg-muted/30 p-2 text-sm">
+            {revision.observacion_general.trim()}
+          </p>
+        </div>
+      )}
 
       <div className="mt-4 grid gap-4 border-t pt-4 sm:grid-cols-2">
         <Firma
@@ -425,6 +516,7 @@ function Firma({
           width={280}
           height={110}
           unoptimized
+          loading="eager"
           className="h-24 w-full rounded border bg-white object-contain"
         />
       ) : (

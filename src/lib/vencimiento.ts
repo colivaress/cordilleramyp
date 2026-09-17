@@ -68,16 +68,6 @@ export function nivelAlerta(
   return "ninguno";
 }
 
-/** ¿Corresponde ofrecer el botón "Notificar Vencimiento por WhatsApp"? — §3 */
-export function puedeNotificarVencimiento(
-  fechaVencimiento: string | Date | null | undefined,
-  estadoTicket: TicketEstado,
-  ahora: Date = new Date(),
-): boolean {
-  const est = estadoVencimiento(fechaVencimiento, estadoTicket, ahora);
-  return est === "por_vencer" || est === "vencido";
-}
-
 /** Texto legible del tiempo restante para UI y mensajes. */
 export function formatearTiempoRestante(
   horas: number | null | undefined,

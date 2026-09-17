@@ -11,11 +11,15 @@ export default async function AppLayout({
 }) {
   const { perfil } = await getSesion();
   const esAdmin = perfil.rol === "administrador";
+  const esAdminContrato = perfil.rol === "administrador_contrato";
   const esSupervisor = perfil.rol === "supervisor";
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <header className="no-print sticky top-0 z-20 border-b bg-card/95 backdrop-blur">
+      <header
+        id="app-header"
+        className="no-print sticky top-0 z-20 border-b bg-card/95 backdrop-blur"
+      >
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2">
           {/* §8: el logo (sin texto al lado) lleva al inicio del rol (admin y
               supervisor: /dashboard, que se renderiza distinto según el rol). */}
@@ -26,28 +30,40 @@ export default async function AppLayout({
           >
             <Logo />
           </Link>
-          <nav className="flex items-center gap-1 text-sm">
-            {/* §2.11: "Dashboard" = analítica; "Inspecciones" = el listado.
-                §2.6: el supervisor no ve ninguno de los dos. */}
+          <nav className="flex items-center gap-2 text-sm">
+            {/* §2.11: "Dashboard" = analítica, exclusivo administrador —
+                administrador_contrato NO entra ahí (explícito en su
+                alcance), aunque sí ve "Inspecciones" (la tabla completa,
+                de solo lectura) y administra Usuarios/Configuración
+                correos igual que un administrador. El supervisor no ve
+                ninguno de los cuatro. */}
             {esAdmin && (
+              <Link
+                href="/dashboard/analitica"
+                className={buttonVariants({ variant: "ghost" })}
+              >
+                Dashboard
+              </Link>
+            )}
+            {(esAdmin || esAdminContrato) && (
               <>
                 <Link
-                  href="/dashboard/analitica"
-                  className={buttonVariants({ variant: "ghost", size: "sm" })}
-                >
-                  Dashboard
-                </Link>
-                <Link
                   href="/dashboard"
-                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                  className={buttonVariants({ variant: "ghost" })}
                 >
                   Inspecciones
                 </Link>
                 <Link
                   href="/usuarios"
-                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                  className={buttonVariants({ variant: "ghost" })}
                 >
                   Usuarios
+                </Link>
+                <Link
+                  href="/configuracion/correos"
+                  className={buttonVariants({ variant: "ghost" })}
+                >
+                  Configuración correos
                 </Link>
               </>
             )}
@@ -55,7 +71,7 @@ export default async function AppLayout({
             {esSupervisor && (
               <Link
                 href="/tickets/new"
-                className={buttonVariants({ variant: "ghost", size: "sm" })}
+                className={buttonVariants({ variant: "ghost" })}
               >
                 Nueva inspección
               </Link>
@@ -67,11 +83,15 @@ export default async function AppLayout({
             <span className="max-w-[8rem] truncate text-muted-foreground sm:max-w-[14rem]">
               {perfil.nombre}
             </span>
-            <Badge variant={esAdmin ? "default" : "secondary"}>
-              {esAdmin ? "Administrador" : "Supervisor"}
+            <Badge variant={esAdmin || esAdminContrato ? "default" : "secondary"}>
+              {esAdmin
+                ? "Administrador"
+                : esAdminContrato
+                  ? "Administrador de contrato"
+                  : "Supervisor"}
             </Badge>
             <form action="/auth/signout" method="post">
-              <Button type="submit" variant="outline" size="sm">
+              <Button type="submit" variant="outline">
                 Salir
               </Button>
             </form>

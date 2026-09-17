@@ -17,13 +17,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { TicketStatusBadge } from "@/components/TicketStatusBadge";
-import { CountdownBadge } from "@/components/CountdownBadge";
+import { BuscadorPatente } from "@/components/BuscadorPatente";
 import { DashboardFilters } from "@/components/DashboardFilters";
+import { FilaTicket } from "@/components/FilaTicket";
 import { Paginacion } from "@/components/Paginacion";
 import { ResumenCards } from "@/components/ResumenCards";
-import { cn } from "@/lib/utils";
-import { clasesFilaAlerta, nivelAlerta } from "@/lib/vencimiento";
 import {
   ESTADOS_FILTRO,
   calcularResumen,
@@ -51,6 +49,13 @@ export default async function DashboardPage({
   const { perfil } = await getSesion();
   const esAdmin = perfil.rol === "administrador";
   const esSupervisor = perfil.rol === "supervisor";
+  // administrador_contrato ve esta pantalla exactamente "como un
+  // administrador" (explícito en su alcance) — todas las inspecciones,
+  // todos los filtros, sin "Nueva inspección" ni el buscador de patentes
+  // (eso último ya queda excluido solo por depender de esSupervisor, no
+  // hace falta tocarlo). Una sola variable derivada para no repetir el OR
+  // en cada punto de esta página.
+  const puedeVerTodo = esAdmin || perfil.rol === "administrador_contrato";
   const supabase = await createClient();
 
   // §2.6: la RLS de `select` ya limita qué tickets ve cada rol (el admin todos;
@@ -81,14 +86,14 @@ export default async function DashboardPage({
   const resumen = calcularResumen(lista);
 
   // ---- Filtros de la tabla (§2.6): mes + supervisor solo admin; estado ambos ----
-  const mesesDisponibles = esAdmin
+  const mesesDisponibles = puedeVerTodo
     ? [...new Set(lista.map((t) => mesKey(t.created_at)))]
         .sort()
         .reverse()
         .map((k) => ({ valor: k, etiqueta: mesEtiqueta(k) }))
     : [];
   const mesSel =
-    esAdmin && mes && mesesDisponibles.some((o) => o.valor === mes) ? mes : "";
+    puedeVerTodo && mes && mesesDisponibles.some((o) => o.valor === mes) ? mes : "";
 
   const estadosValidos = new Set(ESTADOS_FILTRO.map((e) => e.valor));
   const estadoSel =
@@ -96,7 +101,7 @@ export default async function DashboardPage({
       ? (estado as TicketEstado)
       : "";
 
-  const supervisoresDisponibles = esAdmin
+  const supervisoresDisponibles = puedeVerTodo
     ? [
         ...new Map(
           lista
@@ -115,7 +120,7 @@ export default async function DashboardPage({
       ].sort((a, b) => a.etiqueta.localeCompare(b.etiqueta, "es"))
     : [];
   const supervisorSel =
-    esAdmin && supervisor && supervisoresDisponibles.some((o) => o.valor === supervisor)
+    puedeVerTodo && supervisor && supervisoresDisponibles.some((o) => o.valor === supervisor)
       ? supervisor
       : "";
 
@@ -148,7 +153,7 @@ export default async function DashboardPage({
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Inspecciones</h1>
           <p className="text-sm text-muted-foreground">
-            {esAdmin
+            {puedeVerTodo
               ? "Todas las inspecciones y alertas de vencimiento."
               : "Tus inspecciones y alertas de vencimiento."}
           </p>
@@ -160,107 +165,88 @@ export default async function DashboardPage({
         )}
       </div>
 
-      {esAdmin && <ResumenCards resumen={resumen} />}
+      {puedeVerTodo && <ResumenCards resumen={resumen} />}
 
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <CardTitle>Inspecciones</CardTitle>
-              <CardDescription>
-                Las filas se resaltan según el tiempo hasta la fecha límite de
-                corrección (ámbar ≤48h, naranja ≤24h, rojo vencido).
-              </CardDescription>
+      {/* §5: BuscadorPatente es un passthrough transparente cuando `activo`
+          es false (admin) o mientras no hay una búsqueda activa — la tarjeta
+          de abajo es la MISMA tabla de siempre, sin cambios de comportamiento
+          fuera de las dos columnas nuevas. Al buscar (solo supervisor), este
+          componente la reemplaza por una tabla con las mismas filas
+          (FilaTicket) filtradas a lo encontrado. */}
+      <BuscadorPatente activo={esSupervisor}>
+        <Card>
+          <CardHeader>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <CardTitle>Inspecciones</CardTitle>
+                <CardDescription>
+                  Las filas se resaltan según el tiempo hasta la fecha límite
+                  de corrección (ámbar ≤48h, naranja ≤24h, rojo vencido).
+                </CardDescription>
+              </div>
+              <DashboardFilters
+                meses={puedeVerTodo ? mesesDisponibles : null}
+                supervisores={puedeVerTodo ? supervisoresDisponibles : null}
+                estados={ESTADOS_FILTRO}
+              />
             </div>
-            <DashboardFilters
-              meses={esAdmin ? mesesDisponibles : null}
-              supervisores={esAdmin ? supervisoresDisponibles : null}
-              estados={ESTADOS_FILTRO}
-            />
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  {/* §2.6: primera columna "Ver" sin título visible. La columna
-                      del botón de WhatsApp se eliminó por completo (§2.6/§3). */}
-                  <TableHead>
-                    <span className="sr-only">Ver</span>
-                  </TableHead>
-                  {/* §2.6/§2.7: encabezado corto "Nro" (el resto de la app usa
-                      "Nro de Inspección"). El nro de revisión va pegado acá
-                      mismo como "#N", ya no en una columna aparte. */}
-                  <TableHead>Nro</TableHead>
-                  <TableHead>Camión / Rampla</TableHead>
-                  <TableHead>Transporte</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Vencimiento</TableHead>
-                  <TableHead>Supervisor</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {listaPagina.length === 0 && (
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={7} className="text-muted-foreground">
-                      {hayFiltro
-                        ? "No hay inspecciones para los filtros seleccionados."
-                        : "No hay inspecciones todavía."}
-                    </TableCell>
+                    {/* §2.6: primera columna "Ver" sin título visible. La columna
+                        del botón de WhatsApp se eliminó por completo (§2.6/§3). */}
+                    <TableHead>
+                      <span className="sr-only">Ver</span>
+                    </TableHead>
+                    {/* §2.6/§2.7: encabezado corto "Nro" (el resto de la app usa
+                        "Nro de Inspección"). El nro de revisión va pegado acá
+                        mismo como "#N", ya no en una columna aparte. */}
+                    <TableHead>Nro</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Camión / Rampla</TableHead>
+                    <TableHead>Transporte</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead>Vencimiento</TableHead>
+                    <TableHead>Supervisor</TableHead>
                   </TableRow>
-                )}
-                {listaPagina.map((t) => {
-                  const nivel = nivelAlerta(t.fecha_vencimiento, t.estado);
-                  return (
-                    <TableRow key={t.id} className={cn(clasesFilaAlerta(nivel))}>
-                      <TableCell>
-                        {/* §2.6: "Ver" lleva directo al informe. El detalle con
-                            todas las revisiones sigue en /tickets/[id]. */}
-                        <Link
-                          href={`/tickets/${t.id}/report`}
-                          className={cn(
-                            buttonVariants({ variant: "outline", size: "xs" }),
-                            "border-brand-600/40 text-brand-700 hover:bg-brand-50 hover:text-brand-800",
-                          )}
-                        >
-                          Ver
-                        </Link>
+                </TableHeader>
+                <TableBody>
+                  {listaPagina.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={9} className="text-muted-foreground">
+                        {hayFiltro
+                          ? "No hay inspecciones para los filtros seleccionados."
+                          : "No hay inspecciones todavía."}
                       </TableCell>
-                      <TableCell className="font-mono tabular-nums whitespace-nowrap">
-                        {t.numero_inspeccion}
-                        <span className="ml-1 text-xs text-muted-foreground">
-                          #{numeroRevision(t)}
-                        </span>
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {t.patente_camion}
-                        <span className="text-muted-foreground">
-                          {" "}
-                          / {t.patente_rampla}
-                        </span>
-                      </TableCell>
-                      <TableCell>{t.transporte}</TableCell>
-                      <TableCell>
-                        <TicketStatusBadge estado={t.estado} />
-                      </TableCell>
-                      <TableCell>
-                        <CountdownBadge
-                          fechaVencimiento={t.fecha_vencimiento}
-                          estadoTicket={t.estado}
-                          formatoTabla
-                        />
-                      </TableCell>
-                      <TableCell>{t.supervisor?.nombre ?? "—"}</TableCell>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-          <Paginacion page={pageActual} totalPaginas={totalPaginas} />
-        </CardContent>
-      </Card>
+                  )}
+                  {listaPagina.map((t) => (
+                    <FilaTicket
+                      key={t.id}
+                      ticketId={t.id}
+                      numeroInspeccion={t.numero_inspeccion}
+                      numeroRevision={numeroRevision(t)}
+                      tipoInspeccion={t.tipo_inspeccion}
+                      patenteCamion={t.patente_camion}
+                      patenteRampla={t.patente_rampla}
+                      transporte={t.transporte}
+                      estado={t.estado}
+                      fecha={t.fecha}
+                      fechaVencimiento={t.fecha_vencimiento}
+                      supervisorNombre={t.supervisor?.nombre ?? "—"}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <Paginacion page={pageActual} totalPaginas={totalPaginas} />
+          </CardContent>
+        </Card>
+      </BuscadorPatente>
     </div>
   );
 }

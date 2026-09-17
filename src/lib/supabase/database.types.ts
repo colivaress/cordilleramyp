@@ -1,5 +1,6 @@
-// Generado con: supabase gen types typescript (vía MCP).
-// Regenerar tras cambios de esquema.
+// Generado con: supabase gen types typescript --local (CLI, no MCP — el MCP
+// lee del proyecto remoto, y a esta fecha la migración de administrador_contrato
+// aún no está aplicada ahí). Regenerar tras cambios de esquema.
 export type Json =
   | string
   | number
@@ -9,33 +10,70 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.5"
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
   public: {
     Tables: {
       checklist_items: {
         Row: {
-          exigencia: string
+          exigencia: string | null
+          fotos_requeridas: number | null
           key: string
+          modo: Database["public"]["Enums"]["item_modo"]
           nombre: string
           orden: number
+          tipo: string
         }
         Insert: {
-          exigencia: string
+          exigencia?: string | null
+          fotos_requeridas?: number | null
           key: string
+          modo?: Database["public"]["Enums"]["item_modo"]
           nombre: string
           orden: number
+          tipo: string
         }
         Update: {
-          exigencia?: string
+          exigencia?: string | null
+          fotos_requeridas?: number | null
           key?: string
+          modo?: Database["public"]["Enums"]["item_modo"]
           nombre?: string
           orden?: number
+          tipo?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "checklist_items_tipo_fkey"
+            columns: ["tipo"]
+            isOneToOne: false
+            referencedRelation: "tipos_inspeccion"
+            referencedColumns: ["clave"]
+          },
+        ]
       }
       destinatarios_correo: {
         Row: {
@@ -44,8 +82,6 @@ export type Database = {
           email: string
           id: string
           nombre: string
-          recibe_informes: boolean
-          recibe_vencimientos: boolean
         }
         Insert: {
           activo?: boolean
@@ -53,8 +89,6 @@ export type Database = {
           email: string
           id?: string
           nombre: string
-          recibe_informes?: boolean
-          recibe_vencimientos?: boolean
         }
         Update: {
           activo?: boolean
@@ -62,10 +96,44 @@ export type Database = {
           email?: string
           id?: string
           nombre?: string
-          recibe_informes?: boolean
-          recibe_vencimientos?: boolean
         }
         Relationships: []
+      }
+      destinatarios_correo_tipos: {
+        Row: {
+          destinatario_id: string
+          recibe_informes: boolean
+          recibe_vencimientos: boolean
+          tipo_inspeccion: string
+        }
+        Insert: {
+          destinatario_id: string
+          recibe_informes?: boolean
+          recibe_vencimientos?: boolean
+          tipo_inspeccion: string
+        }
+        Update: {
+          destinatario_id?: string
+          recibe_informes?: boolean
+          recibe_vencimientos?: boolean
+          tipo_inspeccion?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "destinatarios_correo_tipos_destinatario_id_fkey"
+            columns: ["destinatario_id"]
+            isOneToOne: false
+            referencedRelation: "destinatarios_correo"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "destinatarios_correo_tipos_tipo_inspeccion_fkey"
+            columns: ["tipo_inspeccion"]
+            isOneToOne: false
+            referencedRelation: "tipos_inspeccion"
+            referencedColumns: ["clave"]
+          },
+        ]
       }
       notificaciones: {
         Row: {
@@ -141,10 +209,72 @@ export type Database = {
         }
         Relationships: []
       }
+      personal_tipos_inspeccion: {
+        Row: {
+          personal_id: string
+          tipo_inspeccion: string
+        }
+        Insert: {
+          personal_id: string
+          tipo_inspeccion: string
+        }
+        Update: {
+          personal_id?: string
+          tipo_inspeccion?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "personal_tipos_inspeccion_personal_id_fkey"
+            columns: ["personal_id"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "personal_tipos_inspeccion_tipo_inspeccion_fkey"
+            columns: ["tipo_inspeccion"]
+            isOneToOne: false
+            referencedRelation: "tipos_inspeccion"
+            referencedColumns: ["clave"]
+          },
+        ]
+      }
+      ticket_checklist_fotos: {
+        Row: {
+          created_at: string
+          id: string
+          orden: number
+          respuesta_id: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          orden?: number
+          respuesta_id: string
+          url: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          orden?: number
+          respuesta_id?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ticket_checklist_fotos_respuesta_id_fkey"
+            columns: ["respuesta_id"]
+            isOneToOne: false
+            referencedRelation: "ticket_checklist_respuestas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ticket_checklist_respuestas: {
         Row: {
           created_at: string
-          estado: Database["public"]["Enums"]["item_estado"]
+          estado: Database["public"]["Enums"]["item_estado"] | null
           foto_url: string | null
           id: string
           item_key: string
@@ -154,7 +284,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
-          estado: Database["public"]["Enums"]["item_estado"]
+          estado?: Database["public"]["Enums"]["item_estado"] | null
           foto_url?: string | null
           id?: string
           item_key: string
@@ -164,7 +294,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
-          estado?: Database["public"]["Enums"]["item_estado"]
+          estado?: Database["public"]["Enums"]["item_estado"] | null
           foto_url?: string | null
           id?: string
           item_key?: string
@@ -207,6 +337,7 @@ export type Database = {
           id: string
           nro_revision_global: number
           numero_revision: number
+          observacion_general: string | null
           supervisor_id: string | null
           ticket_id: string
         }
@@ -220,6 +351,7 @@ export type Database = {
           id?: string
           nro_revision_global?: never
           numero_revision: number
+          observacion_general?: string | null
           supervisor_id?: string | null
           ticket_id: string
         }
@@ -233,6 +365,7 @@ export type Database = {
           id?: string
           nro_revision_global?: never
           numero_revision?: number
+          observacion_general?: string | null
           supervisor_id?: string | null
           ticket_id?: string
         }
@@ -265,6 +398,9 @@ export type Database = {
           fecha: string
           fecha_vencimiento: string | null
           id: string
+          nombre_encarpador: string | null
+          nombre_guardia: string | null
+          nro_contenedor: string | null
           numero_inspeccion: number
           patente_camion: string
           patente_rampla: string
@@ -272,6 +408,7 @@ export type Database = {
           revision_actual: number
           supervisor_id: string | null
           tipo_camion: string
+          tipo_inspeccion: string
           transporte: string
           updated_at: string
         }
@@ -286,6 +423,9 @@ export type Database = {
           fecha: string
           fecha_vencimiento?: string | null
           id?: string
+          nombre_encarpador?: string | null
+          nombre_guardia?: string | null
+          nro_contenedor?: string | null
           numero_inspeccion?: never
           patente_camion: string
           patente_rampla: string
@@ -293,6 +433,7 @@ export type Database = {
           revision_actual?: number
           supervisor_id?: string | null
           tipo_camion: string
+          tipo_inspeccion: string
           transporte: string
           updated_at?: string
         }
@@ -307,6 +448,9 @@ export type Database = {
           fecha?: string
           fecha_vencimiento?: string | null
           id?: string
+          nombre_encarpador?: string | null
+          nombre_guardia?: string | null
+          nro_contenedor?: string | null
           numero_inspeccion?: never
           patente_camion?: string
           patente_rampla?: string
@@ -314,6 +458,7 @@ export type Database = {
           revision_actual?: number
           supervisor_id?: string | null
           tipo_camion?: string
+          tipo_inspeccion?: string
           transporte?: string
           updated_at?: string
         }
@@ -325,19 +470,49 @@ export type Database = {
             referencedRelation: "personal"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "tickets_tipo_inspeccion_fkey"
+            columns: ["tipo_inspeccion"]
+            isOneToOne: false
+            referencedRelation: "tipos_inspeccion"
+            referencedColumns: ["clave"]
+          },
         ]
+      }
+      tipos_inspeccion: {
+        Row: {
+          clave: string
+          titulo: string
+        }
+        Insert: {
+          clave: string
+          titulo: string
+        }
+        Update: {
+          clave?: string
+          titulo?: string
+        }
+        Relationships: []
       }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      contar_tickets_con_patente_exacta: {
+        Args: { p_patente_normalizada: string }
+        Returns: number
+      }
     }
     Enums: {
       item_estado: "conforme" | "no_conforme" | "no_aplica"
+      item_modo: "estado" | "fotos"
       notificacion_tipo: "whatsapp" | "email"
-      rol_usuario: "supervisor" | "administrador" | "conductor"
+      rol_usuario:
+        | "supervisor"
+        | "administrador"
+        | "conductor"
+        | "administrador_contrato"
       ticket_estado:
         | "en_revision"
         | "finalizada_con_observaciones"
@@ -358,12 +533,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -387,11 +562,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -412,11 +587,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -437,11 +612,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -454,11 +629,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -468,11 +643,20 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       item_estado: ["conforme", "no_conforme", "no_aplica"],
+      item_modo: ["estado", "fotos"],
       notificacion_tipo: ["whatsapp", "email"],
-      rol_usuario: ["supervisor", "administrador", "conductor"],
+      rol_usuario: [
+        "supervisor",
+        "administrador",
+        "conductor",
+        "administrador_contrato",
+      ],
       ticket_estado: [
         "en_revision",
         "finalizada_con_observaciones",
@@ -482,3 +666,4 @@ export const Constants = {
     },
   },
 } as const
+

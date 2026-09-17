@@ -9,6 +9,7 @@ import { enviarInformePorCorreo } from "@/lib/email";
 import {
   construirAsuntoInforme,
   construirCuerpoInforme,
+  construirCuerpoInformeControlSalida,
   nombreCompleto,
 } from "@/lib/mensajes";
 
@@ -52,8 +53,15 @@ async function preparar(
     };
   }
 
-  // §2.6: el informe lo pueden manejar tanto el supervisor como el administrador.
-  if (!perfil || (perfil.rol !== "supervisor" && perfil.rol !== "administrador")) {
+  // §2.6: el informe lo pueden manejar supervisor, administrador y
+  // administrador_contrato (este último: "enviar informes por correo",
+  // explícito en su alcance — puede enviar, nunca crear/editar/cerrar).
+  if (
+    !perfil ||
+    (perfil.rol !== "supervisor" &&
+      perfil.rol !== "administrador" &&
+      perfil.rol !== "administrador_contrato")
+  ) {
     return {
       error: NextResponse.json(
         { error: "Solo un supervisor o administrador puede acceder al informe." },
@@ -76,8 +84,10 @@ async function preparar(
     };
   }
 
-  // §2.6: el administrador ve/envía el informe de CUALQUIER ticket. Un supervisor
-  // puede el de los suyos, más los que estén "con observaciones" (o el legado
+  // §2.6: el administrador ve/envía el informe de CUALQUIER ticket —
+  // administrador_contrato también ("ver todas las inspecciones... como un
+  // administrador", "enviar informes por correo"). Un supervisor puede el
+  // de los suyos, más los que estén "con observaciones" (o el legado
   // "en reparación") — la segunda inspección la puede tomar otro supervisor.
   const { data: estadoTicket } = await supabase
     .from("tickets")
@@ -89,6 +99,7 @@ async function preparar(
     estadoTicket?.estado === "en_reparacion_de_observaciones";
   if (
     perfil.rol !== "administrador" &&
+    perfil.rol !== "administrador_contrato" &&
     informe.meta.supervisorId !== perfil.id &&
     !conObservaciones
   ) {
@@ -167,20 +178,45 @@ export async function POST(
 
   const supabase = await createClient();
 
+  // Destinatarios por tipo de inspección: cada fila de destinatarios_correo
+  // ahora tiene un permiso POR TIPO en destinatarios_correo_tipos (no un
+  // flag global) — un destinatario autorizado para Encarpe no está
+  // autorizado para Control de Salida solo porque esté activo. Sin este
+  // chequeo el modelo por tipo es decorativo: la pantalla mostraría listas
+  // separadas y esta ruta seguiría aceptando cualquier destinatario — la
+  // misma forma del error de "sin tipos = todos los tipos" del PR #32. Se
+  // necesita el tipo del ticket ANTES del chequeo de destinatarios, así que
+  // esta consulta va antes de preparar() (igual que la validación de
+  // destinatarios ya iba antes: preparar() genera el PDF, caro en CPU, no
+  // hay que pagarlo si el pedido ya está mal formado).
+  const { data: ticketTipo } = await supabase
+    .from("tickets")
+    .select("tipo_inspeccion")
+    .eq("id", id)
+    .maybeSingle();
+  if (!ticketTipo?.tipo_inspeccion) {
+    return NextResponse.json(
+      { error: "Ticket no encontrado o sin tipo de inspección." },
+      { status: 404 },
+    );
+  }
+
   // Corrección crítica de seguridad: el informe solo se puede mandar a
-  // destinatarios pre-autorizados por un administrador (destinatarios_correo,
-  // activo = true, recibe_informes = true) — nunca a una dirección libre
-  // escrita por quien envía. recibe_informes distingue esto de
+  // destinatarios pre-autorizados por un administrador PARA ESTE TIPO
+  // (destinatarios_correo.activo = true, destinatarios_correo_tipos con
+  // ese tipo_inspeccion y recibe_informes = true) — nunca a una dirección
+  // libre escrita por quien envía. recibe_informes distingue esto de
   // recibe_vencimientos (el aviso automático de vencimiento del cron, otro
-  // flujo aparte) — un destinatario puede estar activo para uno y no para el
-  // otro. Se valida ANTES de preparar() (que genera el PDF, caro en CPU) para
-  // no pagar ese costo cuando el pedido ya está mal formado. Comparación en
-  // minúsculas por ambos lados: una mayúscula no debe romper un correo legítimo.
+  // flujo aparte) — un destinatario puede estar activo para uno y no para
+  // el otro, y autorizado para un tipo y no para otro. Comparación en
+  // minúsculas por ambos lados: una mayúscula no debe romper un correo
+  // legítimo.
   const { data: autorizados, error: errDestinatarios } = await supabase
-    .from("destinatarios_correo")
-    .select("email")
-    .eq("activo", true)
-    .eq("recibe_informes", true);
+    .from("destinatarios_correo_tipos")
+    .select("destinatario:destinatarios_correo!inner(email, activo)")
+    .eq("tipo_inspeccion", ticketTipo.tipo_inspeccion)
+    .eq("recibe_informes", true)
+    .eq("destinatarios_correo.activo", true);
   if (errDestinatarios) {
     return NextResponse.json(
       { error: "No se pudo validar los destinatarios." },
@@ -188,7 +224,7 @@ export async function POST(
     );
   }
   const permitidos = new Set(
-    (autorizados ?? []).map((d) => d.email.toLowerCase()),
+    (autorizados ?? []).map((d) => d.destinatario.email.toLowerCase()),
   );
   const noAutorizados = destinatarios.filter(
     (e) => !permitidos.has(e.toLowerCase()),
@@ -206,26 +242,51 @@ export async function POST(
   if (prep.error) return prep.error;
   const { informe, perfil } = prep;
 
-  const datosCorreo = {
+  const firmanteNombre = nombreCompleto(perfil.nombre, perfil.apellido);
+
+  const datosAsunto = {
     numeroInspeccion: informe.meta.numeroInspeccion,
     numeroRevision: informe.meta.numeroRevision,
     // §4: el asunto refleja si el PDF adjunto es una revisión o todo el historial.
     todasLasRevisiones: informe.meta.modo === "todas",
+    // Fase "tipos de inspección" §1: el título va en el asunto, no compuesto en código.
+    tituloInforme: informe.meta.tituloInforme,
     transporte: informe.meta.transporte,
     patenteCamion: informe.meta.patenteCamion,
     patenteRampla: informe.meta.patenteRampla,
     conductor: informe.meta.conductor,
-    // §4.1: firma = quien envía el correo ahora (usuario autenticado), no el
-    // dueño original del ticket.
-    firmanteNombre: nombreCompleto(perfil.nombre, perfil.apellido),
+    firmanteNombre,
     observaciones: informe.meta.observaciones,
+    esSoloFotos: informe.meta.esSoloFotos,
+    observacionGeneral: informe.meta.observacionGeneral,
   };
+
+  // Fase "tipos de inspección" §5: Control de Salida tiene un cuerpo de
+  // correo distinto EN LA FORMA (veredicto primero, después identificación,
+  // recién después los datos del camión) — lo abre un guardia de portería en
+  // el celular para autorizar o rechazar la salida. Los otros tres tipos
+  // conservan el cuerpo de siempre.
+  const cuerpoHtml =
+    informe.meta.tipoInspeccion === "control_salida"
+      ? construirCuerpoInformeControlSalida({
+          numeroInspeccion: informe.meta.numeroInspeccion,
+          fechaInspeccion: informe.meta.fechaInspeccion,
+          aprobado: informe.meta.estadoResultante === "finalizada_sin_observaciones",
+          transporte: informe.meta.transporte,
+          patenteCamion: informe.meta.patenteCamion,
+          patenteRampla: informe.meta.patenteRampla,
+          conductor: informe.meta.conductor,
+          firmanteNombre,
+          observaciones: informe.meta.observaciones,
+          observacionGeneral: informe.meta.observacionGeneral,
+        })
+      : construirCuerpoInforme(datosAsunto);
 
   try {
     await enviarInformePorCorreo({
       destinatarios,
-      asunto: construirAsuntoInforme(datosCorreo),
-      cuerpoHtml: construirCuerpoInforme(datosCorreo),
+      asunto: construirAsuntoInforme(datosAsunto),
+      cuerpoHtml,
       pdf: informe.pdf,
       nombreArchivo: nombreArchivoInforme(informe.meta),
     });
@@ -247,7 +308,7 @@ export async function POST(
       ticket_id: id,
       tipo: "email" as const,
       destinatario: email,
-      contenido: construirAsuntoInforme(datosCorreo),
+      contenido: construirAsuntoInforme(datosAsunto),
     })),
   );
 
