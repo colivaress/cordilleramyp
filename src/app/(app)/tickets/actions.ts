@@ -1137,17 +1137,57 @@ export async function finalizarReinspeccion(input: {
 // ANTES de crear una inspección nueva.
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * Estados que el buscador de patentes considera "relevantes" — los únicos
+ * que puede mostrar el listado, y los únicos que cuenta el conteo sin RLS de
+ * §5 (ver hayCoincidenciaOcultaPara). SOLO los dos que el supervisor puede
+ * ACCIONAR:
+ *   - `finalizada_con_observaciones`: recién detectada, todavía nadie la tomó.
+ *   - `en_reparacion_de_observaciones`: alguien ya la está reparando — sigue
+ *     siendo exactamente lo que el supervisor necesita saber (que ESE camión
+ *     tiene algo pendiente), así que se queda adentro.
+ * Fuera a propósito: `en_revision` y `finalizada_sin_observaciones`.
+ *
+ * 🔴 `en_revision` SÍ estuvo acá y se sacó de nuevo — no es un vaivén sin
+ * motivo. La razón para incluirlo (dar con una inspección a medio hacer y
+ * seguirla donde quedó) requiere una reanudación real: hoy "Ver" sobre un
+ * ticket `en_revision` lleva a `/report` (que ni siquiera avisa que está
+ * incompleta) y `/tickets/[id]` no tiene ningún botón de continuación para
+ * una revisión 1 sin firmar — la recuperación real (PR #41) vive en
+ * `localStorage` del navegador que abrió la inspección, no es alcanzable
+ * desde el buscador ni desde otro dispositivo/persona. Mostrarlo era un
+ * callejón sin salida disfrazado de resultado útil. Vuelve a esta lista
+ * recién cuando exista una reanudación del lado del servidor (PR aparte).
+ *
+ * Esta MISMA lista la usa `public.contar_tickets_con_patente_exacta`
+ * (migración 20260916040000, redefinida en 20260917010000) en su propio
+ * WHERE, en SQL — no se puede importar de acá. Si esta lista cambia, esa
+ * función tiene que cambiar en la misma vuelta, o el conteo sin RLS y el
+ * conteo con RLS de hayCoincidenciaOcultaPara dejan de compartir predicado
+ * y la resta que calcula "hay algo oculto" puede mentir.
+ */
 const ESTADOS_RELEVANTES_BUSQUEDA = [
-  "en_revision",
   "finalizada_con_observaciones",
   "en_reparacion_de_observaciones",
 ] as const;
 
 /**
- * String de filtro `.or()` para patente_camion/patente_rampla — UNA sola
- * función, usada tanto por la consulta con RLS como por la consulta sin RLS
- * de §5 (ver hayCoincidenciaOcultaPara), para que el predicado de las dos
- * sea EXACTAMENTE el mismo y la resta de conteos sea válida.
+ * String de filtro `.or()` para patente_camion/patente_rampla, POR IGUALDAD
+ * — una sola función, usada tanto por el listado visible como por la
+ * consulta sin RLS de §5 (ver hayCoincidenciaOcultaPara), para que el
+ * predicado de las dos sea EXACTAMENTE el mismo y la resta de conteos sea
+ * válida.
+ *
+ * Por qué igualdad y no substring (el listado usaba `ilike` hasta acá):
+ * reportado en producción — buscar "BDBDB" traía también la patente
+ * "BDBDBD", un camión distinto. La pregunta que hace esta pantalla es
+ * "¿ESTE camión tiene algo pendiente?", y eso es una comparación exacta
+ * sobre la patente ya normalizada — un substring de pocas letras además
+ * sirve de sonda para enumerar patentes letra por letra, el mismo problema
+ * que ya se había evitado para el conteo oculto (ver el historial en
+ * hayCoincidenciaOcultaPara). Con esto, el listado y el conteo oculto
+ * comparten predicado por construcción, no por coincidencia — la resta de
+ * conteos no puede mentir por una diferencia de criterio entre los dos.
  *
  * Requiere `normalizado` restringido a [A-Z0-9]+ (ver la validación en
  * buscarPorPatente, antes de llamar esta función) — el filtro `.or()` de
@@ -1156,13 +1196,6 @@ const ESTADOS_RELEVANTES_BUSQUEDA = [
  * adicionales al filtro.
  */
 function filtroPatente(normalizado: string): string {
-  return `patente_camion.ilike.%${normalizado}%,patente_rampla.ilike.%${normalizado}%`;
-}
-
-/** Mismo filtro que `filtroPatente` pero por igualdad — usado SOLO para el
- *  conteo visible de §5 (ver hayCoincidenciaOcultaPara), nunca para el
- *  listado (que es substring a propósito). */
-function filtroPatenteExacta(normalizado: string): string {
   return `patente_camion.eq.${normalizado},patente_rampla.eq.${normalizado}`;
 }
 
@@ -1222,8 +1255,7 @@ async function tiposPermitidosDe(
 }
 
 /**
- * §5: compara, para la patente EXACTA (no substring — ver el comentario de
- * la migración 20260916040000), el conteo SIN RLS
+ * §5: compara, para la patente EXACTA, el conteo SIN RLS
  * (public.contar_tickets_con_patente_exacta, security definer, llamada por
  * `.rpc()`) contra el conteo CON RLS del mismo predicado — la diferencia es
  * el conjunto oculto. Nunca expone cuál: solo un booleano.
@@ -1250,21 +1282,19 @@ async function tiposPermitidosDe(
  *        ticket que en realidad SÍ es visible — solo que quedó fuera de
  *        la página. Un aviso que grita en falso deja de creerse a la
  *        tercera vez.
- *   v4 (esta) — el conteo CON RLS de esta función es una consulta PROPIA,
+ *   v4 — el conteo CON RLS de esta función pasó a ser una consulta PROPIA,
  *        `head: true` (cuenta sin traer filas — no le aplica ningún tope
  *        de filas, a diferencia del listado) y por IGUALDAD, nunca
- *        derivada del listado por substring. Los dos conteos que se
- *        restan (este y el del RPC) usan el MISMO predicado exacto
- *        (`filtroPatenteExacta` + `ESTADOS_RELEVANTES_BUSQUEDA`) y
- *        difieren solo en la RLS — la resta es válida sin importar cuánto
- *        crezca la tabla ni cuántas filas traiga el listado.
- *
- * IMPORTANTE — por qué exacto y no substring: la pregunta que hace la
- * pantalla es "¿ESTE camión tiene algo pendiente en un tipo que no veo?",
- * y eso es una patente exacta. Un substring de 2-3 letras dispara en casi
- * cualquier búsqueda (no informa nada) y sirve de sonda para enumerar
- * coincidencias letra por letra. El listado visible sigue siendo substring
- * a propósito — ahí la RLS ya es el límite real.
+ *        derivada del listado. En ese momento el listado seguía siendo
+ *        substring, así que hacía falta una función de filtro EXACTA
+ *        aparte (`filtroPatenteExacta`) solo para este conteo.
+ *   v5 (esta) — reportado en producción: el listado por substring traía
+ *        camiones distintos ("BDBDB" traía también "BDBDBD"). Al pasar el
+ *        listado TAMBIÉN a igualdad (ver `filtroPatente`, ya no hace falta
+ *        una función "Exacta" aparte — es la única que queda), el listado
+ *        y este conteo quedan usando el MISMO predicado por construcción,
+ *        no por coincidencia — la resta de conteos no puede mentir por una
+ *        diferencia de criterio entre los dos.
  *
  * Si cualquiera de las dos consultas falla, no se rompe la búsqueda entera
  * por esto: se loguea y se asume "no hay coincidencia oculta" (falso
@@ -1280,7 +1310,7 @@ async function hayCoincidenciaOcultaPara(
       .from("tickets")
       .select("id", { count: "exact", head: true })
       .in("estado", ESTADOS_RELEVANTES_BUSQUEDA)
-      .or(filtroPatenteExacta(patenteNormalizada)),
+      .or(filtroPatente(patenteNormalizada)),
     supabase.rpc("contar_tickets_con_patente_exacta", {
       p_patente_normalizada: patenteNormalizada,
     }),
@@ -1297,7 +1327,12 @@ async function hayCoincidenciaOcultaPara(
 }
 
 /**
- * Busca tickets pendientes/con observaciones por patente (camión o rampla).
+ * Busca tickets CON OBSERVACIONES PENDIENTES DE CORREGIR por patente (camión
+ * o rampla, ya normalizada), por coincidencia EXACTA — ver
+ * ESTADOS_RELEVANTES_BUSQUEDA para los dos estados que cuentan (y por qué
+ * `en_revision` NO es uno de ellos: sin una reanudación real, mostrarlo acá
+ * es un callejón sin salida, no un resultado accionable).
+ *
  * UNA sola consulta a `tickets` sin importar cuántos coincidan — §5 sacó el
  * detalle de ítems no conformes de esta pantalla (queda solo detrás de
  * "Ver", igual que siempre), así que ya no hace falta traer revisiones ni

@@ -287,13 +287,17 @@ export function InspeccionForm({
     () => isoADatetimeLocal(fechaVencimientoInicial) || vencimientoPorDefecto(10),
   );
 
-  // "Abrir no debe escribir": en reinspección, la fila de ticket_revisiones
-  // NO se crea al pasar de "Datos de esta revisión" al checklist — se crea
-  // recién en el PRIMER guardado real (ver conRevisionAsegurada más abajo).
-  // Este ref evita llamar iniciarReinspeccion en cada guardado posterior una
-  // vez que ya se confirmó que la revisión existe (es idempotente igual,
-  // pero llamarlo de nuevo sería un viaje de red de más en cada ítem).
-  const revisionAseguradaRef = useRef(modo === "nueva");
+  // "Abrir no debe escribir" — en los DOS modos: ni el ticket (modo "nueva")
+  // ni la fila de ticket_revisiones (modo "reinspeccion") se crean al pasar
+  // de la cabecera al checklist — se crean recién en el PRIMER guardado real
+  // (ver asegurarRevision más abajo). Arranca en `false` siempre; el efecto
+  // de recuperación al montar lo pone en `true` si ya existía (ticket
+  // recuperado de localStorage con progreso real, o revisión de reinspección
+  // ya abierta). Evita llamar iniciarInspeccion/iniciarReinspeccion en cada
+  // guardado posterior una vez que ya se confirmó que existe (son
+  // idempotentes igual, pero llamarlos de nuevo sería un viaje de red de más
+  // en cada ítem).
+  const revisionAseguradaRef = useRef(false);
 
   const opcionesTipo = useMemo(() => {
     if (!tipos || tipos.length === 0) return ORDEN_TIPOS_INSPECCION;
@@ -555,26 +559,33 @@ export function InspeccionForm({
   );
 
   /**
-   * "Abrir no debe escribir": en reinspección, iniciarReinspeccion (crea la
-   * fila de ticket_revisiones + siembra el checklist) ya NO se llama al
-   * pasar de "Datos de esta revisión" al checklist (ver irAlChecklist) — se
-   * llama acá, envolviendo el PRIMER guardado real (el primer ítem
-   * respondido o la primera firma), nunca antes. Si el supervisor sale de
-   * la pantalla sin guardar nada, no queda ninguna revisión a medias.
+   * "Abrir no debe escribir" — ahora en LOS DOS modos, no solo reinspección:
+   * ni `iniciarInspeccion` (crea `tickets` + revisión #1 + siembra el
+   * checklist) ni `iniciarReinspeccion` (crea la revisión siguiente) se
+   * llaman al avanzar de paso (ver irAlChecklist, que en los dos modos es
+   * ahora un simple cambio de paso de cliente). Se llaman acá, envolviendo
+   * el PRIMER guardado real (el primer ítem respondido o la primera firma),
+   * nunca antes. Si el supervisor entra y sale sin guardar nada, no queda
+   * ticket ni revisión a medias — en modo "nueva" eso significa además que
+   * `numero_inspeccion` (bigint identity) no avanza: la secuencia solo se
+   * consume cuando el INSERT realmente ocurre.
    *
    * `iniciarReinspeccion` deja `tickets.estado` en
    * `en_reparacion_de_observaciones` — NO en `en_revision` — y se queda ahí
    * durante TODA la revisión (ver el comentario grande en esa función,
    * tickets/actions.ts): es lo que mantiene el ticket visible para el
    * resto de los supervisores mientras dura, no solo antes del primer
-   * guardado. Este wrapper no decide ESE valor, solo cuándo se llama a la
-   * función que lo escribe.
+   * guardado. `iniciarInspeccion` no tiene ese problema — nace en
+   * `en_revision` y no hay "otro supervisor" que pueda tomarlo antes de que
+   * exista.
    *
-   * Idempotente por partida doble: iniciarReinspeccion en sí ya lo es
-   * (prepararRevision hace upsert/insert-ignore), y este wrapper además
-   * evita el viaje de red de más en cada guardado siguiente una vez que
-   * revisionAseguradaRef ya está en true (seteado acá al confirmar éxito, o
-   * en el efecto de recuperación al montar si ya existía).
+   * Idempotente por partida doble: las dos funciones ya lo son
+   * (`iniciarInspeccion` hace upsert sobre `tickets` con
+   * `onConflict:"id"`; `prepararRevision` hace upsert/insert-ignore sobre
+   * `ticket_revisiones`), y este wrapper además evita el viaje de red de
+   * más en cada guardado siguiente una vez que revisionAseguradaRef ya está
+   * en true (seteado acá al confirmar éxito, o en el efecto de recuperación
+   * al montar si ya existía).
    *
    * Este wrapper es una conveniencia, no la barrera real: si algún guardado
    * futuro se agrega sin pasar por acá, `autorizarRevisionEnCurso`
@@ -582,20 +593,83 @@ export function InspeccionForm({
    * claro en vez de escribir mal — compara `tickets.revision_actual` contra
    * el número de revisión recibido, que no va a coincidir si la revisión
    * nunca se creó. Ver el comentario de esa función.
+   *
+   * 🔴 Storage es la excepción — no la cubre este wrapper. Las políticas RLS
+   * de `storage.objects` (migración 20260908210559,
+   * `private.puede_editar_ticket`) exigen que la fila de `tickets` YA EXISTA
+   * para permitir el INSERT del objeto — si el ticket no existe todavía, la
+   * subida misma falla por RLS, antes de llegar a ningún guardarX. En
+   * reinspección esto nunca fue un problema (el ticket ya existe desde la
+   * inspección original), pero en "nueva" con creación diferida, si el
+   * PRIMER guardado real es una foto o una firma, hay que asegurar el
+   * ticket ANTES de subir, no después. Por eso `persistirFirma`,
+   * `onFotoItem`, `onFotoModoItem` y el re-guardado de firmas en `onSubmit`
+   * NO llaman `subirArchivo` directo — usan `subirArchivoAsegurando` (ver
+   * más abajo), que llama `asegurarRevision()` primero.
    */
-  async function conRevisionAsegurada<T>(
-    fn: () => Promise<ResultadoAccion<T>>,
-  ): Promise<ResultadoAccion<T>> {
-    if (modo === "reinspeccion" && !revisionAseguradaRef.current) {
-      const res = await iniciarReinspeccion({
+  async function asegurarRevision(): Promise<ResultadoAccion> {
+    if (revisionAseguradaRef.current) return { ok: true };
+    if (modo === "nueva") {
+      const res = await iniciarInspeccion({
         ticketId,
-        conductor: conductorRevision.trim(),
-        fechaVencimientoISO: new Date(vencRevision).toISOString(),
+        cabecera: {
+          transporte: cabecera.transporte,
+          conductor: cabecera.conductor,
+          fecha: new Date(cabecera.fecha).toISOString(),
+          procedencia: cabecera.procedencia,
+          tipo_camion: cabecera.tipo_camion,
+          patente_camion: cabecera.patente_camion,
+          patente_rampla: cabecera.patente_rampla,
+        },
+        fechaVencimientoISO: new Date(cabecera.fechaVencimiento).toISOString(),
+        tipoInspeccion: tipoSeleccionado,
+        nombreEncarpador:
+          tipoSeleccionado === "control_salida" ? nombreEncarpador : null,
+        nombreGuardia:
+          tipoSeleccionado === "control_salida" ? nombreGuardia : null,
+        nroContenedor:
+          tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
       });
       if (!res.ok) return res;
       revisionAseguradaRef.current = true;
+      setNumInsp(res.numeroInspeccion);
+      return { ok: true };
     }
+    const res = await iniciarReinspeccion({
+      ticketId,
+      conductor: conductorRevision.trim(),
+      fechaVencimientoISO: new Date(vencRevision).toISOString(),
+    });
+    if (!res.ok) return res;
+    revisionAseguradaRef.current = true;
+    return { ok: true };
+  }
+
+  async function conRevisionAsegurada<T>(
+    fn: () => Promise<ResultadoAccion<T>>,
+  ): Promise<ResultadoAccion<T>> {
+    const aseg = await asegurarRevision();
+    if (!aseg.ok) return aseg;
     return fn();
+  }
+
+  /**
+   * `subirArchivo`, pero asegurando el ticket/revisión ANTES de subir — ver
+   * el comentario grande de arriba (asegurarRevision). Usar SIEMPRE esta
+   * función para subir a Storage desde este formulario, nunca `subirArchivo`
+   * directo — es la única forma de que el orden (asegurar → subir) no
+   * dependa de que cada call site se acuerde de hacerlo en el orden
+   * correcto.
+   */
+  async function subirArchivoAsegurando(
+    bucket: string,
+    path: string,
+    file: Blob,
+    contentType: string,
+  ): Promise<string> {
+    const aseg = await asegurarRevision();
+    if (!aseg.ok) throw new Error(aseg.mensaje);
+    return subirArchivo(bucket, path, file, contentType);
   }
 
   const patchFotoSlot = useCallback(
@@ -621,7 +695,7 @@ export function InspeccionForm({
     try {
       let path: string | null = null;
       if (dataUrl) {
-        path = await subirArchivo(
+        path = await subirArchivoAsegurando(
           "firmas",
           rutaFirma(quien),
           await dataUrlABlob(dataUrl),
@@ -680,58 +754,17 @@ export function InspeccionForm({
     setCabecera((prev) => ({ ...prev, [key]: value }));
   }
 
-  async function irAlChecklist() {
+  function irAlChecklist() {
     if (!puedeAvanzar || guardadoIniciar.pendiente) return;
-    // "Abrir no debe escribir" (reinspección): a diferencia de "nueva" (que
-    // sí necesita crear el ticket acá — §2.6/§2.8, el numero_inspeccion
-    // tiene que existir para subir firmas/fotos), en reinspección el ticket
-    // YA EXISTE. Avanzar de paso es puro estado de cliente — conductor y
-    // fecha de vencimiento quedan en memoria (conductorRevision/vencRevision)
-    // y se mandan recién en el primer guardado real, vía
-    // conRevisionAsegurada. Si el supervisor entra y sale sin tocar nada, no
-    // se escribe ni una fila.
-    if (modo === "reinspeccion") {
-      setPaso(2);
-      setPasoMaxVisto(2);
-      return;
-    }
-    try {
-      await guardadoIniciar.ejecutar(async () => {
-        // §2.6/§2.8: crea la fila en `tickets`, la revisión #1 y siembra las
-        // respuestas del checklist del tipo elegido — así numero_inspeccion
-        // existe y se puede guardar por ítem.
-        const res = await iniciarInspeccion({
-          ticketId,
-          cabecera: {
-            transporte: cabecera.transporte,
-            conductor: cabecera.conductor,
-            fecha: new Date(cabecera.fecha).toISOString(),
-            procedencia: cabecera.procedencia,
-            tipo_camion: cabecera.tipo_camion,
-            patente_camion: cabecera.patente_camion,
-            patente_rampla: cabecera.patente_rampla,
-          },
-          fechaVencimientoISO: new Date(
-            cabecera.fechaVencimiento,
-          ).toISOString(),
-          tipoInspeccion: tipoSeleccionado,
-          nombreEncarpador:
-            tipoSeleccionado === "control_salida" ? nombreEncarpador : null,
-          nombreGuardia:
-            tipoSeleccionado === "control_salida" ? nombreGuardia : null,
-          nroContenedor:
-            tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
-        });
-        if (!res.ok) throw new Error(res.mensaje);
-        setNumInsp(res.numeroInspeccion);
-        setPaso(2);
-        setPasoMaxVisto(2);
-      });
-    } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : "No se pudo iniciar la revisión.",
-      );
-    }
+    // "Abrir no debe escribir" — en LOS DOS modos ahora: avanzar de paso es
+    // puro estado de cliente, sin llamada de red. En modo "nueva", la
+    // cabecera completa queda en memoria (`cabecera`, `tipoSeleccionado`,
+    // etc.) y se manda recién en el primer guardado real, vía
+    // asegurarRevision/conRevisionAsegurada — igual que conductor/vencimiento
+    // en reinspección. Si el supervisor entra y sale sin tocar nada, no se
+    // escribe ni una fila (ni se consume un numero_inspeccion).
+    setPaso(2);
+    setPasoMaxVisto(2);
   }
 
   // §2.8: cada respuesta se guarda apenas se marca — no todas juntas al final.
@@ -827,7 +860,7 @@ export function InspeccionForm({
     try {
       await guardadoItems.ejecutar(key, async () => {
         const { blob, ext } = await comprimirImagen(file);
-        const path = await subirArchivo(
+        const path = await subirArchivoAsegurando(
           "fallas",
           `${ticketId}/${key}/${nombreFoto(ext)}`,
           blob,
@@ -909,7 +942,7 @@ export function InspeccionForm({
     try {
       await guardadoItems.ejecutar(clave, async () => {
         const { blob, ext } = await comprimirImagen(file);
-        const path = await subirArchivo(
+        const path = await subirArchivoAsegurando(
           "fallas",
           `${ticketId}/${key}/${orden}-${nombreFoto(ext)}`,
           blob,
@@ -1062,24 +1095,32 @@ export function InspeccionForm({
           // §2.8: las firmas ya se subieron al capturarse; acá se re-suben con
           // el trazo actual y se re-guarda la ruta, para dejar todo
           // consistente sí o sí antes de cerrar.
-          const firmaConductorPath = await subirArchivo(
+          //
+          // subirArchivoAsegurando (no subirArchivo directo) acá es defensa en
+          // profundidad, no el camino esperado: para llegar hasta acá,
+          // validarChecklist() ya exigió ambas firmas y todos los ítems
+          // respondidos, así que algún guardado anterior (onEstadoItem/
+          // persistirFirma/...) ya debería haber asegurado el ticket/revisión.
+          // Pero esos campos son estado de CLIENTE (firmaConductorUrl/
+          // firmaFiscalizadorUrl se setean antes del guardado real, no
+          // después) — si todos los guardados anteriores fallaron en red
+          // (ej. el supervisor trabajó offline y recién ahora hay señal) es
+          // posible llegar hasta acá con el ticket todavía sin crear. Sin
+          // asegurar primero, esta subida chocaría contra la RLS de
+          // storage.objects (exige que `tickets` ya exista, ver el comentario
+          // grande en asegurarRevision) antes de llegar a ningún guardarX.
+          const firmaConductorPath = await subirArchivoAsegurando(
             "firmas",
             rutaFirma("conductor"),
             await dataUrlABlob(firmaConductorUrl as string),
             "image/png",
           );
-          const firmaFiscalizadorPath = await subirArchivo(
+          const firmaFiscalizadorPath = await subirArchivoAsegurando(
             "firmas",
             rutaFirma("fiscalizador"),
             await dataUrlABlob(firmaFiscalizadorUrl as string),
             "image/png",
           );
-          // conRevisionAsegurada acá es defensa en profundidad, no el camino
-          // esperado: para llegar hasta acá, validarChecklist() ya exigió
-          // ambas firmas y todos los ítems respondidos, así que algún
-          // guardado anterior (onEstadoItem/persistirFirma/...) ya debería
-          // haber asegurado la revisión. Si por lo que sea no fue así, esto
-          // la asegura igual antes de re-guardar las firmas.
           const resFirmaConductor = await conRevisionAsegurada(() =>
             guardarFirmaRevision({
               ticketId,
