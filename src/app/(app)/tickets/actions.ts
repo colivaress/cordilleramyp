@@ -141,7 +141,32 @@ async function prepararRevision(
       conductor: opts.conductor,
       fecha_vencimiento: opts.fechaVencimientoISO,
     });
-    if (error) return errorInesperado("prepararRevision.insert", error);
+    if (error) {
+      // Carrera real (reportada, no teórica): dos supervisores pueden abrir
+      // la re-inspección del mismo ticket casi al mismo tiempo, ninguno con
+      // la revisión asegurada todavía (conRevisionAsegurada, InspeccionForm.tsx)
+      // — el SELECT de arriba (`revExistente`) no la ve en ninguno de los dos
+      // porque todavía no existe para ninguno, así que los dos calculan el
+      // mismo `numeroRevision` y los dos intentan este mismo INSERT. La
+      // verdad final es el unique (ticket_id, numero_revision) de
+      // ticket_revisiones (§7 del blueprint): quien pierde la carrera choca
+      // acá con 23505. Reintentar el mismo guardado no sirve — la revisión
+      // ya existe, la creó el otro supervisor — así que el mensaje genérico
+      // de errorInesperado ("Intenta de nuevo") sería activamente engañoso.
+      // Recargar sí sirve: trae el numero_revision real y, según quién sea
+      // el supervisor que llama, o entra a la MISMA revisión (si es el dueño
+      // del ticket o de esa revisión — autorizarRevisionEnCurso ya lo
+      // permite) o el próximo intento de iniciarReinspeccion lo rechaza con
+      // el mensaje correcto ("Otro supervisor ya está realizando la
+      // re-inspección de este ticket.", más abajo en esta misma función).
+      if (error.code === "23505")
+        return {
+          ok: false,
+          mensaje:
+            "Otro supervisor ya tomó esta inspección. Recargá la pantalla para ver el estado actual.",
+        };
+      return errorInesperado("prepararRevision.insert", error);
+    }
   }
 
   const { data: items } = await supabase
@@ -1354,79 +1379,3 @@ export async function buscarPorPatente(
   };
 }
 
-/**
- * 🟡 SIN USO desde §5 (el buscador de patentes pasó a filtrar la tabla
- * normal y a apoyarse en "Ver" -> informe -> "Registrar re-inspección", sin
- * un botón "Tomar" propio — ver BuscadorPatente.tsx). Queda la función acá,
- * sin borrar, porque sigue siendo la única transición ATÓMICA (el `.eq`
- * doble de más abajo) para reclamar un ticket antes de abrir el checklist —
- * "Registrar re-inspección" no tiene ese resguardo, así que si más adelante
- * hace falta prevenir la carrera de dos supervisores entrando al mismo
- * ticket "con observaciones" a la vez, esta es la pieza para retomar en vez
- * de escribir una nueva. Decisión pendiente de confirmar con el usuario:
- * borrarla del todo, o volver a exponerla como acción explícita.
- *
- * "Tomar" una inspección con observaciones de OTRO supervisor, desde el
- * buscador de patentes. Transición ÚNICA y acotada a propósito: la RLS de
- * `tickets_update` permite más de lo que este flujo debería (un supervisor
- * con permiso de tipo podría, en teoría, escribir cualquier columna
- * permitida por la política — incluidas patentes, o saltar directo a
- * `finalizada_sin_observaciones` sin pasar por una revisión real). Este
- * action nunca expone esos campos: el único cambio posible es
- * `finalizada_con_observaciones` -> `en_reparacion_de_observaciones`, nada
- * más.
- *
- * No crea la fila de `ticket_revisiones` ni toca `revision_actual`.
- *
- * 🔴 Esto SÍ falló en la práctica una vez (reportado desde staging): la
- * primera versión de este comentario decía que `iniciarReinspeccion`
- * corría "cuando el supervisor llega a la pantalla", pero en ese momento
- * `irAlChecklist` (InspeccionForm.tsx) la llamaba al simple cambio de paso
- * "Datos de esta revisión" -> checklist — ANTES de cualquier guardado
- * real. Esa llamada pisaba el `en_reparacion_de_observaciones` de acá de
- * vuelta a `en_revision` con el checklist todavío vacío, sin firmas —
- * exactamente lo que esta acción existe para evitar. Corregido: ahora
- * `iniciarReinspeccion` se llama recién en el PRIMER guardado real (ver
- * `conRevisionAsegurada` en InspeccionForm.tsx), nunca al abrir la
- * pantalla ni al cambiar de paso. `puedeReinspeccionar` ya aceptaba
- * `en_reparacion_de_observaciones` como punto de partida válido, y
- * `iniciarReinspeccion` ya registra `ticket_revisiones.supervisor_id` como
- * quien llama (nunca sobrescribe `tickets.supervisor_id`, que conserva el
- * origen del ticket) — esa función en sí no cambió, solo CUÁNDO se llama.
- *
- * El doble filtro en el `update` (`.eq("estado", "finalizada_con_observaciones")`)
- * es la defensa real contra dos supervisores tomando la misma inspección a
- * la vez: si otro ya la tomó entre que este supervisor la vio en los
- * resultados y apretó "Tomar", el update no afecta ninguna fila y se avisa
- * en vez de fingir éxito.
- */
-export async function tomarInspeccionConObservaciones(input: {
-  ticketId: string;
-}): Promise<ResultadoAccion> {
-  const { perfil } = await getSesion();
-  if (perfil.rol !== "supervisor")
-    return { ok: false, mensaje: "Solo un supervisor puede tomar una inspección." };
-
-  const supabase = await createClient();
-
-  const { data: actualizado, error } = await supabase
-    .from("tickets")
-    .update({
-      estado: "en_reparacion_de_observaciones",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", input.ticketId)
-    .eq("estado", "finalizada_con_observaciones")
-    .select("id")
-    .maybeSingle();
-  if (error) return errorInesperado("tomarInspeccionConObservaciones.update", error);
-  if (!actualizado)
-    return {
-      ok: false,
-      mensaje:
-        "No se pudo tomar — puede que otro supervisor ya la haya tomado, o que ya no esté disponible. Volvé a buscar.",
-    };
-
-  revalidatePath("/dashboard");
-  return { ok: true };
-}
