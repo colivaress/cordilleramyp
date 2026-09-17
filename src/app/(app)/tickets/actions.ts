@@ -163,7 +163,7 @@ async function prepararRevision(
         return {
           ok: false,
           mensaje:
-            "Otro supervisor ya tomó esta inspección. Recargá la pantalla para ver el estado actual.",
+            "Otro supervisor ya tomó esta inspección. Recarga la pantalla para ver el estado actual.",
         };
       return errorInesperado("prepararRevision.insert", error);
     }
@@ -1321,7 +1321,7 @@ export async function buscarPorPatente(
 
   const normalizado = normalizarPatente(termino);
   if (!normalizado)
-    return { ok: false, mensaje: "Escribí al menos parte de una patente." };
+    return { ok: false, mensaje: "Escribe al menos parte de una patente." };
   // Restringido a alfanumérico: el filtro .or() de PostgREST se arma
   // interpolando este string a mano (filtroPatente) — sin esta validación,
   // una coma o un paréntesis en el término permitiría inyectar condiciones

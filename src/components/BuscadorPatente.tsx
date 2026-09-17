@@ -99,7 +99,7 @@ export function BuscadorPatente({
         <CardHeader>
           <CardTitle>Buscar por patente</CardTitle>
           <CardDescription>
-            Antes de cargar una inspección nueva, revisá si ese camión ya
+            Antes de cargar una inspección nueva, revisa si ese camión ya
             tiene una pendiente o con observaciones.
           </CardDescription>
         </CardHeader>
@@ -145,14 +145,14 @@ export function BuscadorPatente({
       {buscando && resultado.hayCoincidenciaOculta && (
         <AvisoLinea>
           Esta patente tiene además una coincidencia en un tipo de inspección
-          que no podés revisar. No se puede mostrar cuál ni qué dice —
-          preguntale a un administrador o a otro inspector.
+          que no puedes revisar. No se puede mostrar cuál ni qué dice —
+          pregúntale a un administrador o a otro inspector.
         </AvisoLinea>
       )}
 
       {buscando && !sinResultados && resultado.hayMasResultados && (
         <AvisoLinea tono="neutral">
-          Hay más resultados de los que se muestran acá — escribí más letras
+          Hay más resultados de los que se muestran acá — escribe más letras
           o números para acotar la búsqueda.
         </AvisoLinea>
       )}
@@ -162,7 +162,7 @@ export function BuscadorPatente({
           {resultado.tiposPermitidos.length > 0 ? (
             <>
               No se encontraron inspecciones pendientes ni con observaciones
-              para esa patente, en los tipos que podés revisar (
+              para esa patente, en los tipos que puedes revisar (
               {resultado.tiposPermitidos
                 .map((t) => ETIQUETA_TIPO_INSPECCION[t] ?? t)
                 .join(", ")}
@@ -170,7 +170,7 @@ export function BuscadorPatente({
             </>
           ) : (
             <>
-              No tenés ningún tipo de inspección asignado — pedile a un
+              No tienes ningún tipo de inspección asignado — pídele a un
               administrador que te lo asigne en Usuarios. No se puede buscar
               nada mientras tanto.
             </>
