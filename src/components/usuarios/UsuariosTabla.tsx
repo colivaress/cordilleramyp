@@ -152,10 +152,14 @@ type FilaBusqueda = {
 export function UsuariosTabla({
   usuarios,
   perfilId,
+  perfilRol,
   tiposPorSupervisor,
 }: {
   usuarios: Personal[];
   perfilId: string;
+  /** Rol de quien está usando este panel — decide qué rol puede ofrecer el
+   *  <select> del formulario (ver más abajo). */
+  perfilRol: RolUsuario;
   /** personal.id -> claves de tipos_inspeccion permitidos (vacío/ausente = SIN acceso a ninguno). */
   tiposPorSupervisor: Record<string, string[]>;
 }) {
@@ -443,7 +447,19 @@ export function UsuariosTabla({
                   className={nativeSelectClassName}
                 >
                   <option value="supervisor">Supervisor</option>
-                  <option value="administrador">Administrador</option>
+                  {/* Un administrador_contrato nunca puede dejar a nadie como
+                      administrador (RLS de personal_update, migración
+                      20260917030000) — no se le ofrece la opción, así el
+                      intento ni siquiera llega al servidor. Excepción: si la
+                      fila que se está editando YA es administrador, se
+                      mantiene la opción visible (aunque este rol tampoco
+                      pueda guardar ningún cambio ahí, bloqueado aparte por
+                      la RLS) para que el <select> no quede sin ninguna
+                      opción seleccionada. */}
+                  {(perfilRol !== "administrador_contrato" ||
+                    form.rol === "administrador") && (
+                    <option value="administrador">Administrador</option>
+                  )}
                   <option value="administrador_contrato">
                     Administrador de contrato
                   </option>

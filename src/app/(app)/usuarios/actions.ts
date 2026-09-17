@@ -18,6 +18,22 @@ export type UsuarioInput = {
 
 export type ResultadoUsuario = ResultadoAccion<{ aviso?: string }>;
 
+/**
+ * Un WITH CHECK de RLS violado (código Postgres 42501, "new row violates
+ * row-level security policy") es un fallo de PERMISOS, no de infraestructura
+ * — a diferencia de un USING que no matchea ninguna fila (eso es éxito
+ * silencioso con cero filas, ver el comentario en editarUsuario/cambiarActivo
+ * más abajo), un WITH CHECK que rechaza la fila NUEVA sí llega como error
+ * real de Postgres. Pasa, por ejemplo, cuando administrador_contrato edita a
+ * un supervisor (visible por USING) pero intenta dejarlo con
+ * rol = 'administrador' (rechazado por WITH CHECK). El mensaje genérico
+ * (MENSAJE_ERROR_GENERICO, "Intenta de nuevo...") es engañoso acá: reintentar
+ * no cambia nada, es un permiso que nunca se va a dar.
+ */
+function esViolacionRLS(error: { code?: string } | null | undefined): boolean {
+  return error?.code === "42501";
+}
+
 function validar(input: UsuarioInput): ResultadoAccion {
   const req: [string, string][] = [
     ["nombre", input.nombre],
@@ -101,7 +117,11 @@ export async function agregarUsuario(
     activo: true,
     user_id: null,
   });
-  if (error) return errorInesperado("agregarUsuario.insert", error);
+  if (error) {
+    if (esViolacionRLS(error))
+      return { ok: false, mensaje: "No tienes permiso para crear un usuario con ese rol." };
+    return errorInesperado("agregarUsuario.insert", error);
+  }
 
   const aviso = await invitar({
     email,
@@ -145,7 +165,14 @@ export async function editarUsuario(
     .eq("id", input.id)
     .select("id")
     .maybeSingle();
-  if (error) return errorInesperado("editarUsuario.update", error);
+  if (error) {
+    if (esViolacionRLS(error))
+      return {
+        ok: false,
+        mensaje: "No tienes permiso para dejar a este usuario con ese rol.",
+      };
+    return errorInesperado("editarUsuario.update", error);
+  }
   if (!actualizado)
     return {
       ok: false,

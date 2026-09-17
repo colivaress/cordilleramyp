@@ -51,6 +51,7 @@ export default async function UsuariosPage() {
           <UsuariosTabla
             usuarios={usuarios ?? []}
             perfilId={perfil.id}
+            perfilRol={perfil.rol}
             tiposPorSupervisor={tiposPorSupervisor}
           />
         </CardContent>
