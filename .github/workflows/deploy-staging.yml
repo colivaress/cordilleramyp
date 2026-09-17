@@ -23,7 +23,19 @@ jobs:
       - name: Aplicar migraciones al Supabase de staging
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Versión fija (la misma que corre en local — `supabase --version`),
+          # no "latest": con "latest" la acción consulta la API de GitHub sin
+          # autenticar para resolver el último release, y esa consulta puede
+          # fallar por rate limit (60/hora sin token, compartido entre todos
+          # los runners de GitHub) — fue justo lo que rompió este workflow.
+          # Fijarla de paso evita que CI corra un binario distinto al
+          # probado en local sin ningún commit que lo explique.
+          version: 2.117.0
+        env:
+          # Red por si igual llega a consultar la API de GitHub: autenticado
+          # el límite sube de 60 a 5000 por hora. GITHUB_TOKEN lo provee
+          # Actions solo, no hace falta crear ningún secret.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: |
           supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
           supabase db push
