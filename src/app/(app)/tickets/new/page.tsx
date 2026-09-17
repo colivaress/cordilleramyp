@@ -31,7 +31,7 @@ export default async function NuevaInspeccionPage() {
         </div>
         <div className="rounded-xl border border-warning-200 bg-warning-50 p-6 text-warning-800">
           <p className="font-medium">
-            No tenés ningún tipo de inspección asignado.
+            No tienes ningún tipo de inspección asignado.
           </p>
           <p className="mt-1 text-sm">
             Un administrador tiene que asignarte al menos uno desde el panel

@@ -367,7 +367,7 @@ export async function iniciarInspeccion(
     return {
       ok: false,
       mensaje:
-        "No tenés permiso para realizar este tipo de inspección. Pedile a un administrador que te lo asigne en Usuarios.",
+        "No tienes permiso para realizar este tipo de inspección. Pídele a un administrador que te lo asigne en Usuarios.",
     };
 
   const { data, error } = await supabase
