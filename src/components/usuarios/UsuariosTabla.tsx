@@ -414,21 +414,42 @@ export function UsuariosTabla({
               o "Todos (por ser administrador)" descuadraban toda la tabla.
               Con anchos fijos el comportamiento es predecible, y es lo que
               permite truncar el correo (§ celda Correo) y fijar la columna
-              Acciones (§ celda Acciones, sticky). */}
+              Acciones (§ celda Acciones, sticky).
+
+              Anchos en PX, no en %: el ancho real disponible para esta tabla
+              es constante (~1088px) en todo el rango de escritorio — lo pone
+              el max-w-6xl + el padding de la página/card en
+              src/app/(app)/layout.tsx, no el viewport — así que un ancho fijo
+              en px es tan predecible como un % acá, y deja fijar Rol a un
+              número exacto en vez de un porcentaje que hay que recalcular a
+              mano cada vez que cambia otra columna.
+
+              Rol = 190px: medido en vivo (Playwright) — el badge
+              "Administrador de contrato" (el rol con el texto más largo)
+              mide 165px de ancho natural (w-fit + shrink-0 en Badge, nunca
+              se achica ni envuelve, ver src/components/ui/badge.tsx) más
+              8px+8px de padding de la celda = 181px mínimo. 190px deja
+              margen. Antes esta columna tenía 12% (~130px) y el badge se
+              desbordaba sobre "Tipos de inspección" — bug real, reportado.
+              Los 60px que gana Rol salen de Correo (250px -> 191px), que es
+              la que absorbe contenido largo truncando con "…" (ver su
+              celda, más abajo) — nunca se pierde el dato, solo se ve más
+              corto. El resto de las columnas quedan en su ancho actual,
+              convertido de % a px sobre el mismo total (~1088px). */}
           <Table className="table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[20%]">Nombre</TableHead>
-                <TableHead className="w-[23%]">Correo</TableHead>
-                <TableHead className="w-[12%]">Rol</TableHead>
-                <TableHead className="w-[20%]">Tipos de inspección</TableHead>
-                <TableHead className="w-[9%]">Estado</TableHead>
+                <TableHead className="w-[218px]">Nombre</TableHead>
+                <TableHead className="w-[191px]">Correo</TableHead>
+                <TableHead className="w-[190px]">Rol</TableHead>
+                <TableHead className="w-[218px]">Tipos de inspección</TableHead>
+                <TableHead className="w-[98px]">Estado</TableHead>
                 {/* sticky + bg-card propio: sin el fondo opaco, el contenido
                     de las otras columnas se ve pasando por debajo al
                     desplazar horizontalmente. La sombra a la izquierda marca
                     el borde para que se lea como columna fija, no como un
                     corte. */}
-                <TableHead className="sticky right-0 z-20 w-[16%] bg-card text-right shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.15)]">
+                <TableHead className="sticky right-0 z-20 w-[174px] bg-card text-right shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.15)]">
                   Acciones
                 </TableHead>
               </TableRow>
