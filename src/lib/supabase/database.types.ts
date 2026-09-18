@@ -503,6 +503,13 @@ export type Database = {
         Args: { p_patente_normalizada: string }
         Returns: number
       }
+      estado_acceso_personal: {
+        Args: never
+        Returns: {
+          alguna_vez_inicio_sesion: boolean
+          personal_id: string
+        }[]
+      }
     }
     Enums: {
       item_estado: "conforme" | "no_conforme" | "no_aplica"
