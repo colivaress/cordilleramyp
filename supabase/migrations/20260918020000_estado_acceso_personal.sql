@@ -11,11 +11,23 @@
 -- (verificado contra pg_proc antes de escribir esto, no asumido).
 --
 -- Devuelve un conjunto (personal_id, alguna_vez_inicio_sesion) para TODO el
--- personal con user_id ya vinculado, en una sola llamada — no una función
--- parametrizada por personal_id que habría que invocar una vez por fila.
--- Nunca expone ninguna otra columna de auth.users (ni email, ni
--- raw_user_meta_data, nada) — el único dato derivado que sale de acá es el
--- booleano.
+-- personal, en una sola llamada — no una función parametrizada por
+-- personal_id que habría que invocar una vez por fila. Nunca expone
+-- ninguna otra columna de auth.users (ni email, ni raw_user_meta_data,
+-- nada) — el único dato derivado que sale de acá es el booleano.
+--
+-- LEFT JOIN, no INNER JOIN — corregido en revisión. Un INNER JOIN
+-- descartaba toda fila de personal con user_id nulo: exactamente las
+-- filas del mecanismo de alta por fila precargada (el administrador crea
+-- la fila, la persona se registra sola en /registro con ese correo — el
+-- mismo mecanismo de las dos filas que se borraron en staging por quedar
+-- reclamables). Esa persona es la que MÁS necesita salir como "nunca
+-- inició sesión" — es sin excepción el caso "todavía no entró". Con
+-- INNER JOIN el RPC directamente omitía su fila del resultado. Hoy el
+-- código que llama (accesoPorPersonal[u.id] ?? false, en
+-- UsuariosTabla.tsx) compensa esa ausencia con un valor por defecto
+-- correcto — pero el contrato de la función no debería depender de que
+-- quien la llama adivine bien qué hacer con una fila que falta.
 --
 -- La guarda de autorización vive DENTRO de la función, no en el código que
 -- la llama: el `where` exige private.es_admin() o private.es_admin_contrato()
@@ -29,9 +41,9 @@ stable
 security definer
 set search_path = ''
 as $$
-  select p.id, au.last_sign_in_at is not null
+  select p.id, coalesce(au.last_sign_in_at is not null, false)
   from public.personal p
-  join auth.users au on au.id = p.user_id
+  left join auth.users au on au.id = p.user_id
   where private.es_admin() or private.es_admin_contrato();
 $$;
 
