@@ -777,7 +777,20 @@ function FilaUsuario({
           </Badge>
         ) : pendienteInvitacion ? (
           <>
-            <Badge className="bg-warning-100 text-warning-700">
+            {/* Override puntual del nowrap de Badge, SOLO acá — no se toca
+                el componente global: la pastilla de Rol depende de ese
+                nowrap junto con su ancho fijo de 190px (PR #60). Sin esto,
+                "Invitación pendiente" (dos palabras, más larga que "Activo"/
+                "Desactivado") se desbordaba fuera de la celda de 98px — el
+                texto seguía completo en el DOM, pero la columna Acciones
+                (sticky, con fondo opaco) lo tapaba por encima, dando la
+                apariencia de corte ("Invitación penc"). max-w-full +
+                whitespace-normal fuerza el quiebre dentro del ancho de la
+                celda; h-auto + py-1 porque Badge trae h-5 fijo (se saldría
+                por arriba/abajo al partirse en dos líneas); rounded-md en
+                vez del rounded-4xl heredado, que con dos líneas se ve como
+                una cápsula deformada. */}
+            <Badge className="h-auto max-w-full whitespace-normal rounded-md bg-warning-100 py-1 text-center leading-tight text-warning-700">
               {resaltar(f.estadoTexto, terminos)}
             </Badge>
             {/* Antigüedad como línea secundaria, no dentro de la pastilla —
