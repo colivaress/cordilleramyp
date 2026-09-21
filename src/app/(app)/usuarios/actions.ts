@@ -104,6 +104,16 @@ async function invitar(input: {
         telefono: input.telefono,
         fecha_nacimiento: input.fechaNacimiento,
       },
+      // Sin esto, Supabase arma el enlace del correo contra el Site URL
+      // global del proyecto (una configuración del dashboard de Supabase,
+      // no de este código) — si ese valor está mal puesto para el entorno
+      // (ya pasó con el de staging), el enlace queda roto sin que nada acá
+      // lo explique. NEXT_PUBLIC_APP_URL es la URL pública real de CADA
+      // entorno (mismo patrón que ya usa el cron de alertas de
+      // vencimiento) — nunca depende del origin del request que dispara la
+      // Server Action, así que invitar desde un entorno de desarrollo
+      // nunca genera enlaces a ese entorno.
+      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`,
     });
     if (error) {
       if (/already been registered|already registered/i.test(error.message))
@@ -285,7 +295,20 @@ export async function reenviarInvitacion(input: {
     .eq("id", input.id)
     .maybeSingle();
   if (!u) return { ok: false, mensaje: "Usuario no encontrado." };
-  if (u.user_id)
+  // "Ya activó su cuenta" tiene que ser el mismo criterio que usa la
+  // columna Estado de /usuarios (private.estado_acceso_personal(), migración
+  // 20260918020000) — no personal.user_id. user_id se puebla desde el
+  // instante en que se invita (inviteUserByEmail crea la cuenta de auth y
+  // el trigger handle_new_user la vincula ahí mismo), no desde el primer
+  // login — con ese criterio, reenviar le quedaba bloqueado a CUALQUIER
+  // invitado, exactamente el mismo bug que el PR #61 corrigió en la
+  // columna Estado, acá sin corregir. El dato real es si alguna vez inició
+  // sesión.
+  const { data: acceso } = await supabase.rpc("estado_acceso_personal");
+  const yaInicioSesion =
+    acceso?.find((a) => a.personal_id === input.id)?.alguna_vez_inicio_sesion ??
+    false;
+  if (yaInicioSesion)
     return {
       ok: false,
       mensaje: "Este usuario ya activó su cuenta; no hay invitación pendiente.",
