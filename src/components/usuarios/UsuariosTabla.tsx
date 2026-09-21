@@ -141,11 +141,32 @@ function resaltar(texto: string, terminos: string[]): React.ReactNode {
   return partes;
 }
 
+/** "hace 12 h" / "hace 3 días" — antigüedad de una invitación pendiente,
+ *  contada desde personal.created_at (el momento en que agregarUsuario crea
+ *  la fila, en la misma request donde se dispara la invitación real — no
+ *  hace falta ningún dato de auth.users para esto). */
+function antiguedadDesde(fechaIso: string, ahora: Date = new Date()): string {
+  const ms = ahora.getTime() - new Date(fechaIso).getTime();
+  const horas = Math.floor(ms / 3_600_000);
+  if (horas < 1) return "hace menos de 1 h";
+  if (horas < 48) return `hace ${horas} h`;
+  const dias = Math.floor(horas / 24);
+  return `hace ${dias} ${dias === 1 ? "día" : "días"}`;
+}
+
 type FilaBusqueda = {
   usuario: Personal;
   tiposClaves: string[];
   rolTexto: string;
   estadoTexto: string;
+  /** true solo cuando activo=true Y alguna_vez_inicio_sesion=false — fuente
+   *  única para el color del badge y el botón "Reenviar invitación" (antes
+   *  cada uno recalculaba esto por su cuenta a partir de !user_id, que
+   *  queda poblado desde el instante de la invitación, no desde el primer
+   *  login — ver migración 20260918020000). */
+  pendienteInvitacion: boolean;
+  /** Solo con contenido cuando pendienteInvitacion=true. */
+  antiguedadInvitacion: string | null;
   textoGeneral: string;
   telefonoDigitos: string;
 };
@@ -155,6 +176,7 @@ export function UsuariosTabla({
   perfilId,
   perfilRol,
   tiposPorSupervisor,
+  accesoPorPersonal,
 }: {
   usuarios: Personal[];
   perfilId: string;
@@ -163,6 +185,10 @@ export function UsuariosTabla({
   perfilRol: RolUsuario;
   /** personal.id -> claves de tipos_inspeccion permitidos (vacío/ausente = SIN acceso a ninguno). */
   tiposPorSupervisor: Record<string, string[]>;
+  /** personal.id -> alguna_vez_inicio_sesion (private.estado_acceso_personal(),
+   *  migración 20260918020000). Ausente = todavía sin user_id vinculado, se
+   *  trata igual que "nunca inició sesión". */
+  accesoPorPersonal: Record<string, boolean>;
 }) {
   const [abierto, setAbierto] = useState(false);
   const [editandoId, setEditandoId] = useState<string | null>(null);
@@ -263,9 +289,20 @@ export function UsuariosTabla({
           : u.rol === "administrador_contrato"
             ? "Administrador de contrato"
             : "Supervisor";
+      // El dato real es auth.users.last_sign_in_at (via
+      // accesoPorPersonal/private.estado_acceso_personal()), no
+      // personal.user_id — user_id se puebla desde el instante en que se
+      // invita (inviteUserByEmail crea la cuenta de auth y el trigger
+      // handle_new_user la vincula ahí mismo), no desde el primer login.
+      // "Desactivado" gana sobre todo lo demás.
+      const algunaVezInicioSesion = accesoPorPersonal[u.id] ?? false;
+      const pendienteInvitacion = u.activo && !algunaVezInicioSesion;
+      const antiguedadInvitacion = pendienteInvitacion
+        ? antiguedadDesde(u.created_at)
+        : null;
       const estadoTexto = !u.activo
-        ? "Inactivo"
-        : !u.user_id
+        ? "Desactivado"
+        : pendienteInvitacion
           ? "Invitación pendiente"
           : "Activo";
       // administrador_contrato: el concepto "tipos permitidos" no aplica —
@@ -290,11 +327,13 @@ export function UsuariosTabla({
         tiposClaves,
         rolTexto,
         estadoTexto,
+        pendienteInvitacion,
+        antiguedadInvitacion,
         textoGeneral,
         telefonoDigitos: soloDigitos(u.telefono ?? ""),
       };
     });
-  }, [usuarios, tiposPorSupervisor]);
+  }, [usuarios, tiposPorSupervisor, accesoPorPersonal]);
 
   // Búsqueda en cliente: varios términos, deben calzar TODOS (en cualquiera
   // de los 6 campos), sin tildes/mayúsculas, sin ir a la base — con una
@@ -375,21 +414,42 @@ export function UsuariosTabla({
               o "Todos (por ser administrador)" descuadraban toda la tabla.
               Con anchos fijos el comportamiento es predecible, y es lo que
               permite truncar el correo (§ celda Correo) y fijar la columna
-              Acciones (§ celda Acciones, sticky). */}
+              Acciones (§ celda Acciones, sticky).
+
+              Anchos en PX, no en %: el ancho real disponible para esta tabla
+              es constante (~1088px) en todo el rango de escritorio — lo pone
+              el max-w-6xl + el padding de la página/card en
+              src/app/(app)/layout.tsx, no el viewport — así que un ancho fijo
+              en px es tan predecible como un % acá, y deja fijar Rol a un
+              número exacto en vez de un porcentaje que hay que recalcular a
+              mano cada vez que cambia otra columna.
+
+              Rol = 190px: medido en vivo (Playwright) — el badge
+              "Administrador de contrato" (el rol con el texto más largo)
+              mide 165px de ancho natural (w-fit + shrink-0 en Badge, nunca
+              se achica ni envuelve, ver src/components/ui/badge.tsx) más
+              8px+8px de padding de la celda = 181px mínimo. 190px deja
+              margen. Antes esta columna tenía 12% (~130px) y el badge se
+              desbordaba sobre "Tipos de inspección" — bug real, reportado.
+              Los 60px que gana Rol salen de Correo (250px -> 191px), que es
+              la que absorbe contenido largo truncando con "…" (ver su
+              celda, más abajo) — nunca se pierde el dato, solo se ve más
+              corto. El resto de las columnas quedan en su ancho actual,
+              convertido de % a px sobre el mismo total (~1088px). */}
           <Table className="table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[20%]">Nombre</TableHead>
-                <TableHead className="w-[23%]">Correo</TableHead>
-                <TableHead className="w-[12%]">Rol</TableHead>
-                <TableHead className="w-[20%]">Tipos de inspección</TableHead>
-                <TableHead className="w-[9%]">Estado</TableHead>
+                <TableHead className="w-[218px]">Nombre</TableHead>
+                <TableHead className="w-[191px]">Correo</TableHead>
+                <TableHead className="w-[190px]">Rol</TableHead>
+                <TableHead className="w-[218px]">Tipos de inspección</TableHead>
+                <TableHead className="w-[98px]">Estado</TableHead>
                 {/* sticky + bg-card propio: sin el fondo opaco, el contenido
                     de las otras columnas se ve pasando por debajo al
                     desplazar horizontalmente. La sombra a la izquierda marca
                     el borde para que se lea como columna fija, no como un
                     corte. */}
-                <TableHead className="sticky right-0 z-20 w-[16%] bg-card text-right shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.15)]">
+                <TableHead className="sticky right-0 z-20 w-[174px] bg-card text-right shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.15)]">
                   Acciones
                 </TableHead>
               </TableRow>
@@ -608,7 +668,7 @@ function FilaUsuario({
   onEditar: (u: Personal) => void;
 }) {
   const u = f.usuario;
-  const pendienteInvitacion = !u.user_id;
+  const pendienteInvitacion = f.pendienteInvitacion;
   const esYo = u.id === perfilId;
   // Refleja la RLS de personal_update (migración 20260917030000): un
   // administrador_contrato no puede tocar una fila administrador por
@@ -676,9 +736,23 @@ function FilaUsuario({
             {resaltar(f.estadoTexto, terminos)}
           </Badge>
         ) : pendienteInvitacion ? (
-          <Badge className="bg-warning-100 text-warning-700">
-            {resaltar(f.estadoTexto, terminos)}
-          </Badge>
+          <>
+            <Badge className="bg-warning-100 text-warning-700">
+              {resaltar(f.estadoTexto, terminos)}
+            </Badge>
+            {/* Antigüedad como línea secundaria, no dentro de la pastilla —
+                mismo motivo que el teléfono bajo el nombre: la columna
+                Estado es angosta a propósito, y "Invitación pendiente · hace
+                12 h" en una sola pastilla se desbordaría igual que el bug ya
+                arreglado en la columna Rol. Sin esto, un administrador no
+                puede distinguir una invitación recién enviada de una cuyo
+                enlace ya expiró. */}
+            {f.antiguedadInvitacion && (
+              <div className="mt-1 text-xs text-muted-foreground">
+                {f.antiguedadInvitacion}
+              </div>
+            )}
+          </>
         ) : (
           <Badge className="bg-success-100 text-success-700">
             {resaltar(f.estadoTexto, terminos)}
@@ -738,13 +812,14 @@ function FilaUsuario({
               </Button>
             </>
           )}
-          {/* Solo si está activa: con la fila desactivada, handle_new_user()
-              (migración 20260918010000) rechaza el alta igual — reenviar el
-              correo sería ofrecer una acción que ya no puede terminar bien
-              (mismo patrón que el <select> de rol, más arriba en este mismo
-              archivo). La Server Action también lo rechaza, por si acaso
-              (defensa en profundidad). */}
-          {pendienteInvitacion && u.activo && (
+          {/* pendienteInvitacion ya implica activo=true (ver su definición,
+              más arriba) — con la fila desactivada, handle_new_user()
+              (migración 20260918010000) rechaza el alta igual, así que
+              reenviar el correo sería ofrecer una acción que ya no puede
+              terminar bien (mismo patrón que el <select> de rol, más arriba
+              en este mismo archivo). La Server Action también lo rechaza,
+              por si acaso (defensa en profundidad). */}
+          {pendienteInvitacion && (
             <Button
               type="button"
               variant="outline"
