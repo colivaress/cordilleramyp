@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { PencilIcon, UserPlusIcon, XIcon } from "lucide-react";
+import { EllipsisIcon, PencilIcon, UserPlusIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -440,7 +446,11 @@ export function UsuariosTabla({
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[218px]">Nombre</TableHead>
-                <TableHead className="w-[191px]">Correo</TableHead>
+                {/* 225px: recibe los 34px que Acciones deja de necesitar
+                    (174px -> 140px, ver esa celda) — Correo es la columna
+                    que absorbe ancho extra truncando, nunca se pierde el
+                    dato. */}
+                <TableHead className="w-[225px]">Correo</TableHead>
                 <TableHead className="w-[190px]">Rol</TableHead>
                 <TableHead className="w-[218px]">Tipos de inspección</TableHead>
                 <TableHead className="w-[98px]">Estado</TableHead>
@@ -449,7 +459,16 @@ export function UsuariosTabla({
                     desplazar horizontalmente. La sombra a la izquierda marca
                     el borde para que se lea como columna fija, no como un
                     corte. */}
-                <TableHead className="sticky right-0 z-20 w-[174px] bg-card text-right shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.15)]">
+                {/* Ancho fijo, ya no depende de cuántas acciones aplican a
+                    la fila (antes: hasta 3 botones de texto en una fila con
+                    invitación pendiente — Editar/Desactivar/Reenviar
+                    invitación — desbordaban los 174px que alcanzaban para 2,
+                    tapando la columna Estado). Ahora la celda siempre
+                    renderiza como máximo dos controles — "Editar" + el
+                    disparador "⋯" del menú — sin importar cuántos ítems haya
+                    adentro del menú. Medido en vivo tras el cambio, ver el
+                    comentario en la celda de abajo. */}
+                <TableHead className="sticky right-0 z-20 w-[140px] bg-card text-right shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.15)]">
                   Acciones
                 </TableHead>
               </TableRow>
@@ -678,6 +697,16 @@ function FilaUsuario({
   // siempre va a fallar.
   const puedeModificar = !(perfilRol === "administrador_contrato" && u.rol === "administrador");
   const guardado = useEstadoGuardado();
+  const [confirmandoDesactivar, setConfirmandoDesactivar] = useState(false);
+  // El diálogo de confirmación de "Desactivar" vive FUERA del árbol del
+  // DropdownMenu (más abajo, como hermano de <TableRow>) a propósito: si
+  // viviera adentro, cerrar el menú (closeOnClick del ítem, o Escape)
+  // desmontaría el diálogo junto con él — bug conocido de anidar un Dialog
+  // dentro de un Menu. Por eso hace falta esta ref: el foco tiene que volver
+  // a mano al botón "⋯" después de confirmar o cancelar, porque el menú que
+  // lo abrió ya se cerró (y probablemente perdió el elemento que tenía el
+  // foco) antes de que el diálogo termine de cerrarse.
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   async function accion(fn: () => Promise<ResultadoUsuario>, exito: string) {
     try {
@@ -693,7 +722,18 @@ function FilaUsuario({
     }
   }
 
+  function cerrarConfirmacion() {
+    setConfirmandoDesactivar(false);
+    triggerRef.current?.focus();
+  }
+
+  async function confirmarDesactivar() {
+    await accion(() => cambiarActivo({ id: u.id, activo: false }), "Usuario desactivado.");
+    cerrarConfirmacion();
+  }
+
   return (
+    <>
     <TableRow className="group">
       <TableCell className="font-medium">
         <div>{resaltar(`${u.nombre} ${u.apellido ?? ""}`.trim(), terminos)}</div>
@@ -766,15 +806,20 @@ function FilaUsuario({
           resto de la fila por debajo). `group` en el <tr> + `group-hover`
           acá sincroniza los dos. */}
       <TableCell className="sticky right-0 z-10 bg-card shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.15)] group-hover:bg-muted/50">
-        {/* flex-nowrap a propósito: con el ancho que libera sacar la columna
-            Teléfono, "Editar" + "Desactivar"/"Activar" caben en una sola
-            fila — antes se apilaban porque la columna quedaba angosta. */}
+        {/* Siempre como máximo DOS controles visibles — "Editar" + el
+            disparador "⋯" — sin importar cuántas acciones apliquen a esta
+            fila (antes: hasta 3 botones de texto en la misma fila con
+            invitación pendiente, que desbordaban la celda y tapaban la
+            columna Estado — bug real, reportado). El resto de las acciones
+            (Desactivar/Activar, Reenviar invitación) vive adentro del menú,
+            así que el ancho de esta celda deja de depender del estado de la
+            fila. */}
         <div className="flex flex-nowrap items-center justify-end gap-1.5">
           <IndicadorGuardado estado={guardado.estado} />
-          {/* size="sm" explícito a propósito: hasta 3 acciones por fila en un
-              panel de administración de escritorio — el default de 44px
-              infla cada fila sin necesidad (no es lo que usa el supervisor
-              parado en el patio, ver button.tsx). */}
+          {/* size="sm"/"icon-sm" explícito a propósito: hasta dos acciones
+              por fila en un panel de administración de escritorio — el
+              default de 44px infla cada fila sin necesidad (no es lo que usa
+              el supervisor parado en el patio, ver button.tsx). */}
           {puedeModificar && (
             <>
               <Button
@@ -787,61 +832,125 @@ function FilaUsuario({
                 <PencilIcon />
                 Editar
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={guardado.pendiente || (esYo && u.activo)}
-                title={
-                  esYo && u.activo
-                    ? "No puedes desactivar tu propia cuenta"
-                    : undefined
-                }
-                onClick={() =>
-                  accion(
-                    () => cambiarActivo({ id: u.id, activo: !u.activo }),
-                    u.activo ? "Usuario desactivado." : "Usuario activado.",
-                  )
-                }
-              >
-                <ContenidoBoton
-                  pendiente={guardado.pendiente}
-                  texto={u.activo ? "Desactivar" : "Activar"}
-                  textoPendiente={u.activo ? "Desactivando…" : "Activando…"}
-                />
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      ref={triggerRef}
+                      type="button"
+                      variant="outline"
+                      size="icon-sm"
+                      disabled={guardado.pendiente}
+                    />
+                  }
+                >
+                  <EllipsisIcon />
+                  <span className="sr-only">
+                    Más acciones para {u.nombre} {u.apellido}
+                  </span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem
+                    disabled={esYo && u.activo}
+                    onClick={() => {
+                      if (u.activo) {
+                        // Confirmación primero — ver el comentario en
+                        // triggerRef, más arriba, sobre por qué el diálogo
+                        // vive fuera de este menú.
+                        setConfirmandoDesactivar(true);
+                      } else {
+                        accion(
+                          () => cambiarActivo({ id: u.id, activo: true }),
+                          "Usuario activado.",
+                        );
+                      }
+                    }}
+                  >
+                    <div className="grid gap-0.5">
+                      <span>{u.activo ? "Desactivar" : "Activar"}</span>
+                      {/* La razón visible como texto secundario, no en un
+                          `title` — un ítem deshabilitado dentro de un menú
+                          no dispara el tooltip nativo de forma confiable
+                          (no recibe foco/hover como un botón normal), así
+                          que un `title` ahí quedaría escondido sin
+                          explicación. */}
+                      {esYo && u.activo && (
+                        <span className="text-xs font-normal text-muted-foreground">
+                          No puedes desactivar tu propia cuenta
+                        </span>
+                      )}
+                    </div>
+                  </DropdownMenuItem>
+                  {/* pendienteInvitacion ya implica activo=true (ver su
+                      definición, más arriba) — con la fila desactivada,
+                      handle_new_user() (migración 20260918010000) rechaza
+                      el alta igual, así que reenviar el correo sería
+                      ofrecer una acción que ya no puede terminar bien
+                      (mismo patrón que el <select> de rol, más arriba en
+                      este mismo archivo). La Server Action también lo
+                      rechaza, por si acaso (defensa en profundidad). */}
+                  {pendienteInvitacion && (
+                    <DropdownMenuItem
+                      onClick={() =>
+                        accion(
+                          () => reenviarInvitacion({ id: u.id }),
+                          "Invitación reenviada.",
+                        )
+                      }
+                    >
+                      Reenviar invitación
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </>
-          )}
-          {/* pendienteInvitacion ya implica activo=true (ver su definición,
-              más arriba) — con la fila desactivada, handle_new_user()
-              (migración 20260918010000) rechaza el alta igual, así que
-              reenviar el correo sería ofrecer una acción que ya no puede
-              terminar bien (mismo patrón que el <select> de rol, más arriba
-              en este mismo archivo). La Server Action también lo rechaza,
-              por si acaso (defensa en profundidad). */}
-          {pendienteInvitacion && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={guardado.pendiente}
-              onClick={() =>
-                accion(
-                  () => reenviarInvitacion({ id: u.id }),
-                  "Invitación reenviada.",
-                )
-              }
-            >
-              <ContenidoBoton
-                pendiente={guardado.pendiente}
-                texto="Reenviar invitación"
-                textoPendiente="Reenviando…"
-              />
-            </Button>
           )}
         </div>
       </TableCell>
     </TableRow>
+    {/* Hermano de <TableRow>, no anidado dentro del DropdownMenu de arriba
+        — ver el comentario en triggerRef sobre por qué. Controlado por
+        estado propio de esta fila, no por el menú. */}
+    <Dialog
+      open={confirmandoDesactivar}
+      onOpenChange={(open) => {
+        if (!open) cerrarConfirmacion();
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            ¿Desactivar a {u.nombre} {u.apellido}?
+          </DialogTitle>
+          <DialogDescription>
+            No va a poder usar la app hasta que alguien reactive su cuenta.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={cerrarConfirmacion}
+            disabled={guardado.pendiente}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={confirmarDesactivar}
+            disabled={guardado.pendiente}
+          >
+            <ContenidoBoton
+              pendiente={guardado.pendiente}
+              texto="Desactivar"
+              textoPendiente="Desactivando…"
+            />
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
 
