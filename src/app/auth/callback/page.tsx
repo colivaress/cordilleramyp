@@ -1,8 +1,7 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import {
   Card,
@@ -11,6 +10,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+
+/**
+ * Solo rutas internas relativas — nunca un destino externo ni "//host"
+ * (una URL "protocol-relative": el navegador la resuelve como
+ * "https://host", no como una ruta). Evita que `?next=` se use como
+ * redirección abierta.
+ */
+function rutaSegura(valor: string | null): string {
+  if (valor && valor.startsWith("/") && !valor.startsWith("//")) return valor;
+  return "/dashboard";
+}
 
 // Canjea la sesión que llega desde un enlace de correo (invitación,
 // recuperación de clave, confirmación) o desde OAuth (Google).
@@ -26,22 +36,78 @@ import {
 //     recovery) llegan así, no con `?code=`.
 //   - Flujo PKCE (OAuth, ej. "Iniciar sesión con Google" cuando se agregue,
 //     §8 del blueprint): la sesión se canjea con `?code=`.
+//
+// `/auth/callback` está en RUTAS_PUBLICAS de proxy.ts (por el prefijo
+// "/auth") — el proxy sirve el HTML/JS de esta página sin exigir sesión
+// (la petición inicial ni siquiera lleva el fragmento: el navegador nunca
+// lo envía al servidor). Recién una vez que el JS de este componente
+// corre en el navegador se puede leer `window.location.hash` y llamar a
+// setSession() — no hay ninguna carrera con el proxy porque el proxy ya
+// terminó de actuar antes de que este código se ejecute.
 function CallbackInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [error, setError] = useState(false);
+  // El history.replaceState() de más abajo modifica la URL por fuera de
+  // Next.js, y eso puede hacer que este componente se vuelva a renderizar
+  // con una nueva instancia de `router`/`searchParams` (cambian de
+  // identidad aunque el contenido sea el mismo). Un useEffect con
+  // [router, searchParams] como deps se re-dispara en ese momento, y su
+  // cleanup marca `cancelado = true` en el efecto ORIGINAL — así que
+  // cuando el `await setSession()` en curso finalmente resuelve, ve
+  // `cancelado = true` y aborta sin llamar a `router.replace()`, dejando
+  // la página colgada en "Verificando el enlace…" para siempre (la
+  // sesión ya quedó establecida — la cookie se ve en el navegador — pero
+  // nadie redirige). Confirmado empíricamente contra Supabase local.
+  //
+  // Por eso el efecto de abajo corre EXACTAMENTE una vez al montar ([]
+  // como deps, intencional) y lee `router`/`searchParams` desde refs en
+  // vez de las variables reactivas — no queremos que ningún cambio
+  // posterior de identidad lo re-dispare ni lo cancele a medias.
+  const routerRef = useRef(router);
+  const searchParamsRef = useRef(searchParams);
+  useEffect(() => {
+    routerRef.current = router;
+    searchParamsRef.current = searchParams;
+  }, [router, searchParams]);
 
   useEffect(() => {
     let cancelado = false;
 
     async function procesar() {
       const supabase = createClient();
-      const next = searchParams.get("next") ?? "/dashboard";
+      const router = routerRef.current;
+      const next = rutaSegura(searchParamsRef.current.get("next"));
 
       const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
       const accessToken = hash.get("access_token");
       const refreshToken = hash.get("refresh_token");
       const tipo = hash.get("type");
+      const errorHash = hash.get("error");
+
+      // Saca el fragmento de la barra de direcciones de inmediato, antes de
+      // cualquier `await` — los tokens no deben quedar expuestos en la URL
+      // (capturas de pantalla, "copiar enlace") ni un instante más de lo
+      // necesario. `replaceState` también reemplaza la entrada actual del
+      // historial de la pestaña, así que un "atrás" posterior no la trae de
+      // vuelta (aunque el navegador ya haya registrado la URL completa con
+      // el token en su historial permanente al cargar la página — eso
+      // ningún código de cliente puede borrarlo retroactivamente).
+      if (window.location.hash) {
+        window.history.replaceState(
+          null,
+          "",
+          window.location.pathname + window.location.search,
+        );
+      }
+
+      if (errorHash) {
+        console.error(
+          "Enlace de auth con error:",
+          hash.get("error_description") || errorHash,
+        );
+        router.replace("/login?error=auth_callback");
+        return;
+      }
 
       if (accessToken && refreshToken) {
         const { error } = await supabase.auth.setSession({
@@ -51,12 +117,14 @@ function CallbackInner() {
         if (cancelado) return;
         if (error) {
           console.error("setSession falló:", error);
-          setError(true);
+          router.replace("/login?error=auth_callback");
           return;
         }
         // Invitación o recuperación: la persona todavía no tiene contraseña
         // propia (invitación) o quiere cambiarla (recuperación) — en los dos
-        // casos el siguiente paso es definir una contraseña nueva.
+        // casos el siguiente paso es definir una contraseña nueva. Para
+        // cualquier otro `type` conocido (magiclink, signup, ...) o si no
+        // viene ninguno, sigue a `next`.
         const destino =
           tipo === "invite" || tipo === "recovery"
             ? "/auth/actualizar-clave"
@@ -65,7 +133,7 @@ function CallbackInner() {
         return;
       }
 
-      const code = searchParams.get("code");
+      const code = searchParamsRef.current.get("code");
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (cancelado) return;
@@ -76,35 +144,28 @@ function CallbackInner() {
         console.error("exchangeCodeForSession falló:", error);
       }
 
-      setError(true);
+      // Sin fragmento con sesión, sin error explícito y sin `?code=`: enlace
+      // vencido, reutilizado, o alguien llegó a esta ruta directamente.
+      // Nunca se queda a medias en esta pantalla — siempre termina en
+      // /login con un mensaje (mensajeErrorParam ya sabe traducir
+      // "auth_callback").
+      router.replace("/login?error=auth_callback");
     }
 
     procesar();
     return () => {
       cancelado = true;
     };
-  }, [router, searchParams]);
-
-  if (!error) {
-    return (
-      <p className="text-sm text-muted-foreground" role="status">
-        Verificando el enlace…
-      </p>
-    );
-  }
+    // Deps vacío a propósito: debe correr una sola vez al montar — ver el
+    // comentario de más arriba sobre por qué reaccionar a `router`/
+    // `searchParams` rompe el flujo. `routerRef`/`searchParamsRef` son
+    // estables (useRef), no hace falta declararlos como dependencia.
+  }, []);
 
   return (
-    <div className="grid gap-4">
-      <p className="text-sm text-destructive" role="alert">
-        El enlace no es válido o expiró.
-      </p>
-      <Link
-        href="/login"
-        className="text-center text-sm text-primary underline"
-      >
-        Volver a iniciar sesión
-      </Link>
-    </div>
+    <p className="text-sm text-muted-foreground" role="status">
+      Verificando el enlace…
+    </p>
   );
 }
 
