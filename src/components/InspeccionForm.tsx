@@ -42,6 +42,7 @@ import {
   finalizarInspeccion,
   finalizarReinspeccion,
   guardarRespuestaItem,
+  marcarItemsConforme,
   guardarFirmaRevision,
   guardarFotoChecklistItem,
   guardarObservacionGeneral,
@@ -290,14 +291,31 @@ export function InspeccionForm({
   // "Abrir no debe escribir" — en los DOS modos: ni el ticket (modo "nueva")
   // ni la fila de ticket_revisiones (modo "reinspeccion") se crean al pasar
   // de la cabecera al checklist — se crean recién en el PRIMER guardado real
-  // (ver asegurarRevision más abajo). Arranca en `false` siempre; el efecto
-  // de recuperación al montar lo pone en `true` si ya existía (ticket
-  // recuperado de localStorage con progreso real, o revisión de reinspección
-  // ya abierta). Evita llamar iniciarInspeccion/iniciarReinspeccion en cada
-  // guardado posterior una vez que ya se confirmó que existe (son
-  // idempotentes igual, pero llamarlos de nuevo sería un viaje de red de más
-  // en cada ítem).
-  const revisionAseguradaRef = useRef(false);
+  // (ver asegurarRevision más abajo). Arranca en `null` siempre; el efecto
+  // de recuperación al montar lo deja resuelto en `{ok:true}` si ya existía
+  // (ticket recuperado de localStorage con progreso real, o revisión de
+  // reinspección ya abierta).
+  //
+  // Guarda la PROMESA en vuelo, no un booleano — bug real, reportado y
+  // medido: con un booleano (`revisionAseguradaRef.current`, marcado `true`
+  // recién cuando el `await` de iniciarInspeccion/iniciarReinspeccion
+  // resuelve), varios guardados disparados casi juntos (ej. "Marcar los
+  // pendientes como conforme", que hasta hace poco lanzaba N guardados en
+  // paralelo) alcanzaban a leer el booleano en `false` ANTES de que el
+  // primero terminara — cada uno disparaba su propio iniciarInspeccion. Como
+  // `tickets.numero_inspeccion` es `generated always as identity`, Postgres
+  // evalúa `nextval()` para CADA upsert antes de poder resolver el
+  // conflicto (aunque termine en UPDATE, no INSERT) — cada llamada de más
+  // desperdiciaba un número de secuencia (14-17 por inspección, medido en
+  // producción) y varias competían por el mismo candado de fila en
+  // `tickets`, explicando buena parte de los 45-60s de espera. Guardando la
+  // promesa (no un booleano) y asignándola de forma SÍNCRONA antes de
+  // cualquier `await`, la llamada 2 a la N reciben la MISMA promesa en
+  // vuelo y esperan su resultado — no disparan una segunda red. Si la
+  // promesa termina en error (rechazo o `{ok:false}`), se limpia la
+  // referencia para que el próximo guardado pueda reintentar en vez de
+  // quedar con un fracaso cacheado para siempre.
+  const revisionPromesaRef = useRef<Promise<ResultadoAccion> | null>(null);
 
   const opcionesTipo = useMemo(() => {
     if (!tipos || tipos.length === 0) return ORDEN_TIPOS_INSPECCION;
@@ -434,7 +452,7 @@ export function InspeccionForm({
       // obtenerEstadoRevision) ya confirmó que la fila de ticket_revisiones
       // existe y el ticket está en_revision — no hace falta (ni corresponde)
       // volver a llamar iniciarReinspeccion en el próximo guardado.
-      revisionAseguradaRef.current = true;
+      revisionPromesaRef.current = Promise.resolve({ ok: true });
 
       const itemsDeEsteTipo = items
         .filter((i) => i.tipo === res.tipoInspeccion)
@@ -583,9 +601,9 @@ export function InspeccionForm({
    * (`iniciarInspeccion` hace upsert sobre `tickets` con
    * `onConflict:"id"`; `prepararRevision` hace upsert/insert-ignore sobre
    * `ticket_revisiones`), y este wrapper además evita el viaje de red de
-   * más en cada guardado siguiente una vez que revisionAseguradaRef ya está
-   * en true (seteado acá al confirmar éxito, o en el efecto de recuperación
-   * al montar si ya existía).
+   * más en cada guardado siguiente una vez que revisionPromesaRef ya está
+   * resuelta en éxito (seteada acá, o en el efecto de recuperación al
+   * montar si ya existía).
    *
    * Este wrapper es una conveniencia, no la barrera real: si algún guardado
    * futuro se agrega sin pasar por acá, `autorizarRevisionEnCurso`
@@ -606,43 +624,65 @@ export function InspeccionForm({
    * `onFotoItem`, `onFotoModoItem` y el re-guardado de firmas en `onSubmit`
    * NO llaman `subirArchivo` directo — usan `subirArchivoAsegurando` (ver
    * más abajo), que llama `asegurarRevision()` primero.
+   *
+   * 🔴 NO es `async function` a propósito — tiene que ser una función común
+   * que devuelve una promesa, para que la asignación a `revisionPromesaRef`
+   * ocurra de forma SÍNCRONA, antes de cualquier `await`. Si esto fuera
+   * `async` con `await iniciarInspeccion(...)` seguido de la asignación al
+   * ref (como era antes, con un booleano), dos llamadas disparadas casi
+   * juntas (ej. `Promise.all` de N guardados) verían el ref todavía vacío
+   * cada una y arrancarían su propio `iniciarInspeccion` — la carrera que
+   * este cambio cierra. Con la asignación síncrona, la llamada 2 a la N
+   * encuentran la promesa de la llamada 1 ya en el ref y esperan por ELLA,
+   * sin disparar red de más.
    */
-  async function asegurarRevision(): Promise<ResultadoAccion> {
-    if (revisionAseguradaRef.current) return { ok: true };
-    if (modo === "nueva") {
-      const res = await iniciarInspeccion({
+  function asegurarRevision(): Promise<ResultadoAccion> {
+    if (revisionPromesaRef.current) return revisionPromesaRef.current;
+    const promesa: Promise<ResultadoAccion> = (async () => {
+      if (modo === "nueva") {
+        const res = await iniciarInspeccion({
+          ticketId,
+          cabecera: {
+            transporte: cabecera.transporte,
+            conductor: cabecera.conductor,
+            fecha: new Date(cabecera.fecha).toISOString(),
+            procedencia: cabecera.procedencia,
+            tipo_camion: cabecera.tipo_camion,
+            patente_camion: cabecera.patente_camion,
+            patente_rampla: cabecera.patente_rampla,
+          },
+          fechaVencimientoISO: new Date(cabecera.fechaVencimiento).toISOString(),
+          tipoInspeccion: tipoSeleccionado,
+          nombreEncarpador:
+            tipoSeleccionado === "control_salida" ? nombreEncarpador : null,
+          nombreGuardia:
+            tipoSeleccionado === "control_salida" ? nombreGuardia : null,
+          nroContenedor:
+            tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
+        });
+        if (res.ok) setNumInsp(res.numeroInspeccion);
+        return res;
+      }
+      return iniciarReinspeccion({
         ticketId,
-        cabecera: {
-          transporte: cabecera.transporte,
-          conductor: cabecera.conductor,
-          fecha: new Date(cabecera.fecha).toISOString(),
-          procedencia: cabecera.procedencia,
-          tipo_camion: cabecera.tipo_camion,
-          patente_camion: cabecera.patente_camion,
-          patente_rampla: cabecera.patente_rampla,
-        },
-        fechaVencimientoISO: new Date(cabecera.fechaVencimiento).toISOString(),
-        tipoInspeccion: tipoSeleccionado,
-        nombreEncarpador:
-          tipoSeleccionado === "control_salida" ? nombreEncarpador : null,
-        nombreGuardia:
-          tipoSeleccionado === "control_salida" ? nombreGuardia : null,
-        nroContenedor:
-          tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
+        conductor: conductorRevision.trim(),
+        fechaVencimientoISO: new Date(vencRevision).toISOString(),
       });
-      if (!res.ok) return res;
-      revisionAseguradaRef.current = true;
-      setNumInsp(res.numeroInspeccion);
-      return { ok: true };
-    }
-    const res = await iniciarReinspeccion({
-      ticketId,
-      conductor: conductorRevision.trim(),
-      fechaVencimientoISO: new Date(vencRevision).toISOString(),
-    });
-    if (!res.ok) return res;
-    revisionAseguradaRef.current = true;
-    return { ok: true };
+    })()
+      .then((res) => {
+        // Fracaso de negocio (`{ok:false}`, no una excepción): no queda
+        // "asegurada" — limpiar el ref para que el próximo guardado pueda
+        // reintentar, en vez de recibir para siempre el mismo fracaso
+        // cacheado.
+        if (!res.ok) revisionPromesaRef.current = null;
+        return res;
+      })
+      .catch((e) => {
+        revisionPromesaRef.current = null;
+        throw e;
+      });
+    revisionPromesaRef.current = promesa;
+    return promesa;
   }
 
   async function conRevisionAsegurada<T>(
@@ -801,13 +841,45 @@ export function InspeccionForm({
    * toca un ítem que ya tiene valor, así sea "no conforme". Que este botón
    * pudiera pisar un hallazgo ya registrado sería peor que el problema que
    * viene a resolver (§2.7 de la fase).
+   *
+   * UNA sola llamada de red para todos los ítems pendientes, no N en
+   * paralelo — bug real, reportado y medido: la versión anterior hacía
+   * `Promise.all(claves.map(key => onEstadoItem(key, "conforme")))`, es
+   * decir, N llamadas a `guardarRespuestaItem` en paralelo, cada una
+   * disparando su propio `asegurarRevision()` (ver el comentario grande de
+   * esa función) — con 15-18 ítems pendientes, eso son 15-18 upserts
+   * concurrentes peleando por el mismo candado de fila en `tickets`,
+   * causando tanto los saltos de `numero_inspeccion` como buena parte de
+   * los 45-60s de espera medidos en producción. `marcarItemsConforme`
+   * (tickets/actions.ts) guarda todos los ítems en un solo upsert; acá se
+   * llama UNA vez (vía `conRevisionAsegurada`, no una por ítem) y su
+   * resultado se refleja en el indicador de cada fila sin volver a llamar
+   * al servidor por cada una — `guardadoItems.ejecutar` recibe la MISMA
+   * promesa compartida, no una nueva por ítem.
    */
   async function marcarPendientesConforme() {
     const claves = itemsPendientes.map((i) => i.key);
     if (claves.length === 0) return;
-    await guardadoPendientes.ejecutar(() =>
-      Promise.all(claves.map((key) => onEstadoItem(key, "conforme"))),
-    );
+    for (const key of claves) patchResp(key, { estado: "conforme" });
+    try {
+      await guardadoPendientes.ejecutar(async () => {
+        const promesaCompartida = conRevisionAsegurada(() =>
+          marcarItemsConforme({ ticketId, revisionNumero: rev, itemKeys: claves }),
+        );
+        await Promise.all(
+          claves.map((key) =>
+            guardadoItems.ejecutar(key, async () => {
+              const res = await promesaCompartida;
+              if (!res.ok) throw new Error(res.mensaje);
+            }),
+          ),
+        );
+      });
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "No se pudo guardar el elemento.",
+      );
+    }
   }
 
   function onObservacionItem(key: string, texto: string) {
