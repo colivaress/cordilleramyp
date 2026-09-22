@@ -712,6 +712,58 @@ export async function guardarRespuestaItem(
 }
 
 /**
+ * Guarda "conforme" para VARIOS ítems modo 'estado' en una sola consulta —
+ * es lo que dispara el botón "Marcar los pendientes como conforme"
+ * (InspeccionForm.tsx). Antes, ese botón llamaba `guardarRespuestaItem` una
+ * vez por ítem, en paralelo (`Promise.all`): con 15-18 ítems pendientes,
+ * eso son 15-18 llamadas de red simultáneas, cada una re-disparando
+ * `asegurarRevision()` (ver el comentario grande en InspeccionForm.tsx) antes
+ * de que la primera termine de confirmar que el ticket ya existe — de ahí
+ * salían los saltos de `numero_inspeccion` medidos en producción (14-17 por
+ * inspección) y buena parte de los 45-60s de espera: N upserts peleando por
+ * el mismo candado de fila en `tickets`. La capa 1 (asegurarRevision con una
+ * promesa compartida) cierra esa carrera puntual; esta función además evita
+ * generarla desde el vamos, reemplazando las N llamadas por 1.
+ *
+ * Solo para "conforme" — nunca se usa para "no conforme" (ese sigue
+ * pasando por `guardarRespuestaItem`, con foto y observación obligatorias,
+ * uno a la vez, como corresponde a algo que el supervisor sí está
+ * completando a mano). `marcarPendientesConforme` en el cliente ya filtra a
+ * los ítems SIN responder — acá se vuelve a asumir "conforme" siempre, sin
+ * aceptar otro valor, para que esta función no pueda usarse para otra cosa.
+ */
+export async function marcarItemsConforme(input: {
+  ticketId: string;
+  revisionNumero: number;
+  itemKeys: string[];
+}): Promise<ResultadoAccion> {
+  if (input.itemKeys.length === 0) return { ok: true };
+  const { perfil } = await getSesion();
+  const supabase = await createClient();
+  const auth = await autorizarRevisionEnCurso(
+    supabase,
+    perfil.id,
+    input.ticketId,
+    input.revisionNumero,
+  );
+  if (!auth.ok) return auth;
+
+  const { error } = await supabase.from("ticket_checklist_respuestas").upsert(
+    input.itemKeys.map((itemKey) => ({
+      ticket_id: input.ticketId,
+      revision_numero: input.revisionNumero,
+      item_key: itemKey,
+      estado: "conforme" as const,
+      observacion: null,
+      foto_url: null,
+    })),
+    { onConflict: "ticket_id,revision_numero,item_key" },
+  );
+  if (error) return errorInesperado("marcarItemsConforme.upsert", error);
+  return { ok: true };
+}
+
+/**
  * Fase "tipos de inspección" — parte 2/4. Guarda (o quita) UNA de las dos
  * fotos obligatorias de un ítem de modo 'fotos' — orden 1 o 2 en
  * `ticket_checklist_fotos` (unique(respuesta_id, orden): el orden se manda
