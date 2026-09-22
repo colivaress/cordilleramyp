@@ -44,7 +44,15 @@ jobs:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
 
       - name: Instalar Vercel CLI
-        run: npm install --global vercel@latest
+        # Versión fija, no "latest": la corrida del 2026-09-21 usó 59.23.2 y
+        # compiló bien; la del 2026-09-22 saltó sola a 59.25.2 (sin ningún
+        # commit de este repo entre medio) y el build empezó a fallar con
+        # "ENOENT .../.next/next-server.js.nft.json" — Turbopack (default en
+        # Next 16) no emite esos archivos de trazado, y una versión nueva de
+        # la CLI empezó a exigirlos. Mismo patrón que supabase/setup-cli más
+        # arriba: fijar la versión evita correr un binario distinto al
+        # probado sin ningún commit que lo explique.
+        run: npm install --global vercel@59.23.2
 
       - name: Descargar configuración del proyecto (preview)
         run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
