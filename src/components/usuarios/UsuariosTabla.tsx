@@ -30,7 +30,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ContenidoBoton, IndicadorGuardado } from "@/components/ui/estado-accion";
+import { ContenidoBoton } from "@/components/ui/estado-accion";
 import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
 import {
   agregarUsuario,
@@ -828,7 +828,16 @@ function FilaUsuario({
             así que el ancho de esta celda deja de depender del estado de la
             fila. */}
         <div className="flex flex-nowrap items-center justify-end gap-1.5">
-          <IndicadorGuardado estado={guardado.estado} />
+          {/* Sin IndicadorGuardado acá a propósito (bug real, reportado): esta
+              celda es de ancho fijo y ya está justo con Editar + el
+              disparador "⋯" — agregarle el indicador ("Guardando…"/"Error al
+              guardar") la desbordaba, y como es sticky con fondo opaco pero
+              el contenido desbordado no lo hereda, el texto quedaba flotando
+              sobre la columna Estado, montado encima de la pastilla. El éxito
+              y el error de una acción de fila ya se avisan por toast (más
+              abajo, en `accion()`) — eso es el aviso de arriba; no hace falta
+              duplicarlo acá. `guardado.pendiente` sigue deshabilitando los
+              controles mientras hay algo en curso. */}
           {/* size="sm"/"icon-sm" explícito a propósito: hasta dos acciones
               por fila en un panel de administración de escritorio — el
               default de 44px infla cada fila sin necesidad (no es lo que usa
