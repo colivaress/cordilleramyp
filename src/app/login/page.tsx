@@ -113,9 +113,10 @@ function LoginForm() {
       await guardado.ejecutar(async () => {
         const supabase = createClient();
         const { error } = await supabase.auth.resetPasswordForEmail(recuperarEmail, {
-          // Pasa por /auth/callback para canjear el code (PKCE) y dejar la
-          // sesión de recuperación lista antes de mostrar el formulario de
-          // nueva clave.
+          // Pasa por /auth/callback, que detecta el flujo implícito de
+          // GoTrue (sesión en el fragmento de la URL) y deja la sesión de
+          // recuperación lista antes de mostrar el formulario de nueva
+          // clave.
           redirectTo:
             typeof window !== "undefined"
               ? `${window.location.origin}/auth/callback?next=/auth/actualizar-clave`
