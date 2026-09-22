@@ -44,7 +44,11 @@ jobs:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
 
       - name: Instalar Vercel CLI
-        run: npm install --global vercel@latest
+        # Versión fija, no "latest": ver el comentario en deploy-staging.yml
+        # — la CLI saltó sola de 59.23.2 (compilaba bien) a 59.25.2 (rompe el
+        # build con "ENOENT .../.next/next-server.js.nft.json") entre dos
+        # corridas de staging, sin ningún commit de este repo entre medio.
+        run: npm install --global vercel@59.23.2
 
       - name: Descargar configuración del proyecto (producción)
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}

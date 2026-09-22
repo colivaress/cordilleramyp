@@ -28,8 +28,9 @@ export default function ActualizarClavePage() {
   const [error, setError] = useState<string | null>(null);
   const guardado = useEstadoGuardado();
 
-  // §8.1: se llega acá desde el enlace del correo, que pasa por /auth/callback y
-  // deja una sesión de recuperación activa. Si no hay sesión, el enlace venció.
+  // §8.1: se llega acá desde el enlace del correo (invitación o
+  // recuperación), que pasa por /auth/callback y deja una sesión activa a
+  // partir del fragmento de la URL. Si no hay sesión, el enlace venció.
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data, error }) => {
