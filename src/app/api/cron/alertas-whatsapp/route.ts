@@ -50,7 +50,17 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
-  if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
+  const authHeader = req.headers.get("authorization");
+  if (!secret || authHeader !== `Bearer ${secret}`) {
+    // DIAGNÓSTICO TEMPORAL — sacar antes de mergear a main. Nunca loguea el
+    // secreto ni el header completo, solo booleanos/largos/prefijo fijo.
+    console.warn("[cron alertas] 401", {
+      secretDefinido: Boolean(secret),
+      largoSecret: secret?.length ?? 0,
+      headerPresente: Boolean(authHeader),
+      largoHeader: authHeader?.length ?? 0,
+      prefijoHeader: authHeader?.slice(0, 7) ?? null,
+    });
     return NextResponse.json({ error: "No autorizado." }, { status: 401 });
   }
 
