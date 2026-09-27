@@ -372,6 +372,26 @@ export async function iniciarInspeccion(
     return { ok: false, mensaje: "Falta el tipo de inspección." };
   if (!(ORDEN_TIPOS_INSPECCION as readonly string[]).includes(input.tipoInspeccion))
     return { ok: false, mensaje: "Tipo de inspección inválido." };
+
+  // Defensa en profundidad, mismo patrón que el chequeo de permiso más abajo:
+  // la pantalla de "Nueva inspección" ya filtra el combo a los tipos con
+  // `activo = true` (tickets/new/page.tsx), así que llegar acá con un tipo
+  // deshabilitado solo pasa si algo bypasea la UI. Un tipo deshabilitado NO
+  // se borra de `tipos_inspeccion` (los tickets ya creados con ese tipo
+  // siguen necesitando la fila), así que esto no puede resolverse solo con
+  // el chequeo de ORDEN_TIPOS_INSPECCION de arriba — hace falta consultar
+  // `activo` en la base.
+  const { data: tipoRow } = await supabase
+    .from("tipos_inspeccion")
+    .select("activo")
+    .eq("clave", input.tipoInspeccion)
+    .maybeSingle();
+  if (!tipoRow?.activo)
+    return {
+      ok: false,
+      mensaje: "Este tipo de inspección ya no está disponible para inspecciones nuevas.",
+    };
+
   const valCampos = validarCamposPorTipo(input.tipoInspeccion, input);
   if (!valCampos.ok) return valCampos;
 

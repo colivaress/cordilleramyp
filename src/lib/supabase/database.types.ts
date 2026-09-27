@@ -481,14 +481,17 @@ export type Database = {
       }
       tipos_inspeccion: {
         Row: {
+          activo: boolean
           clave: string
           titulo: string
         }
         Insert: {
+          activo?: boolean
           clave: string
           titulo: string
         }
         Update: {
+          activo?: boolean
           clave?: string
           titulo?: string
         }
