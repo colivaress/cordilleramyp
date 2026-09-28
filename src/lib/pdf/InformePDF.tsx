@@ -76,7 +76,10 @@ export type InformePDFDatos = {
   cabecera: {
     transporte: string;
     fecha: string;
-    procedencia: string;
+    // Cambios al formulario pedidos por el cliente: "control_salida" no
+    // pide Procedencia — nullable, mismo criterio que nombreEncarpador/
+    // nombreGuardia/nroContenedor de más abajo.
+    procedencia: string | null;
     tipoCamion: string;
     patenteCamion: string;
     patenteRampla: string;
@@ -478,7 +481,7 @@ export function InformePDF({ datos }: { datos: InformePDFDatos }) {
           <Dato k="Transporte" v={c.transporte} />
           {!esTodas && <Dato k="Conductor" v={rev0.conductor} />}
           <Dato k="Fecha" v={c.fecha} />
-          <Dato k="Procedencia" v={c.procedencia} />
+          <Dato k="Procedencia" v={c.procedencia ?? ""} />
           <Dato k="Tipo de camión" v={c.tipoCamion} />
           <Dato k="Patente camión" v={c.patenteCamion} />
           <Dato k="Patente rampla" v={c.patenteRampla} />

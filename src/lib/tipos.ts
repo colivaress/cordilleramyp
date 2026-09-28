@@ -37,6 +37,25 @@ export const ETIQUETA_TIPO_INSPECCION: Record<string, string> = {
   desencarpe: "Desencarpe",
 };
 
+/**
+ * Combo "Tipo de camión" del formulario de "Datos de Inspección" — pedido
+ * del cliente, valores cerrados. Se guarda el texto tal cual se muestra
+ * (`tickets.tipo_camion` sigue siendo `text`, sin un enum de Postgres
+ * detrás) — los valores que ya existían en la base antes de este cambio
+ * eran datos de prueba, no se migran ni se preservan; una ficha con un
+ * valor fuera de esta lista sigue mostrándolo tal cual (los `<Dato>` que
+ * leen `tickets.tipo_camion` no filtran contra esta lista).
+ */
+export const OPCIONES_TIPO_CAMION = ["Slider", "Abierto", "Baranda"] as const;
+
+/**
+ * Combo "Procedencia" — mismo criterio que OPCIONES_TIPO_CAMION arriba.
+ * No aplica al tipo "control_salida" (se sacó del formulario para ese
+ * tipo; `tickets.procedencia` es nullable ahí — ver la migración
+ * correspondiente).
+ */
+export const OPCIONES_PROCEDENCIA = ["Local", "Internacional"] as const;
+
 /** Estado derivado de vencimiento (no persistido) — §3. */
 export type EstadoVencimiento = "vigente" | "por_vencer" | "vencido";
 
