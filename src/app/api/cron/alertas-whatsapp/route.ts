@@ -3,8 +3,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { enviarWhatsAppPlantilla } from "@/lib/whatsapp";
 import { enviarCorreoHtml } from "@/lib/email";
 import {
-  construirCorreoVencimientoAdmin,
-  construirCorreoVencimientoExterno,
+  construirCorreoVencimientoConEnlace,
+  construirCorreoVencimientoSinEnlace,
   nombreCompleto,
   type MomentoVencimiento,
 } from "@/lib/mensajes";
@@ -30,19 +30,28 @@ export const dynamic = "force-dynamic";
  *       ausente = apagado (ver .env.example).
  * §3.2: correo de vencimiento en 48h, 24h y al vencer (cada momento una sola
  *       vez por ciclo — `alerta_admin_*_enviada`), a DOS grupos separados,
- *       en dos envíos distintos (nunca mezclados en el mismo mensaje):
- *         - interno: administradores y administrador_contrato activos de
- *           `personal` + el supervisor del ticket si está activo. Plantilla
- *           con el link al informe y el nombre del supervisor
- *           (construirCorreoVencimientoAdmin).
- *         - externo: `destinatarios_correo_tipos` con `recibe_vencimientos =
- *           true` PARA EL TIPO del ticket.
- *           Plantilla sin esos dos datos (construirCorreoVencimientoExterno)
- *           — gente fuera de Cordillera, sin cuenta en el sistema.
- *       Si un correo aparece en los dos grupos, se deja solo en el interno
- *       (comparación en minúsculas) para que nadie reciba dos copias. Un
- *       momento cuenta como "enviado" (se marca el flag) si al menos uno de
- *       los dos grupos salió bien.
+ *       en dos envíos distintos (nunca mezclados en el mismo mensaje). El
+ *       criterio que separa los grupos es si el DESTINATARIO FINAL
+ *       corresponde a una fila de `personal` — no de dónde salió la
+ *       dirección:
+ *         - Universo de destinatarios de este aviso: administrador y
+ *           administrador_contrato activos de `personal`, + el supervisor
+ *           del ticket si está activo, + `destinatarios_correo_tipos` con
+ *           `recibe_vencimientos = true` PARA EL TIPO del ticket.
+ *         - con enlace: de ese universo, los que corresponden a una fila de
+ *           `personal` (por construcción, siempre incluye a
+ *           administrador/administrador_contrato/supervisor; también a
+ *           cualquier dirección de `destinatarios_correo` que por
+ *           coincidencia sea la de alguien registrado en `personal`).
+ *           Plantilla con el link al informe y el nombre del supervisor
+ *           (construirCorreoVencimientoConEnlace).
+ *         - sin enlace: el resto — direcciones de `destinatarios_correo`
+ *           que no corresponden a nadie en `personal`. Mismo aviso, sin
+ *           enlace (el informe exige sesión) ni nombre del supervisor
+ *           (construirCorreoVencimientoSinEnlace).
+ *       Un correo nunca recibe las dos copias (comparación en minúsculas).
+ *       Un momento cuenta como "enviado" (se marca el flag) si al menos uno
+ *       de los dos grupos salió bien.
  *
  * Los flags se reinician cuando el ticket vuelve a `en_revision` con una
  * `fecha_vencimiento` nueva (ver iniciarInspeccion / iniciarReinspeccion).
@@ -52,15 +61,6 @@ export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   const authHeader = req.headers.get("authorization");
   if (!secret || authHeader !== `Bearer ${secret}`) {
-    // DIAGNÓSTICO TEMPORAL — sacar antes de mergear a main. Nunca loguea el
-    // secreto ni el header completo, solo booleanos/largos/prefijo fijo.
-    console.warn("[cron alertas] 401", {
-      secretDefinido: Boolean(secret),
-      largoSecret: secret?.length ?? 0,
-      headerPresente: Boolean(authHeader),
-      largoHeader: authHeader?.length ?? 0,
-      prefijoHeader: authHeader?.slice(0, 7) ?? null,
-    });
     return NextResponse.json({ error: "No autorizado." }, { status: 401 });
   }
 
@@ -132,14 +132,30 @@ export async function GET(req: NextRequest) {
     .map((a) => (a.email ?? "").trim())
     .filter(Boolean);
 
-  // Destinatarios por tipo de inspección: el grupo externo del aviso de
-  // vencimiento ya no es una sola lista global — cada destinatario está
-  // autorizado (o no) por tipo, en destinatarios_correo_tipos. Se trae UNA
-  // sola vez, agrupado por tipo, y se busca el grupo correspondiente por
-  // ticket dentro del loop de abajo (t.tipo_inspeccion) — evita repetir la
-  // consulta por cada ticket de la corrida. El grupo INTERNO (admins +
-  // supervisor del ticket) sigue siendo automático y por rol, no se toca —
-  // eso no se configura por tipo, ver el comentario grande de arriba.
+  // Conjunto de TODOS los correos que corresponden a una fila de `personal`
+  // (cualquier rol, activo o no) — es el criterio real que decide si un
+  // destinatario recibe el enlace al informe (ver el comentario grande de
+  // arriba). No se filtra por `activo`: la pregunta acá es "¿existe esta
+  // persona en el sistema?", no "¿puede iniciar sesión hoy?" — eso ya lo
+  // exige el propio enlace al abrirse (requireRol/RLS), no hace falta
+  // duplicarlo en este chequeo.
+  const { data: personalEmailsData } = await supabase
+    .from("personal")
+    .select("email");
+  const emailsEnPersonal = new Set(
+    (personalEmailsData ?? [])
+      .map((p) => (p.email ?? "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  // Destinatarios por tipo de inspección, configurados en
+  // destinatarios_correo_tipos con recibe_vencimientos=true PARA ESE TIPO —
+  // no es una sola lista global. Se trae UNA sola vez, agrupado por tipo, y
+  // se busca el grupo correspondiente por ticket dentro del loop de abajo
+  // (t.tipo_inspeccion) — evita repetir la consulta por cada ticket de la
+  // corrida. Estas direcciones pueden terminar en cualquiera de los dos
+  // grupos de envío (con o sin enlace) según si coinciden con `personal` —
+  // ver el chequeo contra `emailsEnPersonal` más abajo.
   const { data: externosData } = await supabase
     .from("destinatarios_correo_tipos")
     .select(
@@ -283,7 +299,7 @@ export async function GET(req: NextRequest) {
   const resultadosCorreo: {
     numeroInspeccion: number;
     momento: MomentoVencimiento;
-    grupo: "interno" | "externo";
+    grupo: "conEnlace" | "sinEnlace";
     ok: boolean;
     error?: string;
   }[] = [];
@@ -293,35 +309,42 @@ export async function GET(req: NextRequest) {
       ? nombreCompleto(t.supervisor.nombre, t.supervisor.apellido)
       : "—";
 
-    // Interno: admins + el supervisor del ticket, solo si está activo.
-    // Comparación de duplicados siempre en minúsculas.
-    const internosLower = new Set(adminEmails.map((e) => e.toLowerCase()));
+    // Universo de este ticket: administrador/administrador_contrato + el
+    // supervisor del ticket (si está activo) + destinatarios_correo_tipos
+    // del tipo de este ticket. Comparación de duplicados siempre en
+    // minúsculas — un correo nunca recibe dos copias.
+    const baseLower = new Set(adminEmails.map((e) => e.toLowerCase()));
     if (t.supervisor?.activo) {
       const supervisorEmail = (t.supervisor.email ?? "").trim();
-      if (supervisorEmail) internosLower.add(supervisorEmail.toLowerCase());
+      if (supervisorEmail) baseLower.add(supervisorEmail.toLowerCase());
     }
-    const correosInternos = Array.from(internosLower);
-
-    // Externo: destinatarios_correo_tipos con recibe_vencimientos PARA EL
-    // TIPO de este ticket, menos quien ya esté en el grupo interno — nadie
-    // recibe dos copias ni dos versiones.
-    const externosDeEsteTipo = t.tipo_inspeccion
+    const configuradosDeEsteTipo = t.tipo_inspeccion
       ? (externosPorTipo.get(t.tipo_inspeccion) ?? [])
       : [];
-    const correosExternos = Array.from(
-      new Set(
-        externosDeEsteTipo
-          .map((e) => e.toLowerCase())
-          .filter((e) => !internosLower.has(e)),
-      ),
+    const configuradosLower = new Set(
+      configuradosDeEsteTipo.map((e) => e.toLowerCase()).filter(Boolean),
     );
+    for (const e of baseLower) configuradosLower.delete(e);
 
-    let internoOk = false;
-    let externoOk = false;
+    // El criterio que separa los dos envíos: ¿esta dirección corresponde a
+    // una fila de `personal`? — admin/administrador_contrato/supervisor
+    // siempre lo son, por construcción; una dirección de
+    // destinatarios_correo puede o no coincidir con alguien de `personal`.
+    const conEnlaceLower = new Set(baseLower);
+    const sinEnlaceLower = new Set<string>();
+    for (const e of configuradosLower) {
+      if (emailsEnPersonal.has(e)) conEnlaceLower.add(e);
+      else sinEnlaceLower.add(e);
+    }
+    const correosConEnlace = Array.from(conEnlaceLower);
+    const correosSinEnlace = Array.from(sinEnlaceLower);
 
-    // --- grupo interno ---
-    const { asunto: asuntoInterno, html: htmlInterno } =
-      construirCorreoVencimientoAdmin(momento, {
+    let conEnlaceOk = false;
+    let sinEnlaceOk = false;
+
+    // --- grupo con enlace ---
+    const { asunto: asuntoConEnlace, html: htmlConEnlace } =
+      construirCorreoVencimientoConEnlace(momento, {
         ticketId: t.id,
         numeroInspeccion: t.numero_inspeccion,
         transporte: t.transporte,
@@ -332,92 +355,92 @@ export async function GET(req: NextRequest) {
         urlInforme: `${baseUrl}/tickets/${t.id}/report`,
       });
     try {
-      if (correosInternos.length === 0) {
+      if (correosConEnlace.length === 0) {
         await registrar(
           supabase,
           t.id,
           "email",
           "—",
-          `FALLO [${momento}/interno] (sin destinatarios internos activos): ${asuntoInterno}`,
+          `FALLO [${momento}/conEnlace] (sin destinatarios activos en personal): ${asuntoConEnlace}`,
         );
         resultadosCorreo.push({
           numeroInspeccion: t.numero_inspeccion,
           momento,
-          grupo: "interno",
+          grupo: "conEnlace",
           ok: false,
-          error: "sin destinatarios internos activos",
+          error: "sin destinatarios activos en personal",
         });
       } else {
         await enviarCorreoHtml({
-          destinatarios: correosInternos,
-          asunto: asuntoInterno,
-          cuerpoHtml: htmlInterno,
+          destinatarios: correosConEnlace,
+          asunto: asuntoConEnlace,
+          cuerpoHtml: htmlConEnlace,
         });
         await registrar(
           supabase,
           t.id,
           "email",
-          correosInternos.join(", "),
-          `[${momento}/interno] ${asuntoInterno}`,
+          correosConEnlace.join(", "),
+          `[${momento}/conEnlace] ${asuntoConEnlace}`,
         );
-        internoOk = true;
+        conEnlaceOk = true;
         resultadosCorreo.push({
           numeroInspeccion: t.numero_inspeccion,
           momento,
-          grupo: "interno",
+          grupo: "conEnlace",
           ok: true,
         });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "error desconocido";
       console.error(
-        `[cron alertas] correo ${momento}/interno Inspección ${t.numero_inspeccion}: ${msg}`,
+        `[cron alertas] correo ${momento}/conEnlace Inspección ${t.numero_inspeccion}: ${msg}`,
       );
       await registrar(
         supabase,
         t.id,
         "email",
-        correosInternos.join(", ") || "—",
-        `FALLO [${momento}/interno]: ${asuntoInterno} — ${msg}`,
+        correosConEnlace.join(", ") || "—",
+        `FALLO [${momento}/conEnlace]: ${asuntoConEnlace} — ${msg}`,
       );
       resultadosCorreo.push({
         numeroInspeccion: t.numero_inspeccion,
         momento,
-        grupo: "interno",
+        grupo: "conEnlace",
         ok: false,
         error: msg,
       });
     }
 
-    // --- grupo externo ---
-    // A diferencia del interno (siempre debería haber administradores), un
-    // tipo de inspección sin destinatarios externos configurados es un
-    // estado válido — pero no debe quedar en silencio: si nadie externo se
-    // entera de un vencimiento porque nadie cargó destinatarios para ese
-    // tipo (o el Map ni siquiera trae esa clave, `?? []`), eso tiene que
-    // verse en la corrida, no descubrirse después preguntando por qué no
-    // llegó nada.
-    if (correosExternos.length === 0) {
+    // --- grupo sin enlace ---
+    // A diferencia del grupo con enlace (siempre debería haber
+    // administradores), un tipo de inspección sin destinatarios externos
+    // configurados (o todos coincidiendo con personal) es un estado válido
+    // — pero no debe quedar en silencio: si nadie sin cuenta se entera de
+    // un vencimiento porque nadie cargó destinatarios para ese tipo (o el
+    // Map ni siquiera trae esa clave, `?? []`), eso tiene que verse en la
+    // corrida, no descubrirse después preguntando por qué no llegó nada.
+    if (correosSinEnlace.length === 0) {
       console.log(
-        `[cron alertas] correo ${momento}/externo Inspección ${t.numero_inspeccion}: sin destinatarios externos configurados para tipo "${t.tipo_inspeccion ?? "—"}" (o todos ya estaban en el grupo interno)`,
+        `[cron alertas] correo ${momento}/sinEnlace Inspección ${t.numero_inspeccion}: sin destinatarios configurados para tipo "${t.tipo_inspeccion ?? "—"}" (o todos correspondían a alguien de personal)`,
       );
       await registrar(
         supabase,
         t.id,
         "email",
         "—",
-        `SIN DESTINATARIOS [${momento}/externo] (tipo ${t.tipo_inspeccion ?? "—"}): ningún destinatario externo configurado/activo para este tipo`,
+        `SIN DESTINATARIOS [${momento}/sinEnlace] (tipo ${t.tipo_inspeccion ?? "—"}): ningún destinatario configurado/activo para este tipo fuera de personal`,
       );
       resultadosCorreo.push({
         numeroInspeccion: t.numero_inspeccion,
         momento,
-        grupo: "externo",
+        grupo: "sinEnlace",
         ok: false,
-        error: `sin destinatarios externos para tipo ${t.tipo_inspeccion ?? "—"}`,
+        error: `sin destinatarios sin enlace para tipo ${t.tipo_inspeccion ?? "—"}`,
       });
     } else {
-      const { asunto: asuntoExterno, html: htmlExterno } =
-        construirCorreoVencimientoExterno(momento, {
+      const { asunto: asuntoSinEnlace, html: htmlSinEnlace } =
+        construirCorreoVencimientoSinEnlace(momento, {
           numeroInspeccion: t.numero_inspeccion,
           transporte: t.transporte,
           patenteCamion: t.patente_camion,
@@ -426,40 +449,40 @@ export async function GET(req: NextRequest) {
         });
       try {
         await enviarCorreoHtml({
-          destinatarios: correosExternos,
-          asunto: asuntoExterno,
-          cuerpoHtml: htmlExterno,
+          destinatarios: correosSinEnlace,
+          asunto: asuntoSinEnlace,
+          cuerpoHtml: htmlSinEnlace,
         });
         await registrar(
           supabase,
           t.id,
           "email",
-          correosExternos.join(", "),
-          `[${momento}/externo] ${asuntoExterno}`,
+          correosSinEnlace.join(", "),
+          `[${momento}/sinEnlace] ${asuntoSinEnlace}`,
         );
-        externoOk = true;
+        sinEnlaceOk = true;
         resultadosCorreo.push({
           numeroInspeccion: t.numero_inspeccion,
           momento,
-          grupo: "externo",
+          grupo: "sinEnlace",
           ok: true,
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : "error desconocido";
         console.error(
-          `[cron alertas] correo ${momento}/externo Inspección ${t.numero_inspeccion}: ${msg}`,
+          `[cron alertas] correo ${momento}/sinEnlace Inspección ${t.numero_inspeccion}: ${msg}`,
         );
         await registrar(
           supabase,
           t.id,
           "email",
-          correosExternos.join(", "),
-          `FALLO [${momento}/externo]: ${asuntoExterno} — ${msg}`,
+          correosSinEnlace.join(", "),
+          `FALLO [${momento}/sinEnlace]: ${asuntoSinEnlace} — ${msg}`,
         );
         resultadosCorreo.push({
           numeroInspeccion: t.numero_inspeccion,
           momento,
-          grupo: "externo",
+          grupo: "sinEnlace",
           ok: false,
           error: msg,
         });
@@ -467,7 +490,7 @@ export async function GET(req: NextRequest) {
     }
 
     // El hito queda cerrado si al menos uno de los dos grupos salió bien.
-    if (internoOk || externoOk) {
+    if (conEnlaceOk || sinEnlaceOk) {
       await supabase.from("tickets").update(flagUpdate(momento)).eq("id", t.id);
     }
   }

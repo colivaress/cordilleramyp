@@ -52,6 +52,8 @@ import type { ResultadoAccion } from "@/lib/resultado-accion";
 import {
   ETIQUETA_TIPO_INSPECCION,
   ORDEN_TIPOS_INSPECCION,
+  OPCIONES_PROCEDENCIA,
+  OPCIONES_TIPO_CAMION,
   type ChecklistItem,
   type ItemEstado,
   type TipoInspeccion,
@@ -84,7 +86,22 @@ const cabeceraVacia = (): Cabecera => ({
 
 // §2.7: campos obligatorios de "Datos de Inspección" (validación de cliente).
 // §1: `fecha` NO va acá — no es un input, se carga sola y siempre tiene valor.
-const CAMPOS_CABECERA: { key: keyof Cabecera; label: string; type?: string }[] = [
+//
+// `opciones` — cambios al formulario pedidos por el cliente: Procedencia y
+// Tipo de camión pasan de texto libre a combo con valores cerrados (el
+// texto mostrado es el valor que se guarda, sin transformación). Un campo
+// con `opciones` se renderiza como <select>, no como <Input> — ver el loop
+// de render más abajo.
+// `ocultarEnControlSalida` — Procedencia se saca del formulario para el
+// tipo "control_salida" (junto con Nombre Guardia, renderizado aparte):
+// ambos campos condicionales por tipo.
+const CAMPOS_CABECERA: {
+  key: keyof Cabecera;
+  label: string;
+  type?: string;
+  opciones?: readonly string[];
+  ocultarEnControlSalida?: boolean;
+}[] = [
   { key: "transporte", label: "Transporte" },
   { key: "conductor", label: "Conductor" },
   {
@@ -92,8 +109,13 @@ const CAMPOS_CABECERA: { key: keyof Cabecera; label: string; type?: string }[] =
     label: "Fecha de vencimiento de la corrección",
     type: "datetime-local",
   },
-  { key: "procedencia", label: "Procedencia" },
-  { key: "tipo_camion", label: "Tipo de camión" },
+  {
+    key: "procedencia",
+    label: "Procedencia",
+    opciones: OPCIONES_PROCEDENCIA,
+    ocultarEnControlSalida: true,
+  },
+  { key: "tipo_camion", label: "Tipo de camión", opciones: OPCIONES_TIPO_CAMION },
   { key: "patente_camion", label: "Patente camión" },
   { key: "patente_rampla", label: "Patente rampla" },
 ];
@@ -278,7 +300,6 @@ export function InspeccionForm({
   const tipoInspeccion =
     modo === "nueva" ? tipoSeleccionado : tipoInspeccionInicial ?? "";
   const [nombreEncarpador, setNombreEncarpador] = useState("");
-  const [nombreGuardia, setNombreGuardia] = useState("");
   const [nroContenedor, setNroContenedor] = useState("");
 
   // §2.6: conductor de ESTA revisión (solo re-inspección), prellenado con el de
@@ -513,13 +534,17 @@ export function InspeccionForm({
           conductor: res.cabecera.conductor,
           fecha: isoADatetimeLocal(res.cabecera.fecha),
           fechaVencimiento: isoADatetimeLocal(res.fechaVencimientoRevision),
-          procedencia: res.cabecera.procedencia,
+          // Cambios al formulario pedidos por el cliente: "control_salida"
+          // no pide Procedencia — el ticket puede traer `null` en la base
+          // (nuevo desde este cambio) o un valor legado. El estado de
+          // cliente sigue siendo `string` para no complicar el resto del
+          // formulario; "" se trata igual que "sin valor" en los dos casos.
+          procedencia: res.cabecera.procedencia ?? "",
           tipo_camion: res.cabecera.tipo_camion,
           patente_camion: res.cabecera.patente_camion,
           patente_rampla: res.cabecera.patente_rampla,
         });
         setNombreEncarpador(res.nombreEncarpador ?? "");
-        setNombreGuardia(res.nombreGuardia ?? "");
         setNroContenedor(res.nroContenedor ?? "");
       }
 
@@ -655,8 +680,10 @@ export function InspeccionForm({
           tipoInspeccion: tipoSeleccionado,
           nombreEncarpador:
             tipoSeleccionado === "control_salida" ? nombreEncarpador : null,
-          nombreGuardia:
-            tipoSeleccionado === "control_salida" ? nombreGuardia : null,
+          // Cambios al formulario pedidos por el cliente: "control_salida"
+          // ya no pide Nombre Guardia — siempre null desde acá; el
+          // servidor no lo exige más (validarCamposPorTipo).
+          nombreGuardia: null,
           nroContenedor:
             tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
         });
@@ -770,13 +797,20 @@ export function InspeccionForm({
   const cabeceraCompleta = useMemo(() => {
     if (modo !== "nueva") return true;
     if (!tipoSeleccionado) return false;
-    if (!CAMPOS_CABECERA.every((c) => cabecera[c.key].trim() !== "")) return false;
+    // Cambios al formulario pedidos por el cliente: Procedencia no aplica a
+    // "control_salida" — se excluye del chequeo genérico para ese tipo
+    // (mismo criterio que el servidor, ver validarCabecera en
+    // tickets/actions.ts).
+    const camposAValidar = CAMPOS_CABECERA.filter(
+      (c) => !(c.key === "procedencia" && tipoSeleccionado === "control_salida"),
+    );
+    if (!camposAValidar.every((c) => cabecera[c.key].trim() !== "")) return false;
     if (tipoSeleccionado === "control_salida")
-      return nombreEncarpador.trim() !== "" && nombreGuardia.trim() !== "";
+      return nombreEncarpador.trim() !== "";
     if (tipoSeleccionado === "exportacion_chimolsa")
       return nroContenedor.trim() !== "";
     return true;
-  }, [modo, tipoSeleccionado, cabecera, nombreEncarpador, nombreGuardia, nroContenedor]);
+  }, [modo, tipoSeleccionado, cabecera, nombreEncarpador, nroContenedor]);
   const datosRevisionCompletos =
     conductorRevision.trim() !== "" && vencRevision.trim() !== "";
   const puedeAvanzar =
@@ -1344,26 +1378,50 @@ export function InspeccionForm({
                   Se registra automáticamente al abrir la inspección.
                 </span>
               </div>
-              {CAMPOS_CABECERA.map((c) => (
+              {CAMPOS_CABECERA.filter(
+                (c) =>
+                  !(c.ocultarEnControlSalida && tipoSeleccionado === "control_salida"),
+              ).map((c) => (
                 <div key={c.key} className="grid gap-1.5">
                   <Label htmlFor={c.key}>{c.label}</Label>
-                  <Input
-                    id={c.key}
-                    type={c.type ?? "text"}
-                    required
-                    disabled={camposDeshabilitados}
-                    value={cabecera[c.key]}
-                    onChange={(e) => setCampoCabecera(c.key, e.target.value)}
-                    // Solo visual — la normalización real (mayúsculas, sin
-                    // guiones/puntos, espacios colapsados) la hace el
-                    // servidor en iniciarInspeccion (src/lib/patentes.ts),
-                    // esto no cambia el valor que se envía.
-                    className={
-                      c.key === "patente_camion" || c.key === "patente_rampla"
-                        ? "uppercase"
-                        : undefined
-                    }
-                  />
+                  {c.opciones ? (
+                    <select
+                      id={c.key}
+                      required
+                      disabled={camposDeshabilitados}
+                      value={cabecera[c.key]}
+                      onChange={(e) => setCampoCabecera(c.key, e.target.value)}
+                      className={cn(
+                        nativeSelectClassName,
+                        "w-fit min-w-0 justify-self-start pr-8",
+                      )}
+                    >
+                      <option value="">Seleccionar…</option>
+                      {c.opciones.map((op) => (
+                        <option key={op} value={op}>
+                          {op}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <Input
+                      id={c.key}
+                      type={c.type ?? "text"}
+                      required
+                      disabled={camposDeshabilitados}
+                      value={cabecera[c.key]}
+                      onChange={(e) => setCampoCabecera(c.key, e.target.value)}
+                      // Solo visual — la normalización real (mayúsculas, sin
+                      // guiones/puntos, espacios colapsados) la hace el
+                      // servidor en iniciarInspeccion (src/lib/patentes.ts),
+                      // esto no cambia el valor que se envía.
+                      className={
+                        c.key === "patente_camion" || c.key === "patente_rampla"
+                          ? "uppercase"
+                          : undefined
+                      }
+                    />
+                  )}
                   {c.key === "fechaVencimiento" && (
                     <span className="text-xs text-muted-foreground">
                       {tipoSeleccionado === "control_salida"
@@ -1373,30 +1431,21 @@ export function InspeccionForm({
                   )}
                 </div>
               ))}
-              {/* Fase "tipos de inspección" — §3: campos condicionales por tipo. */}
+              {/* Fase "tipos de inspección" — §3: campos condicionales por tipo.
+                  Cambios al formulario pedidos por el cliente: "Nombre
+                  Guardia" se sacó por completo de este tipo (antes vivía acá
+                  al lado de "Nombre Encarpador"). */}
               {tipoSeleccionado === "control_salida" && (
-                <>
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="nombre-encarpador">Nombre Encarpador</Label>
-                    <Input
-                      id="nombre-encarpador"
-                      required
-                      disabled={camposDeshabilitados}
-                      value={nombreEncarpador}
-                      onChange={(e) => setNombreEncarpador(e.target.value)}
-                    />
-                  </div>
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="nombre-guardia">Nombre Guardia</Label>
-                    <Input
-                      id="nombre-guardia"
-                      required
-                      disabled={camposDeshabilitados}
-                      value={nombreGuardia}
-                      onChange={(e) => setNombreGuardia(e.target.value)}
-                    />
-                  </div>
-                </>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="nombre-encarpador">Nombre Encarpador</Label>
+                  <Input
+                    id="nombre-encarpador"
+                    required
+                    disabled={camposDeshabilitados}
+                    value={nombreEncarpador}
+                    onChange={(e) => setNombreEncarpador(e.target.value)}
+                  />
+                </div>
               )}
               {tipoSeleccionado === "exportacion_chimolsa" && (
                 <div className="grid gap-1.5">

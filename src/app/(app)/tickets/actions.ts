@@ -7,7 +7,11 @@ import {
   estadoTrasChecklist,
   puedeReinspeccionar,
 } from "@/lib/ticket-state-machine";
-import { ORDEN_TIPOS_INSPECCION } from "@/lib/tipos";
+import {
+  ORDEN_TIPOS_INSPECCION,
+  OPCIONES_PROCEDENCIA,
+  OPCIONES_TIPO_CAMION,
+} from "@/lib/tipos";
 import type { ItemEstado, TicketEstado } from "@/lib/tipos";
 import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
 import { firmarRutas } from "@/lib/storage";
@@ -19,7 +23,11 @@ export type CabeceraInput = {
   transporte: string;
   conductor: string;
   fecha: string; // ISO
-  procedencia: string;
+  // Cambios al formulario pedidos por el cliente: "control_salida" ya no
+  // pide Procedencia — `tickets.procedencia` es nullable para ese tipo
+  // (migración 20260928010000). Para los otros 3 tipos sigue siendo
+  // obligatoria — ver validarCabecera(), que ahora es tipo-aware.
+  procedencia: string | null;
   tipo_camion: string;
   patente_camion: string;
   patente_rampla: string;
@@ -53,11 +61,18 @@ export type GuardarRespuestaItemInput = {
   fotoPath: string | null;
 };
 
-function validarCabecera(c: CabeceraInput): ResultadoAccion {
+// Cambios al formulario pedidos por el cliente: "control_salida" ya no pide
+// Procedencia — se excluye de este chequeo genérico para ese tipo y se
+// valida aparte, tipo-aware, en validarCamposPorTipo() de abajo (mismo
+// lugar donde ya viven el resto de las reglas condicionales por tipo).
+function validarCabecera(c: CabeceraInput, tipo: string): ResultadoAccion {
   for (const [k, v] of Object.entries(c)) {
+    if (k === "procedencia" && tipo === "control_salida") continue;
     if (!String(v ?? "").trim())
       return { ok: false, mensaje: `Falta el dato de inspección "${k}".` };
   }
+  if (!(OPCIONES_TIPO_CAMION as readonly string[]).includes(c.tipo_camion))
+    return { ok: false, mensaje: "Tipo de camión inválido." };
   return { ok: true };
 }
 
@@ -66,20 +81,32 @@ function validarCabecera(c: CabeceraInput): ResultadoAccion {
  * 2/4 de "tipos de inspección con checklist propio". El combo del cliente ya
  * los deshabilita/oculta según corresponda, pero esto es la validación real
  * (nunca confiar solo en el cliente, mismo criterio que validarCabecera).
+ *
+ * Procedencia se valida ACÁ (tipo-aware) y no en validarCabecera: para
+ * "control_salida" no aplica en absoluto (ni vacía ni con valor — el
+ * formulario ya no la pide); para los otros 3 tipos, obligatoria y
+ * restringida a OPCIONES_PROCEDENCIA (combo cerrado, cambio pedido por el
+ * cliente).
  */
 function validarCamposPorTipo(
   tipo: string,
   campos: {
+    procedencia?: string | null;
     nombreEncarpador?: string | null;
     nombreGuardia?: string | null;
     nroContenedor?: string | null;
   },
 ): ResultadoAccion {
+  if (tipo !== "control_salida") {
+    if (
+      !campos.procedencia ||
+      !(OPCIONES_PROCEDENCIA as readonly string[]).includes(campos.procedencia)
+    )
+      return { ok: false, mensaje: "Procedencia inválida." };
+  }
   if (tipo === "control_salida") {
     if (!campos.nombreEncarpador?.trim())
       return { ok: false, mensaje: 'Falta el "Nombre Encarpador".' };
-    if (!campos.nombreGuardia?.trim())
-      return { ok: false, mensaje: 'Falta el "Nombre Guardia".' };
   }
   if (tipo === "exportacion_chimolsa") {
     if (!campos.nroContenedor?.trim())
@@ -364,15 +391,41 @@ export async function iniciarInspeccion(
   input.cabecera.patente_camion = normalizarPatente(input.cabecera.patente_camion);
   input.cabecera.patente_rampla = normalizarPatente(input.cabecera.patente_rampla);
 
-  const valCabecera = validarCabecera(input.cabecera);
-  if (!valCabecera.ok) return valCabecera;
   if (!input.fechaVencimientoISO)
     return { ok: false, mensaje: "Falta la fecha de vencimiento de la corrección." };
   if (!input.tipoInspeccion)
     return { ok: false, mensaje: "Falta el tipo de inspección." };
   if (!(ORDEN_TIPOS_INSPECCION as readonly string[]).includes(input.tipoInspeccion))
     return { ok: false, mensaje: "Tipo de inspección inválido." };
-  const valCampos = validarCamposPorTipo(input.tipoInspeccion, input);
+
+  // validarCabecera necesita el tipo para saber si Procedencia aplica —
+  // por eso se llama después de confirmar que input.tipoInspeccion vino.
+  const valCabecera = validarCabecera(input.cabecera, input.tipoInspeccion);
+  if (!valCabecera.ok) return valCabecera;
+
+  // Defensa en profundidad, mismo patrón que el chequeo de permiso más abajo:
+  // la pantalla de "Nueva inspección" ya filtra el combo a los tipos con
+  // `activo = true` (tickets/new/page.tsx), así que llegar acá con un tipo
+  // deshabilitado solo pasa si algo bypasea la UI. Un tipo deshabilitado NO
+  // se borra de `tipos_inspeccion` (los tickets ya creados con ese tipo
+  // siguen necesitando la fila), así que esto no puede resolverse solo con
+  // el chequeo de ORDEN_TIPOS_INSPECCION de arriba — hace falta consultar
+  // `activo` en la base.
+  const { data: tipoRow } = await supabase
+    .from("tipos_inspeccion")
+    .select("activo")
+    .eq("clave", input.tipoInspeccion)
+    .maybeSingle();
+  if (!tipoRow?.activo)
+    return {
+      ok: false,
+      mensaje: "Este tipo de inspección ya no está disponible para inspecciones nuevas.",
+    };
+
+  const valCampos = validarCamposPorTipo(input.tipoInspeccion, {
+    ...input,
+    procedencia: input.cabecera.procedencia,
+  });
   if (!valCampos.ok) return valCampos;
 
   // Fase "tipos de inspección" — parte 4/4: mensaje amigable ANTES del
@@ -400,6 +453,15 @@ export async function iniciarInspeccion(
       {
         id: input.ticketId,
         ...input.cabecera,
+        // Cambios al formulario pedidos por el cliente: "control_salida" no
+        // pide Procedencia — se guarda NULL real, nunca cadena vacía ni un
+        // valor centinela (tickets.procedencia es nullable desde la
+        // migración 20260928010000). Para los otros 3 tipos, validarCabecera
+        // ya garantizó que input.cabecera.procedencia viene no-vacío.
+        procedencia:
+          input.tipoInspeccion === "control_salida"
+            ? null
+            : input.cabecera.procedencia,
         estado: "en_revision",
         revision_actual: 1,
         supervisor_id: perfil.id,
