@@ -404,7 +404,7 @@ export type Database = {
           numero_inspeccion: number
           patente_camion: string
           patente_rampla: string
-          procedencia: string
+          procedencia: string | null
           revision_actual: number
           supervisor_id: string | null
           tipo_camion: string
@@ -429,7 +429,7 @@ export type Database = {
           numero_inspeccion?: never
           patente_camion: string
           patente_rampla: string
-          procedencia: string
+          procedencia?: string | null
           revision_actual?: number
           supervisor_id?: string | null
           tipo_camion: string
@@ -454,7 +454,7 @@ export type Database = {
           numero_inspeccion?: never
           patente_camion?: string
           patente_rampla?: string
-          procedencia?: string
+          procedencia?: string | null
           revision_actual?: number
           supervisor_id?: string | null
           tipo_camion?: string
@@ -481,14 +481,17 @@ export type Database = {
       }
       tipos_inspeccion: {
         Row: {
+          activo: boolean
           clave: string
           titulo: string
         }
         Insert: {
+          activo?: boolean
           clave: string
           titulo: string
         }
         Update: {
+          activo?: boolean
           clave?: string
           titulo?: string
         }

@@ -208,7 +208,7 @@ export default async function InformePage({
             <Dato k="Conductor" v={revSel.conductor ?? ticket.conductor} />
           )}
           <Dato k="Fecha de inspección" v={fmt(ticket.fecha)} />
-          <Dato k="Procedencia" v={ticket.procedencia} />
+          <Dato k="Procedencia" v={ticket.procedencia ?? "—"} />
           <Dato k="Tipo de camión" v={ticket.tipo_camion} />
           <Dato k="Patente camión" v={ticket.patente_camion} />
           <Dato k="Patente rampla" v={ticket.patente_rampla} />
