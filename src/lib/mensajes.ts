@@ -283,11 +283,17 @@ export type DatosAvisoVencimiento = {
 };
 
 /**
- * §3.2 — asunto + cuerpo HTML del aviso automático por correo a los
- * administradores (48h / 24h antes de vencer, o al vencer). Sin PDF adjunto;
- * lleva un botón que abre el informe de esa inspección.
+ * §3.2 — asunto + cuerpo HTML del aviso automático por correo de
+ * vencimiento (48h / 24h antes de vencer, o al vencer) para destinatarios
+ * que corresponden a una fila de `personal` — el criterio no es "tiene rol
+ * administrador", es "existe una cuenta suya en el sistema" (por eso puede
+ * incluir, además de administrador/administrador_contrato/supervisor, una
+ * dirección de `destinatarios_correo` que coincida con alguien de
+ * `personal`). Sin PDF adjunto; lleva un botón que abre el informe de esa
+ * inspección — el motivo de reservar esta versión a gente en `personal` es
+ * justamente que ese enlace exige sesión.
  */
-export function construirCorreoVencimientoAdmin(
+export function construirCorreoVencimientoConEnlace(
   momento: MomentoVencimiento,
   d: DatosAvisoVencimiento,
 ): { asunto: string; html: string } {
@@ -343,7 +349,7 @@ export function construirCorreoVencimientoAdmin(
   return { asunto, html };
 }
 
-/** §3.2 (destinatarios externos) — sin ticketId/supervisorNombre/urlInforme: nadie fuera de Cordillera tiene cuenta en el sistema, así que no hay nada ahí que mostrarles. */
+/** §3.2 (destinatarios sin cuenta en personal) — sin ticketId/supervisorNombre/urlInforme: quien recibe esta versión no tiene cuenta en el sistema, así que no hay nada ahí que mostrarle. */
 export type DatosAvisoVencimientoExterno = {
   numeroInspeccion: number;
   transporte: string;
@@ -354,17 +360,17 @@ export type DatosAvisoVencimientoExterno = {
 };
 
 /**
- * §3.2 — versión del aviso automático de vencimiento para destinatarios
- * externos a Cordillera M&P (destinatarios_correo_tipos con
- * recibe_vencimientos para el tipo del ticket, no personal.rol =
- * administrador). A diferencia de
- * construirCorreoVencimientoAdmin, esta versión NO incluye el enlace al
+ * §3.2 — versión del aviso automático de vencimiento para destinatarios que
+ * NO corresponden a ninguna fila de `personal` (direcciones de
+ * `destinatarios_correo_tipos`/`destinatarios_correo` que no coinciden con
+ * nadie registrado en el sistema). A diferencia de
+ * construirCorreoVencimientoConEnlace, esta versión NO incluye el enlace al
  * informe (`/tickets/[id]/report` requiere sesión en el sistema, que estos
  * destinatarios no tienen) ni el nombre del supervisor a cargo (información
- * interna, no le corresponde a un tercero). Mismo esc() en todos los campos
- * de origen humano que la versión interna.
+ * interna, no le corresponde a alguien fuera del sistema). Mismo esc() en
+ * todos los campos de origen humano que la versión con enlace.
  */
-export function construirCorreoVencimientoExterno(
+export function construirCorreoVencimientoSinEnlace(
   momento: MomentoVencimiento,
   d: DatosAvisoVencimientoExterno,
 ): { asunto: string; html: string } {
