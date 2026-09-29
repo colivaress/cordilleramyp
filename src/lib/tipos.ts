@@ -46,7 +46,7 @@ export const ETIQUETA_TIPO_INSPECCION: Record<string, string> = {
  * valor fuera de esta lista sigue mostrándolo tal cual (los `<Dato>` que
  * leen `tickets.tipo_camion` no filtran contra esta lista).
  */
-export const OPCIONES_TIPO_CAMION = ["Slider", "Abierto", "Baranda"] as const;
+export const OPCIONES_TIPO_CAMION = ["Sider", "Abierto", "Baranda"] as const;
 
 /**
  * Combo "Procedencia" — mismo criterio que OPCIONES_TIPO_CAMION arriba.

@@ -139,7 +139,10 @@ async function prepararRevision(
     numeroRevision: number;
     supervisorId: string;
     conductor: string;
-    fechaVencimientoISO: string;
+    // "control_salida" no tiene fecha de vencimiento — null real, nunca un
+    // valor centinela. Los llamadores (iniciarInspeccion/iniciarReinspeccion)
+    // ya resuelven ese null antes de llegar acá.
+    fechaVencimientoISO: string | null;
     tipoInspeccion: string;
   },
 ): Promise<ResultadoAccion> {
@@ -391,12 +394,16 @@ export async function iniciarInspeccion(
   input.cabecera.patente_camion = normalizarPatente(input.cabecera.patente_camion);
   input.cabecera.patente_rampla = normalizarPatente(input.cabecera.patente_rampla);
 
-  if (!input.fechaVencimientoISO)
-    return { ok: false, mensaje: "Falta la fecha de vencimiento de la corrección." };
   if (!input.tipoInspeccion)
     return { ok: false, mensaje: "Falta el tipo de inspección." };
   if (!(ORDEN_TIPOS_INSPECCION as readonly string[]).includes(input.tipoInspeccion))
     return { ok: false, mensaje: "Tipo de inspección inválido." };
+  // "control_salida" no tiene fecha de vencimiento — se saca del formulario
+  // (igual que Procedencia/Nombre Guardia) y se guarda NULL real. Para los
+  // otros 3 tipos sigue siendo obligatoria. Depende de tipoInspeccion, por
+  // eso se valida después del chequeo de arriba.
+  if (input.tipoInspeccion !== "control_salida" && !input.fechaVencimientoISO)
+    return { ok: false, mensaje: "Falta la fecha de vencimiento de la corrección." };
 
   // validarCabecera necesita el tipo para saber si Procedencia aplica —
   // por eso se llama después de confirmar que input.tipoInspeccion vino.
@@ -447,6 +454,12 @@ export async function iniciarInspeccion(
         "No tienes permiso para realizar este tipo de inspección. Pídele a un administrador que te lo asigne en Usuarios.",
     };
 
+  // "control_salida" no tiene fecha de vencimiento — NULL real, nunca
+  // cadena vacía ni un valor centinela, sin confiar en lo que mande el
+  // cliente (mismo criterio que procedencia, justo abajo).
+  const fechaVencimientoFinal =
+    input.tipoInspeccion === "control_salida" ? null : input.fechaVencimientoISO;
+
   const { data, error } = await supabase
     .from("tickets")
     .upsert(
@@ -465,7 +478,7 @@ export async function iniciarInspeccion(
         estado: "en_revision",
         revision_actual: 1,
         supervisor_id: perfil.id,
-        fecha_vencimiento: input.fechaVencimientoISO,
+        fecha_vencimiento: fechaVencimientoFinal,
         tipo_inspeccion: input.tipoInspeccion,
         nombre_encarpador: input.nombreEncarpador?.trim() || null,
         nombre_guardia: input.nombreGuardia?.trim() || null,
@@ -489,7 +502,7 @@ export async function iniciarInspeccion(
     numeroRevision: 1,
     supervisorId: perfil.id,
     conductor: input.cabecera.conductor,
-    fechaVencimientoISO: input.fechaVencimientoISO,
+    fechaVencimientoISO: fechaVencimientoFinal,
     tipoInspeccion: input.tipoInspeccion,
   });
   if (!prep.ok) return prep;
@@ -1094,8 +1107,6 @@ export async function iniciarReinspeccion(input: {
 
   if (!input.conductor?.trim())
     return { ok: false, mensaje: "Falta el conductor de esta revisión." };
-  if (!input.fechaVencimientoISO)
-    return { ok: false, mensaje: "Falta la fecha de vencimiento de la corrección." };
 
   const { data: ticket } = await supabase
     .from("tickets")
@@ -1105,6 +1116,15 @@ export async function iniciarReinspeccion(input: {
   if (!ticket) return { ok: false, mensaje: "Ticket no encontrado." };
   if (!ticket.tipo_inspeccion)
     return { ok: false, mensaje: "Falta el tipo de inspección del ticket." };
+  // "control_salida" no tiene fecha de vencimiento — el tipo es fijo desde
+  // que se creó el ticket (no viene en `input`), por eso este chequeo
+  // depende de `ticket.tipo_inspeccion`, no de `input.tipoInspeccion` (que
+  // no existe acá). Mismo criterio que iniciarInspeccion.
+  if (
+    ticket.tipo_inspeccion !== "control_salida" &&
+    !input.fechaVencimientoISO
+  )
+    return { ok: false, mensaje: "Falta la fecha de vencimiento de la corrección." };
 
   // La última revisión de este ticket — si su estado_resultante sigue en
   // 'en_revision', ESA es la revisión en curso (no hay que crear otra).
@@ -1138,13 +1158,19 @@ export async function iniciarReinspeccion(input: {
     ? ultimaRev!.numero_revision
     : ticket.revision_actual + 1;
   const conductor = input.conductor.trim();
+  // NULL real para "control_salida", sin confiar en lo que mande el
+  // cliente — mismo criterio que iniciarInspeccion.
+  const fechaVencimientoFinal =
+    ticket.tipo_inspeccion === "control_salida"
+      ? null
+      : input.fechaVencimientoISO;
 
   const prep = await prepararRevision(supabase, {
     ticketId: input.ticketId,
     numeroRevision,
     supervisorId: perfil.id,
     conductor,
-    fechaVencimientoISO: input.fechaVencimientoISO,
+    fechaVencimientoISO: fechaVencimientoFinal,
     tipoInspeccion: ticket.tipo_inspeccion,
   });
   if (!prep.ok) return prep;
