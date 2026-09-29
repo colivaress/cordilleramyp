@@ -108,6 +108,9 @@ const CAMPOS_CABECERA: {
     key: "fechaVencimiento",
     label: "Fecha de vencimiento de la corrección",
     type: "datetime-local",
+    // "control_salida" no tiene fecha de vencimiento — se saca del
+    // formulario (mismo criterio que Procedencia, arriba en este archivo).
+    ocultarEnControlSalida: true,
   },
   {
     key: "procedencia",
@@ -811,8 +814,11 @@ export function InspeccionForm({
       return nroContenedor.trim() !== "";
     return true;
   }, [modo, tipoSeleccionado, cabecera, nombreEncarpador, nroContenedor]);
+  // "control_salida" no tiene fecha de vencimiento — no se exige (ni se
+  // muestra el campo, ver más abajo) también en modo reinspección.
   const datosRevisionCompletos =
-    conductorRevision.trim() !== "" && vencRevision.trim() !== "";
+    conductorRevision.trim() !== "" &&
+    (tipoInspeccionInicial === "control_salida" || vencRevision.trim() !== "");
   const puedeAvanzar =
     modo === "nueva" ? cabeceraCompleta : datosRevisionCompletos;
 
@@ -1422,11 +1428,13 @@ export function InspeccionForm({
                       }
                     />
                   )}
+                  {/* "control_salida" nunca llega acá — este campo se filtra
+                      por completo para ese tipo (ocultarEnControlSalida),
+                      así que el único caso que queda es el precarga de 10
+                      días de los otros 3 tipos. */}
                   {c.key === "fechaVencimiento" && (
                     <span className="text-xs text-muted-foreground">
-                      {tipoSeleccionado === "control_salida"
-                        ? "Se precarga como la fecha de inspección + 1 día. Editable."
-                        : "Se precarga como la fecha de inspección + 10 días. Editable."}
+                      Se precarga como la fecha de inspección + 10 días. Editable.
                     </span>
                   )}
                 </div>
@@ -1502,6 +1510,10 @@ export function InspeccionForm({
                   conductor de las revisiones previas.
                 </span>
               </div>
+              {/* "control_salida" no tiene fecha de vencimiento — se saca
+                  también de la vista de reinspección (mismo criterio que en
+                  modo "nueva"). */}
+              {tipoInspeccionInicial !== "control_salida" && (
               <div className="grid gap-1.5">
                 <Label htmlFor="venc-revision">
                   Fecha de vencimiento de la corrección
@@ -1515,6 +1527,7 @@ export function InspeccionForm({
                   onChange={(e) => setVencRevision(e.target.value)}
                 />
               </div>
+              )}
             </>
           )}
           <div className="sm:col-span-2">
