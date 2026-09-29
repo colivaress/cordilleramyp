@@ -454,6 +454,32 @@ export async function iniciarInspeccion(
         "No tienes permiso para realizar este tipo de inspección. Pídele a un administrador que te lo asigne en Usuarios.",
     };
 
+  // Defensa en profundidad — tipo inmutable desde que el ticket existe: se
+  // elige una sola vez, acá, y nunca más se reescribe. El bug real que
+  // motiva este chequeo (ticket 78 en producción): un id de ticket
+  // reciclado del lado del cliente + este mismo upsert sin validar dejaban
+  // reescribir `tipo_inspeccion` sobre un ticket que ya tenía respuestas de
+  // checklist del tipo anterior, mezclando ítems de dos tipos distintos en
+  // una sola revisión. La corrección de fondo es que el cliente ya no
+  // recicla ids (InspeccionForm.tsx, modo "nueva" siempre genera uno
+  // fresco) — este chequeo es la segunda capa: si de todos modos llega acá
+  // un id ya existente con un tipo distinto al guardado, se rechaza en vez
+  // de reescribirlo en silencio.
+  const { data: ticketExistente } = await supabase
+    .from("tickets")
+    .select("tipo_inspeccion")
+    .eq("id", input.ticketId)
+    .maybeSingle();
+  if (
+    ticketExistente &&
+    ticketExistente.tipo_inspeccion !== input.tipoInspeccion
+  )
+    return {
+      ok: false,
+      mensaje:
+        "Este ticket ya fue creado con otro tipo de inspección. El tipo no se puede cambiar una vez creada la inspección.",
+    };
+
   // "control_salida" no tiene fecha de vencimiento — NULL real, nunca
   // cadena vacía ni un valor centinela, sin confiar en lo que mande el
   // cliente (mismo criterio que procedencia, justo abajo).
