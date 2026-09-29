@@ -217,34 +217,6 @@ async function comprimirImagen(
   }
 }
 
-// §2.8 — recuperación tras recargar: en modo "nueva" el ticketId nace como un
-// UUID generado en el cliente, sin URL propia (a diferencia de reinspección,
-// que vive en /tickets/[id]/reinspeccion). Sin esto, una recarga a mitad de
-// camino generaba un UUID NUEVO, dejando el ticket ya creado (con checklist,
-// firmas, todo) inalcanzable desde este formulario — no es "se pierde lo que
-// no se guardó", es "el ticket entero queda huérfano". Se persiste apenas se
-// genera (no recién al crear el ticket) para cubrir también una recarga en
-// el paso 1, antes de "Realizar revisión".
-const CLAVE_TICKET_EN_PROGRESO = "cordillera-inspeccion-en-progreso";
-
-function ticketIdRecuperadoONuevo(): string {
-  if (typeof window === "undefined") return crypto.randomUUID();
-  try {
-    const guardado = window.localStorage.getItem(CLAVE_TICKET_EN_PROGRESO);
-    if (guardado) return guardado;
-  } catch {
-    // localStorage puede fallar (modo privado, cuota) — degradar a "sin
-    // recuperación" en vez de romper la creación de la inspección.
-  }
-  const nuevo = crypto.randomUUID();
-  try {
-    window.localStorage.setItem(CLAVE_TICKET_EN_PROGRESO, nuevo);
-  } catch {
-    /* ver arriba */
-  }
-  return nuevo;
-}
-
 export function InspeccionForm({
   modo,
   items,
@@ -278,10 +250,11 @@ export function InspeccionForm({
 
   // §2.8: el id del ticket y el nro de revisión se fijan al montar, así cada
   // firma/foto/respuesta se guarda con una ruta estable ANTES de "Finalizar
-  // revisión".
-  const [ticketId] = useState(
-    () => ticketIdProp ?? ticketIdRecuperadoONuevo(),
-  );
+  // revisión". En modo "nueva" siempre es un UUID fresco — una inspección
+  // nueva es SIEMPRE un ticket nuevo, nunca reciclado de una sesión previa
+  // (ver el comentario grande en asegurarRevision: apenas el primer guardado
+  // real crea el ticket, la navegación se muda a su URL propia).
+  const [ticketId] = useState(() => ticketIdProp ?? crypto.randomUUID());
   const rev = modo === "nueva" ? 1 : numeroRevision;
 
   const [paso, setPaso] = useState<1 | 2>(1);
@@ -315,10 +288,11 @@ export function InspeccionForm({
   // "Abrir no debe escribir" — en los DOS modos: ni el ticket (modo "nueva")
   // ni la fila de ticket_revisiones (modo "reinspeccion") se crean al pasar
   // de la cabecera al checklist — se crean recién en el PRIMER guardado real
-  // (ver asegurarRevision más abajo). Arranca en `null` siempre; el efecto
-  // de recuperación al montar lo deja resuelto en `{ok:true}` si ya existía
-  // (ticket recuperado de localStorage con progreso real, o revisión de
-  // reinspección ya abierta).
+  // (ver asegurarRevision más abajo). Arranca en `null` siempre; en modo
+  // "reinspeccion" el efecto de recuperación al montar lo deja resuelto en
+  // `{ok:true}` si la revisión ya estaba abierta (recarga a mitad de camino,
+  // o continuación de una inspección nueva que ya había creado su ticket —
+  // ver la página /tickets/[id]/reinspeccion).
   //
   // Guarda la PROMESA en vuelo, no un booleano — bug real, reportado y
   // medido: con un booleano (`revisionAseguradaRef.current`, marcado `true`
@@ -454,19 +428,23 @@ export function InspeccionForm({
     null,
   );
 
-  // Recuperación tras recargar — ver ticketIdRecuperadoONuevo() y el
-  // comentario de obtenerEstadoRevision(). Corre una sola vez al montar: si
-  // el ticket ya existe con progreso guardado (se creó en una carga anterior
-  // de esta misma sesión, o es una re-inspección ya empezada antes de esta
-  // recarga), reconstruye cabecera, checklist, observación general y firmas
-  // — y salta directo al paso 2 si había algo real que mostrar, en vez de
-  // forzar a re-completar "Datos de Inspección" para algo que ya existe.
+  // Recuperación tras recargar — SOLO modo "reinspeccion". Una inspección
+  // nueva es siempre un ticket nuevo (ver el comentario en el `useState` de
+  // `ticketId`) — no hay nada que recuperar ahí, nunca existe todavía nada
+  // bajo ese id al montar. En modo "reinspeccion" el ticketId viene fijo por
+  // la URL (/tickets/[id]/reinspeccion), así que sí puede haber progreso real
+  // ya guardado: la propia revisión ya abierta (recarga a mitad de camino), o
+  // — desde este cambio — una inspección nueva que ya había creado su ticket
+  // y fue redirigida a esa misma ruta (ver asegurarRevision). Corre una sola
+  // vez al montar: si hay algo, reconstruye checklist, observación general y
+  // firmas, y salta directo al paso 2 en vez de forzar a re-completar
+  // "Datos de Inspección" para algo que ya existe.
   //
-  // Si no hay nada que recuperar (ticket recién creado en esta misma carga,
-  // o no existe todavía porque nunca se llegó a "Realizar revisión"),
-  // `obtenerEstadoRevision` devuelve `ok: false` y no se toca nada — ese no
-  // es un error que el supervisor deba ver.
+  // Si no hay nada que recuperar (revisión recién abierta, sin datos
+  // todavía), `obtenerEstadoRevision` devuelve `ok: false` y no se toca
+  // nada — ese no es un error que el supervisor deba ver.
   useEffect(() => {
+    if (modo === "nueva") return;
     let cancelado = false;
     (async () => {
       const res = await obtenerEstadoRevision({ ticketId, revisionNumero: rev });
@@ -523,32 +501,6 @@ export function InspeccionForm({
       if (res.firmaFiscalizadorUrl) {
         setFirmaFiscalizadorUrl(res.firmaFiscalizadorUrl);
         huboAlgo = true;
-      }
-
-      if (modo === "nueva") {
-        setTipoSeleccionado(res.tipoInspeccion);
-        setNumInsp(res.numeroInspeccion);
-        // Sin esto, "Volver a los datos" tras recuperar la sesión mostraría
-        // el paso 1 en blanco, y reenviarlo pisaría con blancos la cabecera
-        // real del ticket (mismo upsert que lo creó) — ver el comentario en
-        // obtenerEstadoRevision.
-        setCabecera({
-          transporte: res.cabecera.transporte,
-          conductor: res.cabecera.conductor,
-          fecha: isoADatetimeLocal(res.cabecera.fecha),
-          fechaVencimiento: isoADatetimeLocal(res.fechaVencimientoRevision),
-          // Cambios al formulario pedidos por el cliente: "control_salida"
-          // no pide Procedencia — el ticket puede traer `null` en la base
-          // (nuevo desde este cambio) o un valor legado. El estado de
-          // cliente sigue siendo `string` para no complicar el resto del
-          // formulario; "" se trata igual que "sin valor" en los dos casos.
-          procedencia: res.cabecera.procedencia ?? "",
-          tipo_camion: res.cabecera.tipo_camion,
-          patente_camion: res.cabecera.patente_camion,
-          patente_rampla: res.cabecera.patente_rampla,
-        });
-        setNombreEncarpador(res.nombreEncarpador ?? "");
-        setNroContenedor(res.nroContenedor ?? "");
       }
 
       if (huboAlgo) {
@@ -690,7 +642,20 @@ export function InspeccionForm({
           nroContenedor:
             tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
         });
-        if (res.ok) setNumInsp(res.numeroInspeccion);
+        if (res.ok) {
+          setNumInsp(res.numeroInspeccion);
+          // El ticket ya existe de verdad — la identidad de "esta
+          // inspección" pasa a vivir en su propia URL, no en este
+          // componente montado bajo /tickets/new. La navegación ocurre acá
+          // mismo, ANTES de que el guardado puntual que disparó este
+          // asegurarRevision (el ítem/firma que el supervisor acaba de
+          // tocar) siquiera se ejecute — no hay ninguna ventana en la que
+          // /tickets/new siga en la URL con datos ya persistidos del lado
+          // del servidor. La página de destino (/tickets/[id]/reinspeccion)
+          // reconstruye el formulario desde cero a partir de lo ya
+          // guardado — nunca se recicla este ticketId para otra inspección.
+          router.replace(`/tickets/${ticketId}/reinspeccion`);
+        }
         return res;
       }
       return iniciarReinspeccion({
@@ -1261,17 +1226,16 @@ export function InspeccionForm({
           // invalidar nada que no esté invalidado ya.
           let ticketIdInforme: string;
           if (modo === "nueva") {
+            // Inalcanzable en la práctica desde este cambio: apenas el
+            // primer guardado real crea el ticket, asegurarRevision navega
+            // a /tickets/[id]/reinspeccion (ver más arriba) y el botón
+            // "Finalizar revisión" deja de renderizarse acá — completar
+            // TODOS los ítems y las dos firmas exige más de un guardado, así
+            // que para cuando eso pasa ya se navegó lejos de este
+            // componente. Se deja como respaldo defensivo, no como flujo
+            // esperado.
             const res = await finalizarInspeccion({ ticketId });
             if (!res.ok) throw new Error(res.mensaje);
-            // Ya cerrada — dejar de intentar recuperarla en la próxima
-            // "Nueva inspección" (ver ticketIdRecuperadoONuevo()).
-            try {
-              window.localStorage.removeItem(CLAVE_TICKET_EN_PROGRESO);
-            } catch {
-              /* no crítico: en el peor caso, la próxima carga intenta
-                 recuperar un ticket ya cerrado y obtenerEstadoRevision
-                 devuelve ok:false — no rompe nada, solo no hidrata. */
-            }
             toast.success(
               `Inspección guardada (Nro ${res.numeroInspeccion}). Generar y enviar el informe.`,
             );
@@ -1553,14 +1517,31 @@ export function InspeccionForm({
         </CardContent>
       </Card>
 
-      {paso === 2 && !esSoloFotos && itemsDelTipo.length > 0 && (
-        <ChecklistProgreso
-          respondidos={itemsDelTipo.length - itemsPendientes.length}
-          total={itemsDelTipo.length}
-        />
+      {paso === 2 &&
+        !esSoloFotos &&
+        itemsDelTipo.length > 0 &&
+        !(modo === "nueva" && numInsp != null) && (
+          <ChecklistProgreso
+            respondidos={itemsDelTipo.length - itemsPendientes.length}
+            total={itemsDelTipo.length}
+          />
+        )}
+
+      {pasoMaxVisto === 2 && modo === "nueva" && numInsp != null && (
+        // El ticket ya existe de verdad (ver asegurarRevision) — la
+        // navegación a su propia URL (/tickets/[id]/reinspeccion) ya se
+        // disparó. Mientras se completa, esta instancia deja de mostrar el
+        // checklist interactivo: no puede quedar ninguna ventana en la que
+        // el supervisor siga tocando ítems con la URL todavía en
+        // /tickets/new.
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            Guardado. Abriendo tu inspección…
+          </CardContent>
+        </Card>
       )}
 
-      {pasoMaxVisto === 2 && (
+      {pasoMaxVisto === 2 && !(modo === "nueva" && numInsp != null) && (
         <div className={cn("grid gap-6", paso === 1 && "hidden")}>
           <Card>
             <CardHeader>

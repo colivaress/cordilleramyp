@@ -29,15 +29,23 @@ export default async function ReinspeccionPage({
   if (!ticket) notFound();
   if (!ticket.tipo_inspeccion) notFound();
 
-  // §2.14/"abrir no debe escribir": al hacer el PRIMER guardado real, el
-  // ticket pasa a `en_reparacion_de_observaciones` — YA NO a `en_revision`
-  // (ver el comentario grande en iniciarReinspeccion, tickets/actions.ts) —
-  // y se queda ahí durante TODA la reinspección, para seguir visible para
-  // el resto de los supervisores mientras dura. Por eso este guard ya no
-  // puede mirar `ticket.estado === "en_revision"`: ese valor nunca vuelve a
-  // aparecer en este flujo. "¿hay una revisión abierta?" se decide con
+  // §2.14/"abrir no debe escribir": al hacer el PRIMER guardado real de una
+  // RE-inspección (revisión 2+), el ticket pasa a
+  // `en_reparacion_de_observaciones` — YA NO a `en_revision` (ver el
+  // comentario grande en iniciarReinspeccion, tickets/actions.ts) — y se
+  // queda ahí durante TODA la reinspección, para seguir visible para el
+  // resto de los supervisores mientras dura. Por eso este guard no puede
+  // mirar solo `ticket.estado === "en_revision"` para ese caso: ese valor
+  // nunca vuelve a aparecer en el flujo de re-inspección propiamente dicho.
+  // "¿hay una revisión abierta?" se decide con
   // `ticket_revisiones.estado_resultante` de la última revisión — mismo
   // criterio que `autorizarRevisionEnCurso` server-side.
+  //
+  // Desde este cambio, esta condición también cubre la revisión 1: una
+  // inspección nueva que ya creó su ticket (primer guardado real vía
+  // iniciarInspeccion) es redirigida acá mismo por el formulario — en ese
+  // caso el ticket SÍ sigue en `en_revision` (nace ahí y no cambia hasta
+  // cerrarse), así que ya no se excluye `numero_revision === 1` como antes.
   const { data: revActual } = await supabase
     .from("ticket_revisiones")
     .select("numero_revision, estado_resultante, supervisor_id")
@@ -49,8 +57,14 @@ export default async function ReinspeccionPage({
   const hayRevisionAbierta =
     revActual != null &&
     revActual.numero_revision === ticket.revision_actual &&
-    revActual.numero_revision > 1 &&
     revActual.estado_resultante === "en_revision";
+
+  // Es la revisión 1 todavía en curso — no una re-inspección. El ticket
+  // nunca pasó por `finalizada_con_observaciones`; es la misma inspección
+  // que se está completando por primera vez. Determina solo el texto de
+  // esta pantalla (título, subtítulo) — la lógica de guardado no distingue
+  // entre los dos casos, ver el comentario en iniciarReinspeccion.
+  const esRevisionInicial = ticket.estado === "en_revision";
 
   // Sin chequeo de dueño acá a propósito: es solo si se MUESTRA el
   // formulario o se redirige, no una autorización — quien no tiene derecho
@@ -79,11 +93,14 @@ export default async function ReinspeccionPage({
     <div className="grid gap-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          Re-inspección — {ticket.patente_camion} / {ticket.patente_rampla}
+          {esRevisionInicial ? "Inspección" : "Re-inspección"} —{" "}
+          {ticket.patente_camion} / {ticket.patente_rampla}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Revisión #{numeroRevision}. Volver a evaluar todos los elementos a
-          fiscalizar y firmar.
+          Revisión #{numeroRevision}.{" "}
+          {esRevisionInicial
+            ? "Completar el checklist de los elementos a fiscalizar y firmar."
+            : "Volver a evaluar todos los elementos a fiscalizar y firmar."}
         </p>
       </div>
       <InspeccionForm
