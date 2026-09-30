@@ -56,8 +56,13 @@ export default async function NuevaInspeccionPage() {
   // Las pantallas de configuración de correos por tipo NO filtran por
   // `activo` — un administrador tiene que poder seguir viendo/editando los
   // destinatarios ya configurados para un tipo deshabilitado.
-  const [{ data: items }, { data: tipos }, { count: totalActivos }, { data: sinTerminar }] =
-    await Promise.all([
+  const [
+    { data: items },
+    { data: tipos },
+    { count: totalActivos },
+    { data: sinTerminar },
+    { data: transportesCatalogo },
+  ] = await Promise.all([
       supabase.from("checklist_items").select("*").order("orden"),
       supabase
         .from("tipos_inspeccion")
@@ -87,6 +92,15 @@ export default async function NuevaInspeccionPage() {
         .eq("estado", "en_revision")
         .eq("revision_actual", 1)
         .order("numero_inspeccion", { ascending: false }),
+      // Catálogo gestionable (/configuracion/transportes) — solo los
+      // activos, orden alfabético. tickets.transporte sigue siendo texto
+      // libre (no FK): esto solo restringe lo que el selector ofrece, no
+      // lo que puede quedar guardado en un ticket ya creado.
+      supabase
+        .from("transportes")
+        .select("nombre")
+        .eq("activo", true)
+        .order("nombre"),
     ]);
 
   return (
@@ -138,7 +152,12 @@ export default async function NuevaInspeccionPage() {
           </p>
         </div>
       )}
-      <InspeccionForm modo="nueva" items={items ?? []} tipos={tipos ?? []} />
+      <InspeccionForm
+        modo="nueva"
+        items={items ?? []}
+        tipos={tipos ?? []}
+        transportes={(transportesCatalogo ?? []).map((t) => t.nombre)}
+      />
     </div>
   );
 }

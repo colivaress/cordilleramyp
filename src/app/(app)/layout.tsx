@@ -35,7 +35,7 @@ export default async function AppLayout({
                 administrador_contrato NO entra ahí (explícito en su
                 alcance), aunque sí ve "Inspecciones" (la tabla completa,
                 de solo lectura) y administra Usuarios/Configuración
-                correos igual que un administrador. El supervisor no ve
+                igual que un administrador. El supervisor no ve
                 ninguno de los cuatro. */}
             {esAdmin && (
               <Link
@@ -60,10 +60,10 @@ export default async function AppLayout({
                   Usuarios
                 </Link>
                 <Link
-                  href="/configuracion/correos"
+                  href="/configuracion"
                   className={buttonVariants({ variant: "ghost" })}
                 >
-                  Configuración correos
+                  Configuración
                 </Link>
               </>
             )}

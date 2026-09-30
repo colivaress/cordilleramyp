@@ -9,6 +9,7 @@ export type ChecklistFoto = Tables<"ticket_checklist_fotos">;
 export type Notificacion = Tables<"notificaciones">;
 export type DestinatarioCorreo = Tables<"destinatarios_correo">;
 export type TipoInspeccion = Tables<"tipos_inspeccion">;
+export type Transporte = Tables<"transportes">;
 
 export type TicketEstado = Enums<"ticket_estado">;
 export type ItemEstado = Enums<"item_estado">;
