@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ContenidoBoton } from "@/components/ui/estado-accion";
 import { OverlayBloqueante } from "@/components/ui/overlay-bloqueante";
 import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
-import { useAccionLarga } from "@/hooks/use-accion-larga";
+import { enfocarCuandoHabilitado, useAccionLarga } from "@/hooks/use-accion-larga";
 import {
   NavegacionNoConfirmadaError,
   useEsperaNavegacion,
@@ -38,6 +38,14 @@ export function BotonFinalizarPendiente({
   const esperarNavegacionInforme = useEsperaNavegacion();
 
   async function finalizar() {
+    // Capturado antes de guardado.ejecutar (que deshabilita el botón de
+    // forma síncrona) y restaurado en el finally de afuera, DESPUÉS de que
+    // guardado.ejecutar también terminó — ver el comentario grande en
+    // useAccionLarga sobre por qué tiene que vivir en este borde exterior.
+    const elementoDisparador =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     try {
       await guardado.ejecutar(() =>
         overlay.ejecutar(async () => {
@@ -70,6 +78,8 @@ export function BotonFinalizarPendiente({
           e instanceof Error ? e.message : "No se pudo finalizar la revisión.",
         );
       }
+    } finally {
+      enfocarCuandoHabilitado(elementoDisparador);
     }
   }
 

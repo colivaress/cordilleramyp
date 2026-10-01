@@ -30,7 +30,7 @@ import {
   useEstadoGuardado,
   useEstadoGuardadoPorClave,
 } from "@/hooks/use-estado-guardado";
-import { useAccionLarga } from "@/hooks/use-accion-larga";
+import { enfocarCuandoHabilitado, useAccionLarga } from "@/hooks/use-accion-larga";
 import {
   NavegacionNoConfirmadaError,
   useEsperaNavegacion,
@@ -1180,6 +1180,17 @@ export function InspeccionForm({
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // Capturado ACÁ, antes de guardadoFinalizar.ejecutar — ese es el que
+    // deshabilita el botón de forma síncrona (disabled={guardadoFinalizar.
+    // pendiente}), y un botón deshabilitado pierde el foco solo. Este es el
+    // único momento en que el elemento real (el botón "Finalizar revisión")
+    // todavía lo tiene. Se restaura en el finally de abajo, DESPUÉS de que
+    // guardadoFinalizar.ejecutar también terminó — ver el comentario grande
+    // en useAccionLarga sobre por qué tiene que vivir en este borde exterior.
+    const elementoDisparador =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     const err = validarChecklist();
     if (err) {
       toast.error(err.mensaje);
@@ -1293,6 +1304,8 @@ export function InspeccionForm({
             : "Error al cerrar la revisión. El checklist ya quedó guardado; se puede reintentar desde el ticket.",
         );
       }
+    } finally {
+      enfocarCuandoHabilitado(elementoDisparador);
     }
   }
 
@@ -1537,31 +1550,14 @@ export function InspeccionForm({
         </CardContent>
       </Card>
 
-      {paso === 2 &&
-        !esSoloFotos &&
-        itemsDelTipo.length > 0 &&
-        !(modo === "nueva" && numInsp != null) && (
-          <ChecklistProgreso
-            respondidos={itemsDelTipo.length - itemsPendientes.length}
-            total={itemsDelTipo.length}
-          />
-        )}
-
-      {pasoMaxVisto === 2 && modo === "nueva" && numInsp != null && (
-        // El ticket ya existe de verdad (ver asegurarRevision) — la
-        // navegación a su propia URL (/tickets/[id]/reinspeccion) ya se
-        // disparó. Mientras se completa, esta instancia deja de mostrar el
-        // checklist interactivo: no puede quedar ninguna ventana en la que
-        // el supervisor siga tocando ítems con la URL todavía en
-        // /tickets/new.
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            Guardado. Abriendo tu inspección…
-          </CardContent>
-        </Card>
+      {paso === 2 && !esSoloFotos && itemsDelTipo.length > 0 && (
+        <ChecklistProgreso
+          respondidos={itemsDelTipo.length - itemsPendientes.length}
+          total={itemsDelTipo.length}
+        />
       )}
 
-      {pasoMaxVisto === 2 && !(modo === "nueva" && numInsp != null) && (
+      {pasoMaxVisto === 2 && (
         <div className={cn("grid gap-6", paso === 1 && "hidden")}>
           <Card>
             <CardHeader>
@@ -1698,6 +1694,16 @@ export function InspeccionForm({
           </div>
         </div>
       )}
+      {/* El ticket ya existe de verdad (ver asegurarRevision) — la
+          navegación a su propia URL (/tickets/[id]/reinspeccion) ya se
+          disparó. El overlay bloquea toda interacción mientras se completa
+          (nadie puede seguir tocando ítems con la URL todavía en
+          /tickets/new) sin ocultar el formulario detrás — evita el salto
+          visual a una tarjeta vacía que antes se leía como un error. */}
+      <OverlayBloqueante
+        visible={modo === "nueva" && numInsp != null}
+        mensaje="Guardado. Abriendo tu inspección…"
+      />
       <OverlayBloqueante
         visible={overlayFinalizar.visible}
         mensaje={overlayFinalizar.mensaje}
