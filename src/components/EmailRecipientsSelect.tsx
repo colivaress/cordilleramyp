@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { ContenidoBoton } from "@/components/ui/estado-accion";
 import { OverlayBloqueante } from "@/components/ui/overlay-bloqueante";
 import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
-import { useAccionLarga } from "@/hooks/use-accion-larga";
+import { enfocarCuandoHabilitado, useAccionLarga } from "@/hooks/use-accion-larga";
 import { createClient } from "@/lib/supabase/client";
 import type { DestinatarioCorreo } from "@/lib/tipos";
 
@@ -71,6 +71,14 @@ export function EmailRecipientsSelect({
   }
 
   async function enviar() {
+    // Capturado antes de guardado.ejecutar (que deshabilita el botón de
+    // forma síncrona) y restaurado en el finally de afuera, DESPUÉS de que
+    // guardado.ejecutar también terminó — ver el comentario grande en
+    // useAccionLarga sobre por qué tiene que vivir en este borde exterior.
+    const elementoDisparador =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     const destinatarios = [...seleccion];
     if (destinatarios.length === 0) {
       toast.error("Seleccionar al menos un destinatario.");
@@ -102,6 +110,8 @@ export function EmailRecipientsSelect({
       toast.error(
         e instanceof Error ? e.message : "Error de red al enviar el informe.",
       );
+    } finally {
+      enfocarCuandoHabilitado(elementoDisparador);
     }
   }
 
