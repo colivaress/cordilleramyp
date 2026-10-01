@@ -173,7 +173,7 @@ export default async function DashboardPage({
           fuera de las dos columnas nuevas. Al buscar (solo supervisor), este
           componente la reemplaza por una tabla con las mismas filas
           (FilaTicket) filtradas a lo encontrado. */}
-      <BuscadorPatente activo={esSupervisor}>
+      <BuscadorPatente activo={esSupervisor} esSupervisor={esSupervisor}>
         <Card>
           <CardHeader>
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -238,6 +238,7 @@ export default async function DashboardPage({
                       fecha={t.fecha}
                       fechaVencimiento={t.fecha_vencimiento}
                       supervisorNombre={t.supervisor?.nombre ?? "—"}
+                      esSupervisor={esSupervisor}
                     />
                   ))}
                 </TableBody>
