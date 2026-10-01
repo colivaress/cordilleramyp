@@ -28,6 +28,13 @@ export type FilaTicketProps = {
   fecha: string | null;
   fechaVencimiento: string | null;
   supervisorNombre: string;
+  /** Solo un supervisor puede continuar una inspección en_revision — mismo
+   *  rol que ya filtra el resto de esta pantalla (dashboard/page.tsx:
+   *  `esSupervisor`, también lo que gatea `BuscadorPatente`). Un
+   *  administrador nunca ve "Continuar": lo llevaría a una redirección,
+   *  porque /tickets/[id]/reinspeccion exige rol supervisor y un
+   *  administrador no puede crear ni editar ninguna inspección. */
+  esSupervisor: boolean;
 };
 
 /**
@@ -48,20 +55,42 @@ export function FilaTicket({
   fecha,
   fechaVencimiento,
   supervisorNombre,
+  esSupervisor,
 }: FilaTicketProps) {
   const nivel = nivelAlerta(fechaVencimiento, estado);
+  // Mientras el ticket está en_revision (recién creado, o una inspección que
+  // se abandonó sin finalizar — nada en los datos distingue un caso del
+  // otro, y no hace falta: en cualquiera de los dos lo que falta es
+  // completar el formulario, no ver un informe que todavía no existe de
+  // verdad). Para cualquier otro estado, el botón sigue yendo al informe
+  // como hasta ahora.
+  //
+  // `&& esSupervisor` — un administrador ve todos los tickets, de cualquier
+  // supervisor, pero no puede crear ni editar ninguna inspección
+  // (/tickets/[id]/reinspeccion exige rol supervisor). Sin este chequeo, un
+  // administrador vería "Continuar" sobre el en_revision de otra persona y
+  // el clic solo lo llevaría a una redirección. La autorización real (solo
+  // el supervisor a cargo de ESTA revisión puede continuarla, no cualquier
+  // supervisor) la siguen aplicando la política RLS de
+  // `tickets`/`ticket_revisiones` y autorizarRevisionEnCurso del lado del
+  // servidor — este link no decide permisos, solo evita el camino que ya
+  // se sabe que termina en un callejón sin salida.
+  const enCurso = estado === "en_revision" && esSupervisor;
   return (
     <TableRow className={cn(clasesFilaAlerta(nivel))}>
       <TableCell>
-        {/* §2.6: "Ver" lleva directo al informe. */}
         <Link
-          href={`/tickets/${ticketId}/report`}
+          href={
+            enCurso
+              ? `/tickets/${ticketId}/reinspeccion`
+              : `/tickets/${ticketId}/report`
+          }
           className={cn(
             buttonVariants({ variant: "outline" }),
             "border-brand-600/40 text-brand-700 hover:bg-brand-50 hover:text-brand-800",
           )}
         >
-          Ver
+          {enCurso ? "Continuar" : "Ver"}
         </Link>
       </TableCell>
       <TableCell className="font-mono tabular-nums whitespace-nowrap">
