@@ -221,6 +221,7 @@ export function InspeccionForm({
   modo,
   items,
   tipos,
+  transportes = [],
   ticketId: ticketIdProp,
   numeroRevision = 1,
   numeroInspeccion = null,
@@ -237,6 +238,11 @@ export function InspeccionForm({
   items: ChecklistItem[];
   /** Solo modo "nueva" — puebla el combo "Tipo de inspección". */
   tipos?: TipoInspeccion[];
+  /** Solo modo "nueva" — puebla el selector "Transporte" (catálogo
+   *  gestionable, solo los activos). tickets.transporte sigue siendo texto
+   *  libre, no una llave foránea — esto solo restringe lo que el selector
+   *  ofrece elegir, no lo que la columna puede contener. */
+  transportes?: string[];
   ticketId?: string;
   numeroRevision?: number;
   /** §2.6: correlativo legible del ticket (solo lectura). Null en inspección nueva sin guardar. */
@@ -320,6 +326,20 @@ export function InspeccionForm({
     const claves = new Set(tipos.map((t) => t.clave));
     return ORDEN_TIPOS_INSPECCION.filter((c) => claves.has(c));
   }, [tipos]);
+
+  // "Transporte" es el único combo de CAMPOS_CABECERA cuyas opciones no son
+  // estáticas (a diferencia de tipo_camion/procedencia, que vienen de
+  // src/lib/tipos.ts) — salen del catálogo gestionable (prop `transportes`,
+  // ver /configuracion/transportes). Se inyectan acá en vez de en la tabla
+  // del módulo porque esa tabla es una constante fuera del componente, sin
+  // acceso a props.
+  const camposCabecera = useMemo(
+    () =>
+      CAMPOS_CABECERA.map((c) =>
+        c.key === "transporte" ? { ...c, opciones: transportes } : c,
+      ),
+    [transportes],
+  );
 
   // Ítems del checklist DEL TIPO elegido, ordenados — §4 de la fase.
   const itemsDelTipo = useMemo(() => {
@@ -1348,7 +1368,7 @@ export function InspeccionForm({
                   Se registra automáticamente al abrir la inspección.
                 </span>
               </div>
-              {CAMPOS_CABECERA.filter(
+              {camposCabecera.filter(
                 (c) =>
                   !(c.ocultarEnControlSalida && tipoSeleccionado === "control_salida"),
               ).map((c) => (
