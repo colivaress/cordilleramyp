@@ -6,18 +6,24 @@ const TIMEOUT_NAVEGACION_MS = 15000;
 
 /**
  * Se lanza SOLO cuando la guardia anti-deadlock se rinde — es decir, cuando
- * la acción del servidor (finalizarInspeccion/finalizarReinspeccion) YA
- * TERMINÓ BIEN y lo único que no se pudo confirmar es la navegación al
- * informe. Es un tipo de error distinto a propósito: si el mensaje dijera
- * "error" o "falló", el supervisor cree que perdió el trabajo y vuelve a
- * apretar "Finalizar revisión" — ahí la guardia del servidor lo rechaza con
- * "ya fue finalizada" y queda con dos avisos seguidos pensando que se perdió
- * todo. El llamador debe mostrar esto con un toast NO alarmante (warning,
- * no error) y nunca reformular el texto — distinguir "la acción falló" de
- * "la acción salió bien pero no pude mostrarte el resultado" es lo único que
- * separa esas dos experiencias.
+ * lo que disparó la navegación (finalizarInspeccion/finalizarReinspeccion al
+ * cerrar una revisión, o la creación del ticket en el primer guardado real
+ * de una inspección nueva — ver conPrimerGuardadoCoordinado en
+ * InspeccionForm) YA TERMINÓ BIEN, y lo único que no se pudo confirmar es la
+ * navegación en sí. Es un tipo de error distinto a propósito: si el mensaje
+ * dijera "error" o "falló", el supervisor cree que perdió el trabajo y
+ * reintenta algo que el servidor va a rechazar por ya estar hecho — dos
+ * avisos seguidos pensando que se perdió todo. El llamador debe mostrar esto
+ * con un toast NO alarmante (warning, no error) y nunca reformular el texto
+ * — distinguir "la acción falló" de "la acción salió bien pero no pude
+ * mostrarte el resultado" es lo único que separa esas dos experiencias. El
+ * mensaje concreto varía según quién llama (ver el parámetro `mensaje` de
+ * `esperar`, abajo) — lo único fijo es este mecanismo.
  */
 export class NavegacionNoConfirmadaError extends Error {}
+
+const MENSAJE_DEFECTO =
+  "La inspección se finalizó correctamente, pero no pudimos mostrarte el informe. Búscalo en el listado de inspecciones.";
 
 /**
  * "Esperar a que la navegación esté confirmada" — Next.js no da una promesa
@@ -52,15 +58,14 @@ export function useEsperaNavegacion() {
     };
   }, []);
 
-  function esperar(timeoutMs: number = TIMEOUT_NAVEGACION_MS): Promise<never> {
+  function esperar(
+    mensaje: string = MENSAJE_DEFECTO,
+    timeoutMs: number = TIMEOUT_NAVEGACION_MS,
+  ): Promise<never> {
     return new Promise((_resolve, reject) => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => {
-        reject(
-          new NavegacionNoConfirmadaError(
-            "La inspección se finalizó correctamente, pero no pudimos mostrarte el informe. Búscalo en el listado de inspecciones.",
-          ),
-        );
+        reject(new NavegacionNoConfirmadaError(mensaje));
       }, timeoutMs);
     });
   }
