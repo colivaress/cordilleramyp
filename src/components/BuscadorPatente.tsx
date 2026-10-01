@@ -50,9 +50,17 @@ import { ETIQUETA_TIPO_INSPECCION } from "@/lib/tipos";
  */
 export function BuscadorPatente({
   activo,
+  esSupervisor,
   children,
 }: {
   activo: boolean;
+  /** Mismo rol que decide `activo` (ver arriba) — se pasa por separado
+   *  hasta FilaTicket para que decida si el botón de cada fila puede
+   *  decir "Continuar". Hoy los resultados de este buscador nunca
+   *  incluyen tickets en_revision (ver el comentario grande de más abajo),
+   *  así que en la práctica no cambia nada todavía — pero si eso cambia,
+   *  no hay que acordarse de enganchar esto acá también. */
+  esSupervisor: boolean;
   children: ReactNode;
 }) {
   const [termino, setTermino] = useState("");
@@ -183,7 +191,7 @@ export function BuscadorPatente({
       )}
 
       {buscando && !sinResultados ? (
-        <TablaResultados resultado={resultado} />
+        <TablaResultados resultado={resultado} esSupervisor={esSupervisor} />
       ) : (
         !buscando && children
       )}
@@ -219,7 +227,13 @@ function AvisoLinea({
  * creyendo que es suya). El detalle de ítems no conformes ya no vive acá:
  * queda, como siempre, detrás del botón "Ver" de cada fila.
  */
-function TablaResultados({ resultado }: { resultado: ResultadoBusquedaPatente }) {
+function TablaResultados({
+  resultado,
+  esSupervisor,
+}: {
+  resultado: ResultadoBusquedaPatente;
+  esSupervisor: boolean;
+}) {
   return (
     <div className="overflow-x-auto rounded-md border">
       <Table>
@@ -243,7 +257,7 @@ function TablaResultados({ resultado }: { resultado: ResultadoBusquedaPatente })
             <>
               <GrupoSeparador texto="Mis inspecciones" />
               {resultado.misInspecciones.map((r) => (
-                <FilaTicket key={r.ticketId} {...r} />
+                <FilaTicket key={r.ticketId} {...r} esSupervisor={esSupervisor} />
               ))}
             </>
           )}
@@ -251,7 +265,7 @@ function TablaResultados({ resultado }: { resultado: ResultadoBusquedaPatente })
             <>
               <GrupoSeparador texto="Con observaciones (de otros inspectores)" />
               {resultado.conObservaciones.map((r) => (
-                <FilaTicket key={r.ticketId} {...r} />
+                <FilaTicket key={r.ticketId} {...r} esSupervisor={esSupervisor} />
               ))}
             </>
           )}

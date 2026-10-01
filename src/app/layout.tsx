@@ -26,8 +26,16 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        {children}
-        <Toaster richColors position="top-right" />
+        {/* Contenedor único con id estable — OverlayBloqueante le alterna
+            el atributo `inert` mientras está visible, para que el resto de
+            la página (navegación, formulario, toasts) quede realmente
+            fuera de alcance del teclado y de los lectores de pantalla, no
+            solo tapado visualmente. Mantiene las clases de layout que
+            antes tenía `body` directamente, para no alterar nada visual. */}
+        <div id="raiz-app" className="flex min-h-full flex-1 flex-col">
+          {children}
+          <Toaster richColors position="top-right" />
+        </div>
       </body>
     </html>
   );

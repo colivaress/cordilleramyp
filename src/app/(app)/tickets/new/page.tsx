@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { requireRol } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { InspeccionForm } from "@/components/InspeccionForm";
@@ -56,7 +55,7 @@ export default async function NuevaInspeccionPage() {
   // Las pantallas de configuración de correos por tipo NO filtran por
   // `activo` — un administrador tiene que poder seguir viendo/editando los
   // destinatarios ya configurados para un tipo deshabilitado.
-  const [{ data: items }, { data: tipos }, { count: totalActivos }, { data: sinTerminar }] =
+  const [{ data: items }, { data: tipos }, { count: totalActivos }, { data: transportesCatalogo }] =
     await Promise.all([
       supabase.from("checklist_items").select("*").order("orden"),
       supabase
@@ -73,20 +72,15 @@ export default async function NuevaInspeccionPage() {
         .from("tipos_inspeccion")
         .select("clave", { count: "exact", head: true })
         .eq("activo", true),
-      // Recuperación EXPLÍCITA, no silenciosa: una inspección nueva es
-      // siempre un ticket nuevo (ver InspeccionForm) — si el supervisor
-      // dejó una sin terminar, se la ofrece acá por su número y tipo, y
-      // depende de él elegir continuarla o empezar otra igual. Revisión 1
-      // en_revision es exactamente, y solo, "el ticket todavía no cerró su
-      // primera vuelta" — nunca puede tratarse de una re-inspección (esas
-      // dejan `en_revision` apenas arrancan, ver iniciarReinspeccion).
+      // Catálogo gestionable (/configuracion/transportes) — solo los
+      // activos, orden alfabético. tickets.transporte sigue siendo texto
+      // libre (no FK): esto solo restringe lo que el selector ofrece, no
+      // lo que puede quedar guardado en un ticket ya creado.
       supabase
-        .from("tickets")
-        .select("id, numero_inspeccion, tipo_inspeccion")
-        .eq("supervisor_id", perfil.id)
-        .eq("estado", "en_revision")
-        .eq("revision_actual", 1)
-        .order("numero_inspeccion", { ascending: false }),
+        .from("transportes")
+        .select("nombre")
+        .eq("activo", true)
+        .order("nombre"),
     ]);
 
   return (
@@ -109,36 +103,12 @@ export default async function NuevaInspeccionPage() {
           </p>
         )}
       </div>
-      {(sinTerminar ?? []).length > 0 && (
-        <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-warning-800">
-          <p className="font-medium">
-            {sinTerminar!.length === 1
-              ? "Tienes una inspección sin terminar:"
-              : "Tienes inspecciones sin terminar:"}
-          </p>
-          <ul className="mt-2 grid gap-1 text-sm">
-            {sinTerminar!.map((t) => (
-              <li key={t.id}>
-                Nro {t.numero_inspeccion},{" "}
-                {ETIQUETA_TIPO_INSPECCION[t.tipo_inspeccion ?? ""] ??
-                  t.tipo_inspeccion}
-                {" — "}
-                <Link
-                  href={`/tickets/${t.id}/reinspeccion`}
-                  className="font-medium underline underline-offset-2"
-                >
-                  Continuarla
-                </Link>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 text-xs text-warning-700">
-            Puedes ignorar este aviso y completar los datos de abajo para
-            empezar una inspección distinta.
-          </p>
-        </div>
-      )}
-      <InspeccionForm modo="nueva" items={items ?? []} tipos={tipos ?? []} />
+      <InspeccionForm
+        modo="nueva"
+        items={items ?? []}
+        tipos={tipos ?? []}
+        transportes={(transportesCatalogo ?? []).map((t) => t.nombre)}
+      />
     </div>
   );
 }
