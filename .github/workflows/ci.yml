@@ -45,7 +45,12 @@ jobs:
       # nuevo. `npm ci` ya corrió arriba con el npm original del runner,
       # sin depender de esta actualización.
       - run: npm install -g npm@latest
-      - run: npm audit --audit-level=high
+      # Reemplaza a `npm audit --audit-level=high`: ese comando bloquea el
+      # pipeline por cualquier vulnerabilidad high/critical sin distinguir
+      # una ya evaluada (con excepción declarada y fecha de vencimiento) de
+      # una nueva. Ver scripts/check-audit.mjs para el detalle y la lista de
+      # excepciones vigentes.
+      - run: node scripts/check-audit.mjs
 
   codeql:
     name: Análisis de seguridad del código (CodeQL)
