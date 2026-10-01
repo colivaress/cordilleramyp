@@ -1702,7 +1702,7 @@ export function InspeccionForm({
           visual a una tarjeta vacía que antes se leía como un error. */}
       <OverlayBloqueante
         visible={modo === "nueva" && numInsp != null}
-        mensaje="Guardado. Abriendo tu inspección…"
+        mensaje="Guardando…"
       />
       <OverlayBloqueante
         visible={overlayFinalizar.visible}
