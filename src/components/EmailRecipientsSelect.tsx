@@ -4,8 +4,6 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { MailIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 import { ContenidoBoton } from "@/components/ui/estado-accion";
 import { OverlayBloqueante } from "@/components/ui/overlay-bloqueante";
 import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
@@ -14,9 +12,19 @@ import { createClient } from "@/lib/supabase/client";
 import type { DestinatarioCorreo } from "@/lib/tipos";
 
 /**
- * Selector MULTI-destinatario (checkboxes) poblado desde destinatarios_correo — §4.1.
- * "Enviar por correo" hace POST al endpoint que genera el PDF del informe en el
- * servidor y lo manda adjunto en un solo envío.
+ * Lista de destinatarios configurados — solo informativa, sin selección.
+ * Decisión de producto: el supervisor ya no elige a quién llegó el informe
+ * — "Enviar por correo" lo manda a TODOS los configurados para este tipo.
+ * La lista que se MUESTRA acá y la lista a la que se ENVÍA tienen que ser
+ * la misma: esta consulta usa exactamente el mismo filtro que la ruta del
+ * servidor (tipo_inspeccion, recibe_informes, activo) — la ruta ya no
+ * acepta destinatarios desde el cliente, los deriva ella misma con esta
+ * misma condición (ver route.ts). Mostrar acá algo que el servidor no
+ * fuera a usar sería mentirle al supervisor sobre a quién le llegó.
+ *
+ * "Enviar por correo" hace POST (sin body — nada que mandar, el servidor
+ * no necesita nada del cliente para decidir a quién) al endpoint que genera
+ * el PDF del informe y lo manda adjunto en un solo envío.
  *
  * Retroalimentación visual: nivel 1 en el botón (useEstadoGuardado, deshabilita
  * de inmediato — sin doble envío, dos correos al cliente sería el peor caso) +
@@ -33,13 +41,12 @@ export function EmailRecipientsSelect({
   ticketId: string;
   /** Destinatarios por tipo de inspección: la lista se filtra a quienes
    *  están autorizados para ESTE tipo (destinatarios_correo_tipos,
-   *  recibe_informes) — mostrar acá un destinatario que la ruta de envío
-   *  igual va a rechazar sería peor que no mostrarlo. */
+   *  recibe_informes) — es solo para MOSTRAR; el servidor vuelve a
+   *  calcularla por su cuenta al enviar, no confía en esto. */
   tipoInspeccion: string;
   rev?: string;
 }) {
   const [lista, setLista] = useState<DestinatarioCorreo[]>([]);
-  const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
   const [cargando, setCargando] = useState(true);
   const guardado = useEstadoGuardado();
   const overlay = useAccionLarga();
@@ -61,15 +68,6 @@ export function EmailRecipientsSelect({
     })();
   }, [tipoInspeccion]);
 
-  function toggle(email: string) {
-    setSeleccion((prev) => {
-      const next = new Set(prev);
-      if (next.has(email)) next.delete(email);
-      else next.add(email);
-      return next;
-    });
-  }
-
   async function enviar() {
     // Capturado antes de guardado.ejecutar (que deshabilita el botón de
     // forma síncrona) y restaurado en el finally de afuera, DESPUÉS de que
@@ -79,19 +77,19 @@ export function EmailRecipientsSelect({
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
-    const destinatarios = [...seleccion];
-    if (destinatarios.length === 0) {
-      toast.error("Seleccionar al menos un destinatario.");
+    if (lista.length === 0) {
+      toast.error("No hay destinatarios configurados.");
       return;
     }
     try {
       await guardado.ejecutar(() =>
         overlay.ejecutar(async () => {
           const qs = rev ? `?rev=${encodeURIComponent(rev)}` : "";
+          // Sin body: el servidor deriva la lista de destinatarios por su
+          // cuenta (mismo filtro que esta pantalla usa para mostrarla) — no
+          // acepta ninguna desde acá. Ver el comentario grande arriba.
           const res = await fetch(`/api/informe/${ticketId}/enviar${qs}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ destinatarios }),
           });
           const data = await res.json().catch(() => ({}));
           // §4.1: sin modo prueba. Solo "éxito" si el correo salió de verdad.
@@ -129,20 +127,12 @@ export function EmailRecipientsSelect({
         <ul className="grid gap-2 sm:grid-cols-2">
           {lista.map((d) => (
             <li key={d.id}>
-              <Label className="items-start gap-2 font-normal">
-                <Checkbox
-                  checked={seleccion.has(d.email)}
-                  onCheckedChange={() => toggle(d.email)}
-                />
-                <span>
-                  <span className="font-medium">{d.nombre}</span>
-                  {d.cargo ? (
-                    <span className="text-muted-foreground"> · {d.cargo}</span>
-                  ) : null}
-                  <br />
-                  <span className="text-xs text-muted-foreground">{d.email}</span>
-                </span>
-              </Label>
+              <span className="font-medium">{d.nombre}</span>
+              {d.cargo ? (
+                <span className="text-muted-foreground"> · {d.cargo}</span>
+              ) : null}
+              <br />
+              <span className="text-xs text-muted-foreground">{d.email}</span>
             </li>
           ))}
         </ul>
@@ -150,7 +140,7 @@ export function EmailRecipientsSelect({
       <Button
         type="button"
         onClick={enviar}
-        disabled={guardado.pendiente || seleccion.size === 0}
+        disabled={guardado.pendiente || lista.length === 0}
         aria-busy={guardado.pendiente}
         className="w-fit"
       >

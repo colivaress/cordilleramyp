@@ -16,8 +16,6 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 /** §4: `?rev=todas` o `?rev=<n>`; sin param -> la revisión más reciente. */
 function leerOpciones(req: NextRequest): OpcionesInforme {
   const rev = req.nextUrl.searchParams.get("rev");
@@ -153,42 +151,26 @@ export async function POST(
 ) {
   const { id } = await params;
 
-  let destinatarios: string[] = [];
-  try {
-    const body = await req.json();
-    destinatarios = Array.isArray(body?.destinatarios)
-      ? body.destinatarios.map((s: unknown) => String(s).trim()).filter(Boolean)
-      : [];
-  } catch {
-    return NextResponse.json({ error: "Body inválido." }, { status: 400 });
-  }
-
-  const invalidos = destinatarios.filter((e) => !EMAIL_RE.test(e));
-  if (destinatarios.length === 0 || invalidos.length > 0) {
-    return NextResponse.json(
-      {
-        error:
-          invalidos.length > 0
-            ? `Correos inválidos: ${invalidos.join(", ")}`
-            : "Seleccionar al menos un destinatario.",
-      },
-      { status: 400 },
-    );
-  }
-
+  // Decisión de producto: el supervisor ya no elige destinatarios — la
+  // pantalla solo los MUESTRA (EmailRecipientsSelect), y esta ruta los
+  // CALCULA, sin leer nada del body. Cualquier `destinatarios` que venga en
+  // el request (viejos clientes, un curl directo) se ignora por completo —
+  // no se lee el body en absoluto, no solo "se valida y se descarta". Antes
+  // (hasta el incidente de septiembre) la ruta confiaba en lo que mandaba el
+  // cliente; el parche de ese momento agregó la validación contra
+  // destinatarios_correo, pero seguía aceptando un SUBCONJUNTO elegido por
+  // el cliente. Que el servidor construya la lista él mismo, en vez de
+  // validar una ajena, cierra el agujero por construcción — no hay nada que
+  // mandar que el servidor pueda aceptar mal.
   const supabase = await createClient();
 
   // Destinatarios por tipo de inspección: cada fila de destinatarios_correo
-  // ahora tiene un permiso POR TIPO en destinatarios_correo_tipos (no un
-  // flag global) — un destinatario autorizado para Encarpe no está
-  // autorizado para Control de Salida solo porque esté activo. Sin este
-  // chequeo el modelo por tipo es decorativo: la pantalla mostraría listas
-  // separadas y esta ruta seguiría aceptando cualquier destinatario — la
-  // misma forma del error de "sin tipos = todos los tipos" del PR #32. Se
-  // necesita el tipo del ticket ANTES del chequeo de destinatarios, así que
-  // esta consulta va antes de preparar() (igual que la validación de
-  // destinatarios ya iba antes: preparar() genera el PDF, caro en CPU, no
-  // hay que pagarlo si el pedido ya está mal formado).
+  // tiene un permiso POR TIPO en destinatarios_correo_tipos (no un flag
+  // global) — un destinatario autorizado para Encarpe no está autorizado
+  // para Control de Salida solo porque esté activo. Se necesita el tipo del
+  // ticket ANTES de poder calcular la lista, así que esta consulta va antes
+  // de preparar() (que genera el PDF, caro en CPU — no hay que pagarlo si
+  // no hay a quién mandarle nada).
   const { data: ticketTipo } = await supabase
     .from("tickets")
     .select("tipo_inspeccion")
@@ -201,16 +183,13 @@ export async function POST(
     );
   }
 
-  // Corrección crítica de seguridad: el informe solo se puede mandar a
-  // destinatarios pre-autorizados por un administrador PARA ESTE TIPO
-  // (destinatarios_correo.activo = true, destinatarios_correo_tipos con
-  // ese tipo_inspeccion y recibe_informes = true) — nunca a una dirección
-  // libre escrita por quien envía. recibe_informes distingue esto de
-  // recibe_vencimientos (el aviso automático de vencimiento del cron, otro
-  // flujo aparte) — un destinatario puede estar activo para uno y no para
-  // el otro, y autorizado para un tipo y no para otro. Comparación en
-  // minúsculas por ambos lados: una mayúscula no debe romper un correo
-  // legítimo.
+  // La lista de ENVÍO — mismo filtro, exactamente, que EmailRecipientsSelect
+  // usa para MOSTRARLA (destinatarios_correo.activo = true,
+  // destinatarios_correo_tipos con ese tipo_inspeccion y
+  // recibe_informes = true). recibe_informes distingue esto de
+  // recibe_vencimientos (el aviso automático del cron, otro flujo aparte) —
+  // un destinatario puede estar activo para uno y no para el otro, y
+  // autorizado para un tipo y no para otro.
   const { data: autorizados, error: errDestinatarios } = await supabase
     .from("destinatarios_correo_tipos")
     .select("destinatario:destinatarios_correo!inner(email, activo)")
@@ -219,20 +198,16 @@ export async function POST(
     .eq("destinatarios_correo.activo", true);
   if (errDestinatarios) {
     return NextResponse.json(
-      { error: "No se pudo validar los destinatarios." },
+      { error: "No se pudo calcular los destinatarios." },
       { status: 500 },
     );
   }
-  const permitidos = new Set(
-    (autorizados ?? []).map((d) => d.destinatario.email.toLowerCase()),
-  );
-  const noAutorizados = destinatarios.filter(
-    (e) => !permitidos.has(e.toLowerCase()),
-  );
-  if (noAutorizados.length > 0) {
+  const destinatarios = (autorizados ?? []).map((d) => d.destinatario.email);
+  if (destinatarios.length === 0) {
     return NextResponse.json(
       {
-        error: `Destinatario(s) no autorizados: ${noAutorizados.join(", ")}`,
+        error:
+          "No hay destinatarios configurados para este tipo de inspección.",
       },
       { status: 400 },
     );
