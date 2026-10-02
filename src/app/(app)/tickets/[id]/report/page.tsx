@@ -311,6 +311,53 @@ type RevisionRow = {
   observacion_general: string | null;
 };
 
+/** Un ítem junto con su número de orden EN TODO EL CHECKLIST (no en el
+ *  subconjunto filtrado) — así un checklist mixto numera igual acá y en el
+ *  PDF (generarInformePdf.ts asigna `n` sobre `filas`, sin filtrar antes). */
+type RespuestaNumerada = { r: RespuestaConItem; n: number };
+
+/** Ítems modo 'fotos' agrupados (nombre encima, sus fotos debajo) — Exportación
+ *  Chimolsa (100% fotos) y "Foto evidencia" de Control de Salida (mixto). */
+function GrillaFotosPorItem({
+  items,
+  urlFotos,
+}: {
+  items: RespuestaNumerada[];
+  urlFotos: Record<string, string>;
+}) {
+  return (
+    <div className="grid gap-4">
+      {items.map(({ r, n }) => {
+        const fotosOrdenadas = (r.fotos ?? []).sort((a, b) => a.orden - b.orden);
+        return (
+          <div key={r.id}>
+            <p className="mb-1.5 text-sm font-medium">
+              {n}. {r.item?.nombre}
+            </p>
+            {fotosOrdenadas.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {fotosOrdenadas.map((f, j) => (
+                  <Image
+                    key={j}
+                    src={urlFotos[f.url] ?? ""}
+                    alt={`${r.item?.nombre} — foto ${j + 1}`}
+                    width={220}
+                    height={165}
+                    unoptimized
+                    className="h-32 w-44 rounded border object-cover"
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Sin fotos</p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function BloqueRevision({
   revision,
   tipoInspeccion,
@@ -339,12 +386,25 @@ function BloqueRevision({
   // fotos" cuando ninguno de sus ítems tiene Conforme/No conforme/No aplica.
   const esSoloFotos =
     respuestas.length > 0 && respuestas.every((r) => r.item?.modo === "fotos");
-  const itemsEstado = respuestas.filter((r) => r.item?.modo !== "fotos");
+  // Numerados ANTES de filtrar, sobre el checklist completo — mismo criterio
+  // que generarInformePdf.ts (asigna `n` sobre `filas` sin filtrar) — para
+  // que un checklist MIXTO (hoy, Control de Salida con "Foto evidencia"
+  // agregado) numere igual acá que en el PDF, en vez de reiniciar en 1 cada
+  // bloque filtrado.
+  const numeradas: RespuestaNumerada[] = respuestas.map((r, i) => ({
+    r,
+    n: i + 1,
+  }));
+  const itemsEstado = numeradas.filter(({ r }) => r.item?.modo === "estado");
+  // Antes esto era either/or (tabla O grilla de fotos) — un tipo mixto se
+  // quedaba sin su bloque de fotos, que desaparecía del informe en
+  // silencio. Se muestran los dos, en orden, cuando ambos tienen ítems.
+  const itemsFotos = numeradas.filter(({ r }) => r.item?.modo === "fotos");
 
   const mostrarDeclaracion =
     tipoInspeccion === "control_salida" &&
     !esSoloFotos &&
-    !itemsEstado.some((r) => r.estado === "no_conforme");
+    !itemsEstado.some(({ r }) => r.estado === "no_conforme");
 
   return (
     <section className="mb-8 last:mb-0">
@@ -364,83 +424,60 @@ function BloqueRevision({
       <h3 className="mb-2 font-semibold">Elementos a Fiscalizar</h3>
 
       {esSoloFotos ? (
-        <div className="grid gap-4">
-          {respuestas.map((r, i) => {
-            const fotosOrdenadas = (r.fotos ?? []).sort(
-              (a, b) => a.orden - b.orden,
-            );
-            return (
-              <div key={r.id}>
-                <p className="mb-1.5 text-sm font-medium">
-                  {i + 1}. {r.item?.nombre}
-                </p>
-                {fotosOrdenadas.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {fotosOrdenadas.map((f, j) => (
-                      <Image
-                        key={j}
-                        src={urlFotos[f.url] ?? ""}
-                        alt={`${r.item?.nombre} — foto ${j + 1}`}
-                        width={220}
-                        height={165}
-                        unoptimized
-                        className="h-32 w-44 rounded border object-cover"
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">Sin fotos</p>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        <GrillaFotosPorItem items={itemsFotos} urlFotos={urlFotos} />
       ) : (
-        <table className="w-full border-collapse text-left">
-          <thead>
-            <tr className="border-b text-xs text-muted-foreground">
-              <th className="py-1 pr-2">#</th>
-              <th className="py-1 pr-2">Elemento</th>
-              <th className="py-1 pr-2">Resultado</th>
-              <th className="py-1">Observación</th>
-            </tr>
-          </thead>
-          <tbody>
-            {itemsEstado.map((r, i) => (
-              <tr key={r.id} className="border-b align-top">
-                <td className="py-1.5 pr-2 tabular-nums">{i + 1}</td>
-                <td className="py-1.5 pr-2">{r.item?.nombre}</td>
-                <td className="py-1.5 pr-2">
-                  {/* cerrarRevision ya no permite cerrar una revisión con
-                      ítems sin responder (§2.7/§9 de la fase) — r.estado
-                      null acá sería un dato viejo o un caso no debería
-                      pasar. Si aparece, mejor decir la verdad que asumir
-                      "Conforme" sin que nadie lo haya confirmado. */}
-                  {r.estado ? ETIQUETA_ITEM[r.estado] : "Sin responder"}
-                </td>
-                <td className="py-1.5">
-                  {r.estado === "no_conforme" ? (
-                    <div className="grid gap-1">
-                      <span>{r.observacion}</span>
-                      {r.foto_url && urlFotos[r.foto_url] && (
-                        <Image
-                          src={urlFotos[r.foto_url]}
-                          alt={`Falla ${r.item?.nombre}`}
-                          width={200}
-                          height={150}
-                          unoptimized
-                          className="mt-1 h-32 w-44 rounded border object-cover"
-                        />
-                      )}
-                    </div>
-                  ) : (
-                    "—"
-                  )}
-                </td>
+        <>
+          <table className="w-full border-collapse text-left">
+            <thead>
+              <tr className="border-b text-xs text-muted-foreground">
+                <th className="py-1 pr-2">#</th>
+                <th className="py-1 pr-2">Elemento</th>
+                <th className="py-1 pr-2">Resultado</th>
+                <th className="py-1">Observación</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {itemsEstado.map(({ r, n }) => (
+                <tr key={r.id} className="border-b align-top">
+                  <td className="py-1.5 pr-2 tabular-nums">{n}</td>
+                  <td className="py-1.5 pr-2">{r.item?.nombre}</td>
+                  <td className="py-1.5 pr-2">
+                    {/* cerrarRevision ya no permite cerrar una revisión con
+                        ítems sin responder (§2.7/§9 de la fase) — r.estado
+                        null acá sería un dato viejo o un caso no debería
+                        pasar. Si aparece, mejor decir la verdad que asumir
+                        "Conforme" sin que nadie lo haya confirmado. */}
+                    {r.estado ? ETIQUETA_ITEM[r.estado] : "Sin responder"}
+                  </td>
+                  <td className="py-1.5">
+                    {r.estado === "no_conforme" ? (
+                      <div className="grid gap-1">
+                        <span>{r.observacion}</span>
+                        {r.foto_url && urlFotos[r.foto_url] && (
+                          <Image
+                            src={urlFotos[r.foto_url]}
+                            alt={`Falla ${r.item?.nombre}`}
+                            width={200}
+                            height={150}
+                            unoptimized
+                            className="mt-1 h-32 w-44 rounded border object-cover"
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {itemsFotos.length > 0 && (
+            <div className="mt-4">
+              <GrillaFotosPorItem items={itemsFotos} urlFotos={urlFotos} />
+            </div>
+          )}
+        </>
       )}
 
       {mostrarDeclaracion && (

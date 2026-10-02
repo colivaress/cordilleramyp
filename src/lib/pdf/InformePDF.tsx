@@ -20,9 +20,11 @@ export type ItemEstadoPDF = {
 };
 
 /**
- * Ítem de checklist modo 'fotos' (hoy, únicamente Exportación Chimolsa) — sin
- * Conforme/No conforme/No aplica, solo N fotos obligatorias (N =
- * checklist_items.fotos_requeridas, no es una constante fija).
+ * Ítem de checklist modo 'fotos' (Exportación Chimolsa, y "Foto evidencia"
+ * de Control de Salida) — sin Conforme/No conforme/No aplica, solo fotos.
+ * `fotos` trae las que el supervisor cargó (puede ser menos que
+ * checklist_items.fotos_maximas si el ítem admite opcionales, nunca menos
+ * que fotos_requeridas en una revisión ya cerrada).
  */
 export type ItemFotosPDF = {
   modo: "fotos";
@@ -374,6 +376,14 @@ function BloqueRevision({
   const itemsEstado = r.items.filter(
     (it): it is ItemEstadoPDF => it.modo === "estado",
   );
+  // Checklist MIXTO (hoy, Control de Salida con "Foto evidencia" agregado):
+  // ni todo-fotos ni todo-estado. Antes esto era either/or (TablaChecklist O
+  // FotosPorItem) — un tipo mixto se quedaba sin su bloque de fotos, que
+  // desaparecía del informe en silencio. Se muestran los dos bloques, en
+  // orden, cuando ambos tienen ítems.
+  const itemsFotos = r.items.filter(
+    (it): it is ItemFotosPDF => it.modo === "fotos",
+  );
 
   // §2 de la fase: SOLO Control de Salida, y solo si esta revisión no tiene
   // ningún ítem no conforme.
@@ -398,13 +408,12 @@ function BloqueRevision({
 
       <Text style={s.seccion}>Elementos a Fiscalizar</Text>
       {esSoloFotos ? (
-        <FotosPorItem
-          items={r.items.filter(
-            (it): it is ItemFotosPDF => it.modo === "fotos",
-          )}
-        />
+        <FotosPorItem items={itemsFotos} />
       ) : (
-        <TablaChecklist items={itemsEstado} />
+        <>
+          <TablaChecklist items={itemsEstado} />
+          {itemsFotos.length > 0 && <FotosPorItem items={itemsFotos} />}
+        </>
       )}
 
       {mostrarDeclaracion && (

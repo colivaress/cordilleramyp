@@ -44,14 +44,16 @@ export type RespuestaEditable = {
   fotoPath: string | null;
   fotoNombre: string | null;
   fotoPreviewUrl: string | null;
-  // Solo modo 'fotos': una fila por foto obligatoria del ítem (cantidad =
-  // checklist_items.fotos_requeridas — ya no es una constante fija de 2;
-  // varía por ítem). Índice 0 = orden 1 en ticket_checklist_fotos, índice 1
-  // = orden 2, etc.
+  // Solo modo 'fotos': una fila por espacio de carga del ítem (cantidad =
+  // checklist_items.fotos_maximas, no fotos_requeridas — un ítem puede
+  // admitir más fotos de las obligatorias para cerrar, ver validarChecklist
+  // en InspeccionForm). Índice 0 = orden 1 en ticket_checklist_fotos, índice
+  // 1 = orden 2, etc. Los slots más allá de fotos_requeridas pueden quedar
+  // vacíos — son opcionales, no bloquean nada.
   fotos: FotoSlot[];
 };
 
-/** `cantidadFotos` = checklist_items.fotos_requeridas del ítem (0 si modo 'estado'). */
+/** `cantidadFotos` = checklist_items.fotos_maximas del ítem (0 si modo 'estado') — la cantidad de ESPACIOS a mostrar, no el mínimo obligatorio. */
 export const respuestaVacia = (cantidadFotos = 0): RespuestaEditable => ({
   estado: null,
   observacion: "",
@@ -101,9 +103,17 @@ export function ChecklistItemRow({
   estadoGuardadoFoto?: (orden: number) => EstadoGuardado;
 }) {
   if (item.modo === "fotos") {
-    // checklist_items.fotos_requeridas manda la cantidad de espacios de
-    // carga — un ítem de una sola foto muestra un solo espacio, no dos con
-    // uno opcional.
+    // checklist_items.fotos_maximas manda la cantidad de espacios de carga
+    // (fotos_requeridas es el mínimo para poder cerrar la revisión — ver
+    // validarChecklist en InspeccionForm). Un ítem de cantidad EXACTA
+    // (fotos_requeridas === fotos_maximas, hoy los 4 de Exportación Chimolsa)
+    // sigue etiquetando cada espacio "(obligatoria)", sin cambios. Un ítem
+    // con rango (fotos_requeridas < fotos_maximas, hoy "Foto evidencia" de
+    // Control de Salida: 2 obligatorias + 2 opcionales) no distingue cuáles
+    // son cuáles en la etiqueta — pedido explícito del cliente, "sin
+    // etiqueta por foto": el inspector fotografía lo que corresponda, la
+    // exigencia del mínimo se aplica solo al cerrar, no en cada espacio.
+    const esRango = (item.fotos_maximas ?? 0) > (item.fotos_requeridas ?? 0);
     return (
       <div className="grid gap-3 border-b py-3 last:border-b-0">
         <div className="flex flex-wrap items-center gap-2">
@@ -124,9 +134,11 @@ export function ChecklistItemRow({
             <FotoSlotInput
               key={idx}
               label={
-                valor.fotos.length > 1
-                  ? `Foto ${idx + 1} (obligatoria)`
-                  : "Foto (obligatoria)"
+                esRango
+                  ? `Foto ${idx + 1}`
+                  : valor.fotos.length > 1
+                    ? `Foto ${idx + 1} (obligatoria)`
+                    : "Foto (obligatoria)"
               }
               slot={slot}
               disabled={!onFotoModo}
