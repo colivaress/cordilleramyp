@@ -662,20 +662,16 @@ export function InspeccionForm({
           nroContenedor:
             tipoSeleccionado === "exportacion_chimolsa" ? nroContenedor : null,
         });
-        if (res.ok) {
-          setNumInsp(res.numeroInspeccion);
-          // El ticket ya existe de verdad — la identidad de "esta
-          // inspección" pasa a vivir en su propia URL, no en este
-          // componente montado bajo /tickets/new. La navegación ocurre acá
-          // mismo, ANTES de que el guardado puntual que disparó este
-          // asegurarRevision (el ítem/firma que el supervisor acaba de
-          // tocar) siquiera se ejecute — no hay ninguna ventana en la que
-          // /tickets/new siga en la URL con datos ya persistidos del lado
-          // del servidor. La página de destino (/tickets/[id]/reinspeccion)
-          // reconstruye el formulario desde cero a partir de lo ya
-          // guardado — nunca se recicla este ticketId para otra inspección.
-          router.replace(`/tickets/${ticketId}/reinspeccion`);
-        }
+        // El ticket ya existe de verdad apenas `res.ok` — pero el supervisor
+        // se queda en /tickets/new, sin navegar a su propia URL. Decisión de
+        // producto: la navegación (agregada en #84 para que una recarga no
+        // dejara el ticket huérfano) ya no hace falta — desde PR #88, una
+        // inspección en_revision aparece en la grilla con "Continuar", que
+        // lleva a /tickets/[id]/reinspeccion y recupera el checklist ya
+        // guardado. La URL dejó de ser la única puerta para encontrarla. Sin
+        // esta navegación tampoco hay ya ninguna carrera que coordinar entre
+        // guardar y navegar (ver el intento anterior, revertido).
+        if (res.ok) setNumInsp(res.numeroInspeccion);
         return res;
       }
       return iniciarReinspeccion({
@@ -1694,16 +1690,14 @@ export function InspeccionForm({
           </div>
         </div>
       )}
-      {/* El ticket ya existe de verdad (ver asegurarRevision) — la
-          navegación a su propia URL (/tickets/[id]/reinspeccion) ya se
-          disparó. El overlay bloquea toda interacción mientras se completa
-          (nadie puede seguir tocando ítems con la URL todavía en
-          /tickets/new) sin ocultar el formulario detrás — evita el salto
-          visual a una tarjeta vacía que antes se leía como un error. */}
-      <OverlayBloqueante
-        visible={modo === "nueva" && numInsp != null}
-        mensaje="Guardando…"
-      />
+      {/* Decisión de producto: crear el ticket (primer guardado real) ya no
+          navega ni bloquea la pantalla — ver el comentario grande en
+          asegurarRevision. La única señal de guardado durante el checklist
+          es el "Guardado" de cada ítem (IndicadorGuardado, vía
+          guardadoItems), que ya corre independiente de esto. El overlay
+          bloqueante sigue existiendo solo para "Finalizar revisión" — ahí sí
+          corresponde: es una acción que el usuario dispara y que cierra la
+          inspección. */}
       <OverlayBloqueante
         visible={overlayFinalizar.visible}
         mensaje={overlayFinalizar.mensaje}
