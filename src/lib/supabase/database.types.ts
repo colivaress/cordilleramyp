@@ -40,6 +40,7 @@ export type Database = {
       checklist_items: {
         Row: {
           exigencia: string | null
+          fotos_maximas: number | null
           fotos_requeridas: number | null
           key: string
           modo: Database["public"]["Enums"]["item_modo"]
@@ -49,6 +50,7 @@ export type Database = {
         }
         Insert: {
           exigencia?: string | null
+          fotos_maximas?: number | null
           fotos_requeridas?: number | null
           key: string
           modo?: Database["public"]["Enums"]["item_modo"]
@@ -58,6 +60,7 @@ export type Database = {
         }
         Update: {
           exigencia?: string | null
+          fotos_maximas?: number | null
           fotos_requeridas?: number | null
           key?: string
           modo?: Database["public"]["Enums"]["item_modo"]

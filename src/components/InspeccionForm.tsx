@@ -149,11 +149,20 @@ function diasVencimientoPorTipo(tipo: string): number {
 }
 
 /**
- * Fase "tipos de inspección" — cantidad de fotos obligatorias de un ítem de
- * modo 'fotos', leída de checklist_items.fotos_requeridas — ya no es una
- * constante del código (algunos ítems piden 1, otros 2).
+ * Cantidad de ESPACIOS de carga a mostrar para un ítem de modo 'fotos' —
+ * checklist_items.fotos_maximas, no fotos_requeridas. Para los ítems de
+ * cantidad exacta (Exportación Chimolsa) ambas coinciden, sin cambio de
+ * comportamiento. Para un ítem con rango ("Foto evidencia" de Control de
+ * Salida: 2 obligatorias, hasta 4), esto es 4 — el mínimo para poder cerrar
+ * la revisión se valida aparte, ver `fotosRequeridasItem` y
+ * `validarChecklist`.
  */
 function cantidadFotosItem(item: ChecklistItem): number {
+  return item.modo === "fotos" ? item.fotos_maximas ?? 0 : 0;
+}
+
+/** Mínimo de fotos para poder cerrar la revisión — checklist_items.fotos_requeridas. */
+function fotosRequeridasItem(item: ChecklistItem): number {
   return item.modo === "fotos" ? item.fotos_requeridas ?? 0 : 0;
 }
 
@@ -387,6 +396,29 @@ export function InspeccionForm({
       itemsDelTipo.filter(
         (i) => i.modo !== "fotos" && respuestas[i.key]?.estado == null,
       ),
+    [itemsDelTipo, respuestas],
+  );
+
+  // Para ChecklistProgreso — distinto de itemsPendientes de arriba (que es
+  // "próximo ítem de ESTADO sin responder", usado para saltar ahí desde
+  // validarChecklist, a propósito sin ítems modo 'fotos'). Acá sí hace
+  // falta contarlos: un ítem modo 'fotos' cuenta como respondido cuando
+  // cumple su MÍNIMO (fotosRequeridasItem, no fotos_maximas) — las fotos
+  // opcionales no lo hacen "más respondido". Sin esto, un ítem de fotos
+  // recién llegado a pantalla, sin ninguna foto todavía, contaba como
+  // respondido solo porque itemsPendientes lo excluye por diseño — nunca se
+  // notó antes porque el único tipo con ítems modo 'fotos' (Exportación
+  // Chimolsa) es 100% fotos, y esSoloFotos oculta este bloque entero ahí.
+  const cantidadRespondidos = useMemo(
+    () =>
+      itemsDelTipo.filter((i) => {
+        if (i.modo === "fotos") {
+          const requeridas = fotosRequeridasItem(i);
+          const fotos = respuestas[i.key]?.fotos ?? [];
+          return fotos.slice(0, requeridas).every((f) => f.path);
+        }
+        return respuestas[i.key]?.estado != null;
+      }).length,
     [itemsDelTipo, respuestas],
   );
 
@@ -1142,8 +1174,12 @@ export function InspeccionForm({
       const r = respuestas[item.key];
       if (!r) return { mensaje: `Falta completar "${item.nombre}".`, itemKey: item.key };
       if (item.modo === "fotos") {
-        const requeridas = cantidadFotosItem(item);
-        if (r.fotos.length < requeridas || r.fotos.some((f) => !f.path))
+        // Solo los primeros `requeridas` espacios bloquean el cierre — los
+        // que quedan hasta fotos_maximas son opcionales (ver
+        // fotosRequeridasItem/cantidadFotosItem) y pueden quedar vacíos sin
+        // que eso falte nada.
+        const requeridas = fotosRequeridasItem(item);
+        if (r.fotos.slice(0, requeridas).some((f) => !f.path))
           return {
             mensaje: `Faltan fotos en "${item.nombre}" (se requiere${requeridas === 1 ? "" : "n"} ${requeridas}).`,
             itemKey: item.key,
@@ -1548,7 +1584,7 @@ export function InspeccionForm({
 
       {paso === 2 && !esSoloFotos && itemsDelTipo.length > 0 && (
         <ChecklistProgreso
-          respondidos={itemsDelTipo.length - itemsPendientes.length}
+          respondidos={cantidadRespondidos}
           total={itemsDelTipo.length}
         />
       )}
