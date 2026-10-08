@@ -16,6 +16,23 @@
 // (porque la advisory ya no aparece) o si aparece una advisory nueva no
 // contemplada.
 //
+// La decisión de FALLAR usa el árbol de producción (`npm audit --omit=dev`):
+// la mayoría de los paquetes de este proyecto (`shadcn`, el CLI que arrastra
+// `@modelcontextprotocol/sdk`/`express`/`proxy-addr`, y las herramientas de
+// build que arrastra `fast-glob`/`micromatch`/`braces`) nunca corren en el
+// servidor que atiende tráfico — solo en la máquina de quien hace `npm run
+// build` o en el propio CI. Bloquear el pipeline por una vulnerabilidad que
+// nunca se ejecuta en producción no agrega seguridad real, y en la práctica
+// termina entrenando a mirar el check en rojo como "ruido" en vez de una
+// señal real.
+//
+// Dicho eso, una dependencia de build comprometida (supply-chain) puede
+// exfiltrar secretos del entorno de CI con la misma facilidad que una de
+// producción — así que el árbol de desarrollo NUNCA se descarta en
+// silencio: cada hallazgo que solo aparece ahí se imprime igual, como
+// advertencia, para que alguien lo mire — simplemente no bloquea el merge
+// por sí solo.
+//
 // Sin dependencias nuevas: solo Node (child_process, Date) y el propio npm.
 
 import { execSync } from "node:child_process";
@@ -84,9 +101,9 @@ function esAltaOCritica(severidad) {
   return severidad === "high" || severidad === "critical";
 }
 
-function obtenerReporteAuditoria() {
+function obtenerReporteAuditoria(comando) {
   try {
-    const salida = execSync("npm audit --json", {
+    const salida = execSync(comando, {
       encoding: "utf8",
       maxBuffer: 1024 * 1024 * 20,
     });
@@ -100,12 +117,12 @@ function obtenerReporteAuditoria() {
       try {
         return JSON.parse(error.stdout);
       } catch {
-        console.error("No se pudo interpretar la salida de `npm audit --json`.");
+        console.error(`No se pudo interpretar la salida de \`${comando}\`.`);
         console.error(error.stdout);
         process.exit(1);
       }
     }
-    console.error("No se pudo ejecutar `npm audit --json`:", error.message);
+    console.error(`No se pudo ejecutar \`${comando}\`:`, error.message);
     process.exit(1);
   }
 }
@@ -150,15 +167,22 @@ function diasRestantes(vence) {
 }
 
 function main() {
-  const reporte = obtenerReporteAuditoria();
-  const advisories = advisoriesDetectadas(reporte);
+  // Dos árboles: el de producción (`--omit=dev`) es el que decide si el
+  // pipeline falla — es el único que puede llegar a ejecutarse en el
+  // servidor que atiende tráfico real. El completo (dev + producción) es
+  // solo para informar: nunca bloquea por sí solo, pero tampoco se calla.
+  const reporteProduccion = obtenerReporteAuditoria("npm audit --omit=dev --json");
+  const reporteCompleto = obtenerReporteAuditoria("npm audit --json");
+  const advisoriesProduccion = advisoriesDetectadas(reporteProduccion);
+  const advisoriesCompletas = advisoriesDetectadas(reporteCompleto);
   const porGhsa = new Map(ALLOWLIST.map((entrada) => [entrada.ghsa, entrada]));
-  const ghsaDetectados = new Set(advisories.map((a) => a.ghsa));
+  const ghsaProduccion = new Set(advisoriesProduccion.map((a) => a.ghsa));
 
   const errores = [];
 
-  // (a) vulnerabilidad high/critical sin excepción declarada.
-  for (const a of advisories) {
+  // (a) vulnerabilidad high/critical sin excepción declarada — solo cuenta
+  // si es alcanzable desde el árbol de producción.
+  for (const a of advisoriesProduccion) {
     if (esAltaOCritica(a.severidad) && !porGhsa.has(a.ghsa)) {
       errores.push(
         `Vulnerabilidad ${a.severidad.toUpperCase()} sin excepción: ${a.ghsa} (${a.paquete}) — ${a.titulo}\n` +
@@ -180,22 +204,38 @@ function main() {
     }
   }
 
-  // (c) excepciones muertas — ya no aparecen en el reporte.
+  // (c) excepciones muertas — ya no aparecen en el árbol de PRODUCCIÓN. Si
+  // una excepción deja de ser alcanzable ahí (por ejemplo porque el paquete
+  // que la arrastraba pasó a devDependencies), ya no protege nada y hay que
+  // sacarla, aunque siga apareciendo en el árbol completo.
   for (const entrada of ALLOWLIST) {
-    if (!ghsaDetectados.has(entrada.ghsa)) {
+    if (!ghsaProduccion.has(entrada.ghsa)) {
       errores.push(
-        `Excepción muerta: ${entrada.ghsa} (${entrada.paquete}) ya no aparece en \`npm audit\` — hay que borrarla de la ALLOWLIST en scripts/check-audit.mjs.`,
+        `Excepción muerta: ${entrada.ghsa} (${entrada.paquete}) ya no aparece en el árbol de producción (\`npm audit --omit=dev\`) — hay que borrarla de la ALLOWLIST en scripts/check-audit.mjs.`,
       );
     }
   }
 
+  // Hallazgos que solo existen en el árbol de desarrollo/build (CLIs como
+  // `shadcn`, herramientas de build, etc.) — nunca bloquean el pipeline por
+  // sí solos, pero se imprimen siempre como advertencia: una dependencia de
+  // build comprometida puede exfiltrar los secretos del CI igual que una de
+  // producción, así que alguien tiene que verlos.
+  const soloEnDesarrollo = advisoriesCompletas.filter((a) => !ghsaProduccion.has(a.ghsa));
+
   if (errores.length > 0) {
     console.error("AUDITORIA DE DEPENDENCIAS: FALLO\n");
     for (const e of errores) console.error(`- ${e}\n`);
+    if (soloEnDesarrollo.length > 0) {
+      console.warn("ADVERTENCIA — además, solo en el árbol de desarrollo/build (no bloquean, no se ignoran):\n");
+      for (const a of soloEnDesarrollo) {
+        console.warn(`  - ${a.severidad.toUpperCase()} ${a.ghsa} (${a.paquete}) — ${a.titulo}\n    ${a.url}\n`);
+      }
+    }
     process.exit(1);
   }
 
-  console.log("AUDITORIA DE DEPENDENCIAS: OK\n");
+  console.log("AUDITORIA DE DEPENDENCIAS: OK (árbol de producción, npm audit --omit=dev)\n");
   if (ALLOWLIST.length === 0) {
     console.log("Sin excepciones activas.");
   } else {
@@ -206,6 +246,17 @@ function main() {
         `  - ${entrada.ghsa} (${entrada.paquete}, ${entrada.severidad}) — vence ${entrada.vence} (${dias} día(s) restantes)\n` +
           `    Motivo: ${entrada.motivo}`,
       );
+    }
+  }
+
+  if (soloEnDesarrollo.length > 0) {
+    console.warn(
+      "\nADVERTENCIA — vulnerabilidades solo en el árbol de desarrollo/build (no ejecutan en producción, " +
+        "así que no bloquean el pipeline, pero una dependencia de build comprometida puede exfiltrar los " +
+        "secretos del CI igual que una de producción — no se descartan en silencio):\n",
+    );
+    for (const a of soloEnDesarrollo) {
+      console.warn(`  - ${a.severidad.toUpperCase()} ${a.ghsa} (${a.paquete}) — ${a.titulo}\n    ${a.url}\n`);
     }
   }
 }
