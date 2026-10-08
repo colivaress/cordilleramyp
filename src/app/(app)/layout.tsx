@@ -12,7 +12,6 @@ export default async function AppLayout({
   const { perfil } = await getSesion();
   const esAdmin = perfil.rol === "administrador";
   const esAdminContrato = perfil.rol === "administrador_contrato";
-  const esSupervisor = perfil.rol === "supervisor";
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
@@ -67,15 +66,14 @@ export default async function AppLayout({
                 </Link>
               </>
             )}
-            {/* §2.6: solo el supervisor crea inspecciones; el admin no ve el link. */}
-            {esSupervisor && (
-              <Link
-                href="/tickets/new"
-                className={buttonVariants({ variant: "ghost" })}
-              >
-                Nueva inspección
-              </Link>
-            )}
+            {/* §2.6 pedía este link "Nueva inspección" en la barra, solo para
+                supervisor. Se saca por pedido del cliente (2026-10-02): el
+                único acceso a crear una inspección pasa a ser el botón azul
+                del listado (/dashboard), para no tener dos puertas al mismo
+                formulario. El supervisor llega al listado por el logo, que
+                apunta a /dashboard — ese es ahora su único elemento de
+                navegación, porque el link "Inspecciones" de más arriba sigue
+                restringido a admin y admin de contrato. */}
           </nav>
           <div className="ml-auto flex min-w-0 items-center gap-2 text-sm sm:gap-3">
             {/* §2.6: el nombre debe verse en todos los tamaños (antes tenía
