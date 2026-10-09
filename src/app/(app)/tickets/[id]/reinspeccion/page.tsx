@@ -87,6 +87,7 @@ export default async function ReinspeccionPage({
     .from("checklist_items")
     .select("*")
     .eq("tipo", ticket.tipo_inspeccion)
+    .eq("activo", true)
     .order("orden");
 
   return (
