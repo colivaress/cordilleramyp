@@ -55,6 +55,57 @@ alter table public.checklist_items
   add column tipo text not null default 'encarpe' references public.tipos_inspeccion(clave),
   add column modo public.item_modo not null default 'estado';
 
+-- ─────────────────────────────────────────────────────────────────────────
+-- 2.bis Los 18 ítems de Encarpe que el bloque de arriba da por existentes.
+--
+--   Agregado el 9-oct-2026. El comentario que sigue siempre dijo que el
+--   default de `tipo` existía "para poder backfillear los 18 ítems de Encarpe
+--   ya existentes" — pero esas filas nunca estuvieron en ninguna migración:
+--   se insertaron a mano durante la construcción inicial. En una base nueva
+--   no existían, el backfill no backfilleaba nada, y
+--   20261002020000_bajas_catalogo_desencarpe_encarpe.sql abortaba con
+--   "encarpe quedó con 0 ítems, se esperaban 17". En la práctica: la base no
+--   se podía reconstruir desde el repositorio.
+--
+--   Van acá y no en una migración aparte por dos razones. Primero, es el
+--   lugar correcto: este es el punto donde esta migración asume que existen.
+--   Segundo, una migración aparte con timestamp anterior al último aplicado
+--   hace que `supabase db push` se niegue a correr ("Found local migration
+--   files to be inserted before the last migration on remote database") —
+--   verificado en el deploy a staging del 9-oct — y la alternativa sería
+--   pasarle --include-all al pipeline, que apagaría esa protección para
+--   siempre y para todas las migraciones futuras, no solo para esta.
+--
+--   No hace falta guardia: en este punto `tipo` y `modo` todavía tienen sus
+--   defaults ('encarpe'/'estado'), así que el insert de 4 columnas es válido
+--   — que es exactamente lo que el comentario de abajo describe.
+--
+--   EN PRODUCCIÓN Y STAGING NO CAMBIA NADA: esta migración ya está aplicada
+--   en ambos entornos y no se vuelve a ejecutar. El cambio solo afecta la
+--   reconstrucción de una base desde cero (`supabase db reset`).
+-- ─────────────────────────────────────────────────────────────────────────
+
+insert into public.checklist_items (key, nombre, exigencia, orden) values
+  ('plataforma',        'Plataforma',                      'No debe presentar fisuras ni ovalaciones', 1),
+  ('teleras_y_ganchos', 'Teleras y Ganchos',               'Las teleras deben estar en buen estado, los ganchos deben estar separados aprox. cada 60 cm', 2),
+  ('carpas',            'Carpas',                          'Deben cubrir el ancho y alto de la carga, no debe presentar agujeros, no debe estar quemada', 3),
+  ('nylon',             'Nylon',                           'Debe cubrir el largo carga, no presentar agujeros', 4),
+  ('ponchos',           'Ponchos',                         'No deben presentar agujeros, no debe estar quemado', 5),
+  ('cordeles',          'Cordeles',                        'No deben presentar nudos, estar picados o quemados', 6),
+  ('cortinas',          'Cortinas',                        'No deben presentar fisuras, agujeros o encontrarse quemadas', 7),
+  ('goma_drenaje',      'Gomas Drenaje',                   'No deben estar dañadas, quemadas o cortadas', 8),
+  ('sider_broches',     'Slider (Broches sujeta cortina)', 'Deben estar en buen estado', 9),
+  ('esquineros',        'Esquineros',                      'Mantener un mínimo de 30 esquineros de madera o plástico', 10),
+  ('eslingas',          'Eslingas',                        'Sin piquetes, rajaduras, quemaduras ni nudos', 11),
+  ('trinquetes',        'Trinquetes',                      'Deben estar en buen estado con sus seguros y mecanismos funcionando', 12),
+  ('carga',             'Carga',                           'Debe venir bien estibada y/o prensada', 13),
+  ('maletero',          'Maletero (Herramientas)',         'Deben estar en buen estado', 14),
+  ('fugas',             'Fugas',                           'No deben tener fugas de agua o combustible', 15),
+  ('luces',             'Luces',                           'Deben estar en buen estado', 16),
+  ('neumaticos',        'Neumáticos',                      'Deben estar en buen estado', 17),
+  ('cunas',             'Cuñas',                           'Debe contar con 2 cuñas de plástico o goma maciza', 18)
+on conflict (key) do nothing;
+
 -- El default de `tipo` solo existió para poder backfillear los 18 ítems de
 -- Encarpe ya existentes en el mismo ALTER — se saca para que cualquier ítem
 -- nuevo tenga que declarar su tipo explícitamente, nunca heredar 'encarpe'
