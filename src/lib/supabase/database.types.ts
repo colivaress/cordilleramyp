@@ -281,6 +281,9 @@ export type Database = {
           foto_url: string | null
           id: string
           item_key: string
+          item_modo: Database["public"]["Enums"]["item_modo"]
+          item_nombre: string
+          item_orden: number
           observacion: string | null
           revision_numero: number
           ticket_id: string
@@ -291,6 +294,9 @@ export type Database = {
           foto_url?: string | null
           id?: string
           item_key: string
+          item_modo?: Database["public"]["Enums"]["item_modo"]
+          item_nombre?: string
+          item_orden?: number
           observacion?: string | null
           revision_numero: number
           ticket_id: string
@@ -301,6 +307,9 @@ export type Database = {
           foto_url?: string | null
           id?: string
           item_key?: string
+          item_modo?: Database["public"]["Enums"]["item_modo"]
+          item_nombre?: string
+          item_orden?: number
           observacion?: string | null
           revision_numero?: number
           ticket_id?: string

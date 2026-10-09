@@ -167,19 +167,18 @@ async function construirRevisionPDF(
   const conductor = rev.conductor ?? conductorFallback;
   const vencimiento = rev.fecha_vencimiento ?? vencimientoFallback;
 
-  // Fase "tipos de inspección" — parte 3/4: `item` trae modo/fotos_requeridas
-  // (para saber cómo renderizar cada ítem) y `fotos` trae las filas de
-  // ticket_checklist_fotos de esa respuesta (ítems modo 'fotos').
+  // nombre/orden/modo del ítem vienen congelados en la propia respuesta
+  // (item_nombre/item_orden/item_modo), nunca del catálogo vivo: editar o
+  // renumerar el catálogo no debe cambiar ni reordenar un informe firmado.
+  // `fotos` trae las filas de ticket_checklist_fotos (ítems modo 'fotos').
   const { data: respuestas } = await supabase
     .from("ticket_checklist_respuestas")
-    .select(
-      "*, item:checklist_items(nombre, orden, modo, fotos_requeridas), fotos:ticket_checklist_fotos(url, orden)",
-    )
+    .select("*, fotos:ticket_checklist_fotos(url, orden)")
     .eq("ticket_id", ticketId)
     .eq("revision_numero", rev.numero_revision);
 
   const filas = (respuestas ?? []).sort(
-    (a, b) => (a.item?.orden ?? 0) - (b.item?.orden ?? 0),
+    (a, b) => a.item_orden - b.item_orden,
   );
 
   const urlFotos = await firmarRutas(supabase, "fallas", [
@@ -195,8 +194,8 @@ async function construirRevisionPDF(
   const [items, [firmaConductorUri, firmaFiscalizadorUri]] = await Promise.all([
     Promise.all(
       filas.map(async (r, i): Promise<ItemPDF> => {
-        const nombre = r.item?.nombre ?? r.item_key;
-        if (r.item?.modo === "fotos") {
+        const nombre = r.item_nombre;
+        if (r.item_modo === "fotos") {
           const fotosOrdenadas = (r.fotos ?? []).sort(
             (a, b) => a.orden - b.orden,
           );
@@ -239,7 +238,7 @@ async function construirRevisionPDF(
   const observaciones = filas
     .filter((r) => r.estado === "no_conforme")
     .map((r) => ({
-      nombre: r.item?.nombre ?? r.item_key,
+      nombre: r.item_nombre,
       observacion: r.observacion,
     }));
 
