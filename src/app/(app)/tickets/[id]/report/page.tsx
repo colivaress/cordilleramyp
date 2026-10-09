@@ -93,13 +93,13 @@ export default async function InformePage({
   const revsAMostrar = modoTodas ? revisiones : [revSel];
 
   // Firmar en lote las fotos y firmas de todas las revisiones que se muestran.
-  // Fase "tipos de inspección" §4: `item` trae modo/fotos_requeridas y
-  // `fotos` las filas de ticket_checklist_fotos (ítems modo 'fotos').
+  // nombre/orden/modo del ítem vienen congelados en la propia respuesta
+  // (item_nombre/item_orden/item_modo), nunca del catálogo vivo: editar o
+  // renumerar el catálogo no debe cambiar ni reordenar un informe firmado.
+  // `fotos` trae las filas de ticket_checklist_fotos (ítems modo 'fotos').
   const { data: respuestasData } = await supabase
     .from("ticket_checklist_respuestas")
-    .select(
-      "*, item:checklist_items(nombre, orden, modo, fotos_requeridas), fotos:ticket_checklist_fotos(url, orden)",
-    )
+    .select("*, fotos:ticket_checklist_fotos(url, orden)")
     .eq("ticket_id", id)
     .in(
       "revision_numero",
@@ -241,7 +241,7 @@ export default async function InformePage({
             supervisorNombre={supervisorNombre}
             respuestas={respuestas
               .filter((x) => x.revision_numero === r.numero_revision)
-              .sort((a, b) => (a.item?.orden ?? 0) - (b.item?.orden ?? 0))}
+              .sort((a, b) => a.item_orden - b.item_orden)}
             urlFotos={urlFotos}
             urlFirmas={urlFirmas}
             conSubtitulo={modoTodas}
@@ -281,13 +281,6 @@ export default async function InformePage({
   );
 }
 
-type ItemInfo = {
-  nombre: string;
-  orden: number;
-  modo: "estado" | "fotos";
-  fotos_requeridas: number | null;
-} | null;
-
 type RespuestaConItem = {
   id: string;
   revision_numero: number;
@@ -295,7 +288,10 @@ type RespuestaConItem = {
   estado: "conforme" | "no_conforme" | "no_aplica" | null;
   observacion: string | null;
   foto_url: string | null;
-  item: ItemInfo;
+  // Congelados al crear la respuesta (trigger trg_congelar_item_checklist).
+  item_nombre: string;
+  item_orden: number;
+  item_modo: "estado" | "fotos";
   fotos: { url: string; orden: number }[] | null;
 };
 
@@ -332,7 +328,7 @@ function GrillaFotosPorItem({
         return (
           <div key={r.id}>
             <p className="mb-1.5 text-sm font-medium">
-              {n}. {r.item?.nombre}
+              {n}. {r.item_nombre}
             </p>
             {fotosOrdenadas.length > 0 ? (
               <div className="flex flex-wrap gap-2">
@@ -340,7 +336,7 @@ function GrillaFotosPorItem({
                   <Image
                     key={j}
                     src={urlFotos[f.url] ?? ""}
-                    alt={`${r.item?.nombre} — foto ${j + 1}`}
+                    alt={`${r.item_nombre} — foto ${j + 1}`}
                     width={220}
                     height={165}
                     unoptimized
@@ -385,7 +381,7 @@ function BloqueRevision({
   // Derivado de los ítems (no de la clave del tipo): un checklist es "todo
   // fotos" cuando ninguno de sus ítems tiene Conforme/No conforme/No aplica.
   const esSoloFotos =
-    respuestas.length > 0 && respuestas.every((r) => r.item?.modo === "fotos");
+    respuestas.length > 0 && respuestas.every((r) => r.item_modo === "fotos");
   // Numerados ANTES de filtrar, sobre el checklist completo — mismo criterio
   // que generarInformePdf.ts (asigna `n` sobre `filas` sin filtrar) — para
   // que un checklist MIXTO (hoy, Control de Salida con "Foto evidencia"
@@ -395,11 +391,11 @@ function BloqueRevision({
     r,
     n: i + 1,
   }));
-  const itemsEstado = numeradas.filter(({ r }) => r.item?.modo === "estado");
+  const itemsEstado = numeradas.filter(({ r }) => r.item_modo === "estado");
   // Antes esto era either/or (tabla O grilla de fotos) — un tipo mixto se
   // quedaba sin su bloque de fotos, que desaparecía del informe en
   // silencio. Se muestran los dos, en orden, cuando ambos tienen ítems.
-  const itemsFotos = numeradas.filter(({ r }) => r.item?.modo === "fotos");
+  const itemsFotos = numeradas.filter(({ r }) => r.item_modo === "fotos");
 
   const mostrarDeclaracion =
     tipoInspeccion === "control_salida" &&
@@ -440,7 +436,7 @@ function BloqueRevision({
               {itemsEstado.map(({ r, n }) => (
                 <tr key={r.id} className="border-b align-top">
                   <td className="py-1.5 pr-2 tabular-nums">{n}</td>
-                  <td className="py-1.5 pr-2">{r.item?.nombre}</td>
+                  <td className="py-1.5 pr-2">{r.item_nombre}</td>
                   <td className="py-1.5 pr-2">
                     {/* cerrarRevision ya no permite cerrar una revisión con
                         ítems sin responder (§2.7/§9 de la fase) — r.estado
@@ -456,7 +452,7 @@ function BloqueRevision({
                         {r.foto_url && urlFotos[r.foto_url] && (
                           <Image
                             src={urlFotos[r.foto_url]}
-                            alt={`Falla ${r.item?.nombre}`}
+                            alt={`Falla ${r.item_nombre}`}
                             width={200}
                             height={150}
                             unoptimized

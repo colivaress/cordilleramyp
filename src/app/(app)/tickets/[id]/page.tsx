@@ -52,7 +52,7 @@ export default async function TicketDetallePage({
 
   const { data: respuestas } = await supabase
     .from("ticket_checklist_respuestas")
-    .select("*, item:checklist_items(nombre, orden)")
+    .select("*")
     .eq("ticket_id", id)
     .order("revision_numero");
 
@@ -229,7 +229,7 @@ export default async function TicketDetallePage({
       {revs.map((rev) => {
         const items = resp
           .filter((r) => r.revision_numero === rev.numero_revision)
-          .sort((a, b) => (a.item?.orden ?? 0) - (b.item?.orden ?? 0));
+          .sort((a, b) => a.item_orden - b.item_orden);
         return (
           <Card key={rev.id}>
             <CardHeader>
@@ -260,7 +260,7 @@ export default async function TicketDetallePage({
                 {items.map((r) => (
                   <li key={r.id} className="grid gap-2 py-2">
                     <div className="flex items-center gap-2 text-sm">
-                      <span className="font-medium">{r.item?.nombre}</span>
+                      <span className="font-medium">{r.item_nombre}</span>
                       <ItemEstadoBadge estado={r.estado} />
                     </div>
                     {r.estado === "no_conforme" && (
@@ -269,7 +269,7 @@ export default async function TicketDetallePage({
                         {r.foto_url && urlFotos[r.foto_url] && (
                           <FotoFalla
                             src={urlFotos[r.foto_url]}
-                            alt={`Falla: ${r.item?.nombre}`}
+                            alt={`Falla: ${r.item_nombre}`}
                           />
                         )}
                       </div>
