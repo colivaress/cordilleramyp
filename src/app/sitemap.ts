@@ -1,9 +1,10 @@
 import type { MetadataRoute } from "next";
 
 /**
- * SOLO la portada — es la única página comercial pública del sitio (§ portada
- * pública). El resto de la app (login, registro, dashboard, tickets, API)
- * nunca va acá; se bloquea explícitamente en robots.ts, no se enumera aquí.
+ * Las páginas comerciales públicas del sitio: la portada y el formulario de
+ * cotización de fletes. El resto de la app (login, registro, dashboard,
+ * tickets, API) nunca va acá; se bloquea explícitamente en robots.ts, no se
+ * enumera aquí.
  *
  * NEXT_PUBLIC_APP_URL: mismo patrón que ya usa el cron de alertas de
  * vencimiento (src/app/api/cron/alertas-whatsapp/route.ts) para armar URLs
@@ -18,6 +19,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: new Date(),
       changeFrequency: "monthly",
       priority: 1,
+    },
+    {
+      url: `${baseUrl}/cotizacion`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.8,
     },
   ];
 }

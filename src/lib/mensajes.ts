@@ -1,3 +1,6 @@
+import { formatearRut } from "./rut";
+import { formatearTelefonoCl } from "./telefono";
+
 const fmtFecha = (v: string | Date | null | undefined) =>
   v
     ? new Date(v).toLocaleString("es-CL", {
@@ -414,6 +417,244 @@ export function construirCorreoVencimientoSinEnlace(
     </table>
 
     <p style="margin: 12px 0 0; font-size: 12px; color: #64748b;">Aviso automático de Cordillera M&amp;P — no responder a este correo.</p>
+  </div>`;
+
+  return { asunto, html };
+}
+
+/* ------------------------------------------------------------------ */
+/* Cotización de fletes (§ "Cotización de fletes")                     */
+/* ------------------------------------------------------------------ */
+
+/** Fecha sin hora — `fmtFecha` agrega "00:00" a una columna `date`. */
+const fmtSoloFecha = (v: string | Date | null | undefined) =>
+  v
+    ? new Date(`${String(v).slice(0, 10)}T12:00:00`).toLocaleDateString(
+        "es-CL",
+        { day: "2-digit", month: "2-digit", year: "numeric" },
+      )
+    : "—";
+
+export type DatosCotizacion = {
+  /** Correlativo legible (`cotizaciones_fletes.numero_solicitud`). */
+  numeroSolicitud: number;
+  tipoSolicitante: "particular" | "empresa";
+  nombre: string;
+  apellido: string;
+  /** RUT normalizado; se muestra con puntos y guion. */
+  rut: string;
+  correo: string;
+  telefono: string;
+  tieneWhatsapp: boolean;
+  razonSocial: string | null;
+  rutEmpresa: string | null;
+  giro: string | null;
+  direccionComercial: string | null;
+  origen: string;
+  destino: string;
+  tipoCarga: string;
+  peso: string;
+  fechaEstimada: string;
+  requiereEncarpe: boolean;
+  comentarios: string | null;
+};
+
+const celdaEtiquetaCot =
+  "background:#eef1f6; font-weight:bold; padding:8px 12px; border:1px solid #dde3ee; width:170px; vertical-align:top;";
+const celdaValorCot =
+  "padding:8px 12px; border:1px solid #dde3ee; vertical-align:top;";
+const filaCot = (etiqueta: string, valor: string) =>
+  `<tr><td style="${celdaEtiquetaCot}">${etiqueta}</td><td style="${celdaValorCot}">${esc(
+    valor,
+  )}</td></tr>`;
+
+const encabezadoLogo = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin:0 0 16px 0;">
+      <tr><td align="left" style="text-align:left; padding:0;">
+        <img src="cid:logo-cordillera-mp" alt="Cordillera M&amp;P" width="150" style="display:block; margin:0; border:0; outline:none; text-decoration:none; width:150px; max-width:150px; height:auto;" />
+      </td></tr>
+    </table>`;
+
+/** Botón de acción del correo interno (llamar / escribir / WhatsApp). */
+const botonCot = (href: string, texto: string, color: string) =>
+  `<td align="center" bgcolor="${color}" style="border-radius:6px; padding:0;">
+        <a href="${esc(href)}" style="display:inline-block; padding:10px 18px; font-weight:bold; color:#ffffff; text-decoration:none; font-family: Arial, Helvetica, sans-serif; font-size:14px;">${texto}</a>
+      </td>`;
+
+/**
+ * Correo INTERNO: le llega a Jaime con todos los datos de la solicitud y
+ * botones de un toque para contactar al interesado (`tel:`, `mailto:` y, si
+ * marcó que tiene WhatsApp y el número es un móvil, `wa.me`).
+ *
+ * El `reply-to` lo pone quien envía (ver actions.ts): apuntando al correo del
+ * solicitante, responder desde el cliente de correo ya le escribe a él.
+ *
+ * Los botones van en una tabla con `bgcolor` en el `<td>` y no en el `<a>`
+ * porque Outlook ignora `background-color` en un `<a>` — mismo patrón que ya
+ * usa el botón "Ver inspección" de §3.2.
+ */
+export function construirCorreoCotizacion(
+  d: DatosCotizacion,
+  enlaces: { tel: string | null; whatsapp: string | null },
+): { asunto: string; html: string } {
+  const quien = nombreCompleto(d.nombre, d.apellido);
+  const asunto = sinSaltosDeLinea(
+    `Cotización de flete N° ${d.numeroSolicitud} — ${quien}${
+      d.razonSocial ? ` (${d.razonSocial})` : ""
+    }`,
+  );
+
+  const esEmpresa = d.tipoSolicitante === "empresa";
+
+  const filasEmpresa = esEmpresa
+    ? `${filaCot("Razón social", d.razonSocial ?? "—")}
+      ${filaCot("RUT empresa", d.rutEmpresa ? formatearRut(d.rutEmpresa) : "—")}
+      ${filaCot("Giro", d.giro ?? "—")}
+      ${filaCot("Dirección comercial", d.direccionComercial ?? "—")}`
+    : "";
+
+  const botones = [
+    enlaces.tel ? botonCot(enlaces.tel, "Llamar", "#1e40af") : "",
+    botonCot(`mailto:${d.correo}`, "Responder por correo", "#334155"),
+    enlaces.whatsapp ? botonCot(enlaces.whatsapp, "WhatsApp", "#128C7E") : "",
+  ].filter(Boolean);
+
+  const filaBotones = botones.join(
+    '<td style="width:10px; font-size:0; line-height:0;">&nbsp;</td>',
+  );
+
+  // Si marcó WhatsApp pero el número no es un móvil chileno, el botón no
+  // aparece — y se dice por qué, para que no parezca que el dato se perdió.
+  const notaWhatsapp =
+    d.tieneWhatsapp && !enlaces.whatsapp
+      ? `<p style="margin: 0 0 16px; font-size: 13px; color: #92400e; background:#fffbeb; border:1px solid #fde68a; padding:8px 12px;">Marcó que tiene WhatsApp, pero el teléfono que dejó no es un móvil chileno válido, así que no se pudo armar el enlace. Revisar el número antes de escribirle.</p>`
+      : "";
+
+  const bloqueComentarios = (d.comentarios ?? "").trim()
+    ? `<h3 style="margin: 0 0 8px; font-size: 15px; color:#1a2233;">Comentarios del interesado</h3>
+    <p style="margin: 0 0 20px; white-space: pre-wrap;">${esc(d.comentarios!.trim())}</p>`
+    : "";
+
+  const html = `<div lang="es" style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
+    ${encabezadoLogo}
+
+    <p style="margin: 0 0 8px;">Nueva solicitud de cotización de flete desde el sitio web.</p>
+
+    <h3 style="margin: 18px 0 8px; font-size: 15px;">Quién solicita</h3>
+    <table style="border-collapse: collapse; width: 100%; margin: 0 0 20px;">
+      ${filaCot("Tipo", esEmpresa ? "Empresa" : "Particular")}
+      ${filaCot("Nombre", quien)}
+      ${filaCot("RUT", formatearRut(d.rut))}
+      ${filaCot("Correo", d.correo)}
+      ${filaCot("Teléfono", `${formatearTelefonoCl(d.telefono)}${d.tieneWhatsapp ? " (tiene WhatsApp)" : ""}`)}
+      ${filasEmpresa}
+    </table>
+
+    ${notaWhatsapp}
+
+    <h3 style="margin: 0 0 8px; font-size: 15px;">Qué necesita</h3>
+    <table style="border-collapse: collapse; width: 100%; margin: 0 0 20px;">
+      ${filaCot("Origen", d.origen)}
+      ${filaCot("Destino", d.destino)}
+      ${filaCot("Tipo de carga", d.tipoCarga)}
+      ${filaCot("Peso / tonelaje", d.peso)}
+      ${filaCot("Fecha estimada", fmtSoloFecha(d.fechaEstimada))}
+      ${filaCot("¿Requiere encarpe?", d.requiereEncarpe ? "Sí" : "No")}
+    </table>
+
+    ${bloqueComentarios}
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 8px 0;">
+      <tr>${filaBotones}</tr>
+    </table>
+
+    <p style="margin: 16px 0 0; font-size: 12px; color: #64748b;">Solicitud N° ${d.numeroSolicitud} — enviada desde el formulario público de cordilleramyp.cl.</p>
+  </div>`;
+
+  return { asunto, html };
+}
+
+/**
+ * Acuse de recibo al INTERESADO. A propósito NO compromete un plazo de
+ * respuesta (nada de "dentro de 24 horas"): es un formulario público, el
+ * volumen es impredecible y prometer un plazo que no se cumple es peor que
+ * no prometerlo. Tampoco repite el RUT ni el teléfono — quien lo escribió ya
+ * los sabe, y un correo que los devuelve es un dato personal de más viajando
+ * por ahí si la casilla no es suya.
+ */
+export function construirAcuseCotizacion(d: DatosCotizacion): {
+  asunto: string;
+  html: string;
+} {
+  const asunto = sinSaltosDeLinea(
+    `Recibimos su solicitud de cotización (N° ${d.numeroSolicitud})`,
+  );
+
+  const html = `<div lang="es" style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
+    ${encabezadoLogo}
+
+    <p style="margin: 0 0 12px;">Hola ${esc(d.nombre)},</p>
+
+    <p style="margin: 0 0 12px;">Recibimos su solicitud de cotización de flete. Quedó registrada con el número <strong>${d.numeroSolicitud}</strong>.</p>
+
+    <p style="margin: 0 0 16px;">Un ejecutivo de Cordillera M&amp;P revisará los datos y se pondrá en contacto con usted a la brevedad para entregarle la cotización.</p>
+
+    <h3 style="margin: 0 0 8px; font-size: 15px;">Lo que nos indicó</h3>
+    <table style="border-collapse: collapse; width: 100%; margin: 0 0 20px;">
+      ${filaCot("Origen", d.origen)}
+      ${filaCot("Destino", d.destino)}
+      ${filaCot("Tipo de carga", d.tipoCarga)}
+      ${filaCot("Peso / tonelaje", d.peso)}
+      ${filaCot("Fecha estimada", fmtSoloFecha(d.fechaEstimada))}
+      ${filaCot("¿Requiere encarpe?", d.requiereEncarpe ? "Sí" : "No")}
+    </table>
+
+    <p style="margin: 0 0 12px;">Si algo de lo anterior no está correcto, responda este correo indicándonos el cambio.</p>
+
+    <p style="margin: 20px 0 0;">Atentamente,<br />Cordillera M&amp;P</p>
+    <p style="margin: 4px 0 0; font-size: 12px; color: #64748b;">Sociedad Cordillera M&amp;P SPA — Puente Alto, Región Metropolitana.</p>
+  </div>`;
+
+  return { asunto, html };
+}
+
+/**
+ * Correo con el que se le envía la cotización al interesado, con el PDF
+ * adjunto. No repite el desglose completo (eso está en el PDF): solo el
+ * total y hasta cuándo vale, que es lo que la persona necesita ver en la
+ * bandeja sin abrir nada.
+ */
+export function construirCorreoEnvioCotizacion(d: {
+  numeroSolicitud: number;
+  nombre: string;
+  origen: string;
+  destino: string;
+  totalFormateado: string;
+  valeHasta: string;
+  emitidaPor: string;
+}): { asunto: string; html: string } {
+  const asunto = sinSaltosDeLinea(
+    `Cotización de flete N° ${d.numeroSolicitud} — Cordillera M&P`,
+  );
+
+  const html = `<div lang="es" style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
+    ${encabezadoLogo}
+
+    <p style="margin: 0 0 12px;">Hola ${esc(d.nombre)},</p>
+
+    <p style="margin: 0 0 16px;">Adjuntamos la cotización del flete que nos solicitó, de <strong>${esc(d.origen)}</strong> a <strong>${esc(d.destino)}</strong>.</p>
+
+    <table style="border-collapse: collapse; width: 100%; margin: 0 0 20px;">
+      ${filaCot("Total (IVA incluido)", d.totalFormateado)}
+      ${filaCot("Válida hasta", d.valeHasta)}
+      ${filaCot("N° de solicitud", String(d.numeroSolicitud))}
+    </table>
+
+    <p style="margin: 0 0 12px;">El detalle completo, con el desglose de neto e IVA y las condiciones del servicio, está en el PDF adjunto.</p>
+
+    <p style="margin: 0 0 16px;">Si quiere avanzar, o si necesita ajustar algo de lo cotizado, responda este correo y lo vemos.</p>
+
+    <p style="margin: 20px 0 0;">Atentamente,<br />${esc(d.emitidaPor)}<br />Cordillera M&amp;P</p>
+    <p style="margin: 4px 0 0; font-size: 12px; color: #64748b;">Sociedad Cordillera M&amp;P SPA — Puente Alto, Región Metropolitana.</p>
   </div>`;
 
   return { asunto, html };
