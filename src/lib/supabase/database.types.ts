@@ -92,7 +92,9 @@ export type Database = {
           cotizada_at: string | null
           cotizada_por: string | null
           created_at: string
-          destino: string
+          destino_calle: string
+          destino_comuna: string
+          destino_region: string
           direccion_comercial: string | null
           estado: Database["public"]["Enums"]["cotizacion_estado"]
           fecha_estimada: string
@@ -102,7 +104,9 @@ export type Database = {
           nombre: string
           numero_solicitud: number
           observaciones_cotizacion: string | null
-          origen: string
+          origen_calle: string
+          origen_comuna: string
+          origen_region: string
           peso: string
           razon_social: string | null
           requiere_encarpe: boolean
@@ -125,7 +129,9 @@ export type Database = {
           cotizada_at?: string | null
           cotizada_por?: string | null
           created_at?: string
-          destino: string
+          destino_calle: string
+          destino_comuna: string
+          destino_region: string
           direccion_comercial?: string | null
           estado?: Database["public"]["Enums"]["cotizacion_estado"]
           fecha_estimada: string
@@ -135,7 +141,9 @@ export type Database = {
           nombre: string
           numero_solicitud?: never
           observaciones_cotizacion?: string | null
-          origen: string
+          origen_calle: string
+          origen_comuna: string
+          origen_region: string
           peso: string
           razon_social?: string | null
           requiere_encarpe: boolean
@@ -158,7 +166,9 @@ export type Database = {
           cotizada_at?: string | null
           cotizada_por?: string | null
           created_at?: string
-          destino?: string
+          destino_calle?: string
+          destino_comuna?: string
+          destino_region?: string
           direccion_comercial?: string | null
           estado?: Database["public"]["Enums"]["cotizacion_estado"]
           fecha_estimada?: string
@@ -168,7 +178,9 @@ export type Database = {
           nombre?: string
           numero_solicitud?: never
           observaciones_cotizacion?: string | null
-          origen?: string
+          origen_calle?: string
+          origen_comuna?: string
+          origen_region?: string
           peso?: string
           razon_social?: string | null
           requiere_encarpe?: boolean

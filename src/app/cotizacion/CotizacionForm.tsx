@@ -8,7 +8,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ContenidoBoton } from "@/components/ui/estado-accion";
+import { nativeSelectClassName } from "@/components/ui/native-select";
 import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
+import { comunasDe, REGIONES } from "@/lib/chile";
 import { formatearRut, rutValido } from "@/lib/rut";
 import { normalizarTelefonoCl } from "@/lib/telefono";
 import { enviarSolicitudCotizacion } from "./actions";
@@ -31,6 +33,112 @@ const grid2 = "grid grid-cols-1 gap-4 min-[700px]:grid-cols-2";
 const tituloBloque =
   "mb-4 font-landing-heading text-[22px] font-bold tracking-[0.01em] text-landing-charcoal";
 
+/**
+ * Una dirección: calle y número libre, más región y comuna encadenadas.
+ *
+ * El combo de comuna aparece recién cuando hay región elegida — antes no
+ * tiene nada que ofrecer, y mostrarlo vacío solo invita a hacerle clic. Al
+ * cambiar de región se limpia la comuna: si no, quedaría seleccionada una
+ * comuna que ya no pertenece a la región mostrada, y el servidor la
+ * rechazaría con un mensaje que la persona no podría entender mirando la
+ * pantalla.
+ */
+function BloqueDireccion({
+  titulo,
+  idBase,
+  calle,
+  setCalle,
+  region,
+  setRegion,
+  comuna,
+  setComuna,
+}: {
+  titulo: string;
+  idBase: string;
+  calle: string;
+  setCalle: (v: string) => void;
+  region: string;
+  setRegion: (v: string) => void;
+  comuna: string;
+  setComuna: (v: string) => void;
+}) {
+  const comunas = comunasDe(region);
+
+  return (
+    <fieldset className="mb-6">
+      <legend className="mb-3 font-landing-body text-[15px] font-semibold text-landing-charcoal">
+        {titulo}
+      </legend>
+
+      <div className={grupo}>
+        <Label htmlFor={`${idBase}-calle`} className={etiqueta}>
+          Calle y número
+        </Label>
+        <Input
+          id={`${idBase}-calle`}
+          value={calle}
+          onChange={(e) => setCalle(e.target.value)}
+          placeholder="Av. Concha y Toro 1234"
+          autoComplete="off"
+          maxLength={400}
+          required
+        />
+      </div>
+
+      <div className={grid2}>
+        <div>
+          <Label htmlFor={`${idBase}-region`} className={etiqueta}>
+            Región
+          </Label>
+          <select
+            id={`${idBase}-region`}
+            value={region}
+            onChange={(e) => {
+              setRegion(e.target.value);
+              setComuna("");
+            }}
+            className={`${nativeSelectClassName} w-full`}
+            required
+          >
+            <option value="">Elegir región…</option>
+            {REGIONES.map((r) => (
+              <option key={r.nombre} value={r.nombre}>
+                {r.nombre}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <Label htmlFor={`${idBase}-comuna`} className={etiqueta}>
+            Comuna
+          </Label>
+          {region ? (
+            <select
+              id={`${idBase}-comuna`}
+              value={comuna}
+              onChange={(e) => setComuna(e.target.value)}
+              className={`${nativeSelectClassName} w-full`}
+              required
+            >
+              <option value="">Elegir comuna…</option>
+              {comunas.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="flex h-11 items-center text-[13.5px] text-landing-steel">
+              Elige primero la región.
+            </p>
+          )}
+        </div>
+      </div>
+    </fieldset>
+  );
+}
+
 export function CotizacionForm() {
   const idBase = useId();
   const guardado = useEstadoGuardado();
@@ -48,8 +156,12 @@ export function CotizacionForm() {
   const [giro, setGiro] = useState("");
   const [direccionComercial, setDireccionComercial] = useState("");
 
-  const [origen, setOrigen] = useState("");
-  const [destino, setDestino] = useState("");
+  const [origenCalle, setOrigenCalle] = useState("");
+  const [origenRegion, setOrigenRegion] = useState("");
+  const [origenComuna, setOrigenComuna] = useState("");
+  const [destinoCalle, setDestinoCalle] = useState("");
+  const [destinoRegion, setDestinoRegion] = useState("");
+  const [destinoComuna, setDestinoComuna] = useState("");
   const [tipoCarga, setTipoCarga] = useState("");
   const [peso, setPeso] = useState("");
   const [fechaEstimada, setFechaEstimada] = useState("");
@@ -84,8 +196,12 @@ export function CotizacionForm() {
       if (!giro.trim()) return "Falta el giro.";
       if (!direccionComercial.trim()) return "Falta la dirección comercial.";
     }
-    if (!origen.trim()) return "Falta la dirección de origen.";
-    if (!destino.trim()) return "Falta la dirección de destino.";
+    if (!origenCalle.trim()) return "Falta la calle y número de origen.";
+    if (!origenRegion) return "Elige la región de origen.";
+    if (!origenComuna) return "Elige la comuna de origen.";
+    if (!destinoCalle.trim()) return "Falta la calle y número de destino.";
+    if (!destinoRegion) return "Elige la región de destino.";
+    if (!destinoComuna) return "Elige la comuna de destino.";
     if (!tipoCarga.trim()) return "Falta el tipo de carga.";
     if (!peso.trim()) return "Falta el peso o tonelaje.";
     if (!fechaEstimada) return "Falta la fecha estimada.";
@@ -126,8 +242,12 @@ export function CotizacionForm() {
           rutEmpresa,
           giro,
           direccionComercial,
-          origen,
-          destino,
+          origenCalle,
+          origenRegion,
+          origenComuna,
+          destinoCalle,
+          destinoRegion,
+          destinoComuna,
           tipoCarga,
           peso,
           fechaEstimada,
@@ -386,34 +506,28 @@ export function CotizacionForm() {
       {/* ---------- El flete ---------- */}
       <h2 className={`${tituloBloque} mt-8`}>El flete</h2>
 
-      <div className={`${grid2} ${grupo}`}>
-        <div>
-          <Label htmlFor={`${idBase}-origen`} className={etiqueta}>
-            Dirección de origen
-          </Label>
-          <Input
-            id={`${idBase}-origen`}
-            value={origen}
-            onChange={(e) => setOrigen(e.target.value)}
-            placeholder="Calle, número, comuna"
-            maxLength={400}
-            required
-          />
-        </div>
-        <div>
-          <Label htmlFor={`${idBase}-destino`} className={etiqueta}>
-            Dirección de destino
-          </Label>
-          <Input
-            id={`${idBase}-destino`}
-            value={destino}
-            onChange={(e) => setDestino(e.target.value)}
-            placeholder="Calle, número, comuna"
-            maxLength={400}
-            required
-          />
-        </div>
-      </div>
+      <BloqueDireccion
+        titulo="Dirección de origen"
+        idBase={`${idBase}-origen`}
+        calle={origenCalle}
+        setCalle={setOrigenCalle}
+        region={origenRegion}
+        setRegion={setOrigenRegion}
+        comuna={origenComuna}
+        setComuna={setOrigenComuna}
+      />
+
+      <BloqueDireccion
+        titulo="Dirección de destino"
+        idBase={`${idBase}-destino`}
+        calle={destinoCalle}
+        setCalle={setDestinoCalle}
+        region={destinoRegion}
+        setRegion={setDestinoRegion}
+        comuna={destinoComuna}
+        setComuna={setDestinoComuna}
+      />
+
 
       <div className={`${grid2} ${grupo}`}>
         <div>

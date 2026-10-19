@@ -34,8 +34,10 @@ export const metadata: Metadata = {
 const kicker = "mb-2.5 font-landing-body text-[14.5px] font-semibold text-landing-orange";
 const sectionTitle =
   "mb-5 max-w-[640px] font-landing-heading text-[clamp(30px,4vw,44px)] font-bold leading-[1.02] tracking-[0.01em] text-landing-charcoal";
-const btnPrimary =
-  "inline-block cursor-pointer rounded-[3px] border-none bg-landing-orange px-[26px] py-3.5 font-landing-body text-[15px] font-semibold text-white transition-colors duration-150 hover:bg-landing-orange-deep";
+// `btnPrimary` se eliminó: el único botón naranjo del hero es ahora el de
+// "Cotizar un flete", que vive anclado arriba a la derecha con sus propias
+// clases (más grande que el resto). La banda de cotización previa al footer
+// usa un botón blanco sobre naranjo, también con clases propias.
 const btnGhost =
   "inline-block cursor-pointer rounded-[3px] border-[1.5px] border-white/50 bg-transparent px-[26px] py-3.5 font-landing-body text-[15px] font-semibold text-white transition-colors duration-150 hover:border-white";
 
@@ -69,14 +71,9 @@ export default function Home() {
             Encarpe, amarre técnico y transporte terrestre para la gran industria — con el
             estándar de seguridad que exige cada tramo de la ruta.
           </p>
-          {/* La acción de conversión (pedir una cotización) es la única en
-              naranjo; las dos de navegación quedan en "ghost". Antes había
-              dos naranjas compitiendo entre sí y ninguna llevaba a un
-              formulario. */}
+          {/* Solo navegación acá. La acción de conversión subió al extremo
+              superior derecho del hero — ver el comentario de ese bloque. */}
           <div className="flex flex-wrap gap-3.5">
-            <Link href="/cotizacion" className={btnPrimary}>
-              Cotizar un flete
-            </Link>
             <ScrollToButton targetId="servicios" className={btnGhost}>
               Ver nuestros servicios
             </ScrollToButton>
@@ -85,6 +82,23 @@ export default function Home() {
             </ScrollToButton>
           </div>
         </div>
+
+        {/* "Cotizar un flete", arriba a la derecha y más grande.
+            POR QUÉ ACÁ Y NO ABAJO CON LOS OTROS: el hero mide 640px de alto y
+            alinea su contenido al fondo (`items-end`). En un notebook —con la
+            barra del navegador, el alto útil ronda los 600-650px— ese bloque
+            inferior queda justo en el pliegue o debajo, así que el botón solo
+            aparecía al hacer scroll. En el celular el hero es más bajo
+            (520px) y entra entero, que es por qué ahí sí se veía de
+            inmediato. Anclado arriba se ve en cualquier pantalla sin scroll.
+            Es `absolute` sobre la foto, no dentro del flujo del texto, para
+            no empujar el h1 hacia abajo y reproducir el mismo problema. */}
+        <Link
+          href="/cotizacion"
+          className="absolute top-4 right-5 z-[4] cursor-pointer rounded-[3px] bg-landing-orange px-5 py-3 font-landing-body text-[15px] font-bold text-white shadow-[0_8px_24px_rgba(0,0,0,.35)] transition-colors duration-150 hover:bg-landing-orange-deep min-[880px]:top-7 min-[880px]:right-7 min-[880px]:px-8 min-[880px]:py-[18px] min-[880px]:text-[17px]"
+        >
+          Cotizar un flete
+        </Link>
         <div className="absolute right-3.5 bottom-3.5 z-[3] flex items-center justify-center rounded-md bg-white px-3 py-2 shadow-[0_10px_26px_rgba(0,0,0,.28)] min-[880px]:right-7 min-[880px]:bottom-7 min-[880px]:px-6 min-[880px]:py-4">
           <Image
             src="/images/logo-cmpc.png"

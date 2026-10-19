@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireRol } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { enviarCorreoConPdf } from "@/lib/email";
+import { direccionCompleta } from "@/lib/chile";
 import { calcularTotales, formatearCLP } from "@/lib/dinero";
 import {
   construirCorreoEnvioCotizacion,
@@ -105,8 +106,16 @@ export async function emitirCotizacion(
     const { asunto, html } = construirCorreoEnvioCotizacion({
       numeroSolicitud: solicitud.numero_solicitud,
       nombre: solicitud.nombre,
-      origen: solicitud.origen,
-      destino: solicitud.destino,
+      origen: direccionCompleta(
+        solicitud.origen_calle,
+        solicitud.origen_comuna,
+        solicitud.origen_region,
+      ),
+      destino: direccionCompleta(
+        solicitud.destino_calle,
+        solicitud.destino_comuna,
+        solicitud.destino_region,
+      ),
       totalFormateado,
       valeHasta: valeHasta.toLocaleDateString("es-CL", {
         day: "2-digit",
