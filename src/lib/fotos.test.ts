@@ -3,25 +3,22 @@ import assert from "node:assert/strict";
 import { esFotoPermitida, FORMATOS_FOTO, MIME_FOTO } from "./fotos.ts";
 
 /**
- * Este test existe por un bug de producción, no por completitud.
+ * CORRECCIÓN sobre la versión anterior de este archivo: decía que el
+ * comodín era lo que devolvía la cámara en Android. Es falso — se probó en
+ * producción con video y no cambió nada. Ese problema se resolvió con dos
+ * inputs separados (`BotonesFoto`), no con este valor.
  *
- * El `accept` del input de fotos ya rompió la captura dos veces, cada vez
- * escondiendo una mitad distinta del menú del sistema y cada vez solo
- * visible en un teléfono real:
- *
- *   capture="environment"  → se llevó la galería (PR #113)
- *   accept="image/jpeg,…"  → se llevó la cámara en Android (19-10)
- *
- * El valor correcto es el comodín. Si alguien lo "ordena" volviendo a poner
- * la lista explícita de MIME —que se ve más prolija y más segura— acá falla
- * antes de llegar a planta.
+ * El comodín se queda por una razón distinta y más chica: la lista
+ * explícita de MIME no aportaba seguridad (`accept` es un filtro del
+ * selector, no una validación) y en cambio escondía archivos HEIC
+ * legítimos en algunos selectores de escritorio. La validación real está
+ * en `esFotoPermitida`.
  */
 test("el accept es el comodín image/*, no una lista de MIME", () => {
   assert.equal(FORMATOS_FOTO, "image/*");
 });
 
 test("el accept no enumera tipos concretos", () => {
-  // Una lista explícita es exactamente lo que esconde la cámara en Android.
   assert.ok(
     !FORMATOS_FOTO.includes(","),
     `accept con lista explícita: "${FORMATOS_FOTO}"`,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import { comunasDe, REGIONES } from "@/lib/chile";
 import { formatearRut, rutValido } from "@/lib/rut";
 import { normalizarTelefonoCl } from "@/lib/telefono";
 import { enviarSolicitudCotizacion } from "./actions";
+import { Turnstile } from "./Turnstile";
 
 type Tipo = "particular" | "empresa";
 
@@ -172,6 +173,19 @@ export function CotizacionForm() {
   // autocomplete apagado para que el navegador tampoco lo rellene solo.
   const [sitioWeb, setSitioWeb] = useState("");
 
+  // Token de Turnstile. Vacío mientras Cloudflare no lo entregue, o si la
+  // protección no está configurada — el servidor decide qué hacer con eso.
+  const [turnstileToken, setTurnstileToken] = useState("");
+
+  // Cuándo se abrió el formulario. En una ref y no en estado: cambiarlo no
+  // tiene que re-renderizar nada. Se fija en el efecto y no al declararlo
+  // para que sea el momento en que el formulario quedó visible en el
+  // navegador, no el del render en el servidor.
+  const abiertoEnRef = useRef<number | null>(null);
+  useEffect(() => {
+    abiertoEnRef.current = Date.now();
+  }, []);
+
   const [error, setError] = useState<string | null>(null);
   const [numeroSolicitud, setNumeroSolicitud] = useState<number | null>(null);
 
@@ -254,6 +268,14 @@ export function CotizacionForm() {
           requiereEncarpe,
           comentarios,
           sitioWeb,
+          turnstileToken,
+          // -1 = el efecto no alcanzó a correr. El servidor solo descarta
+          // valores >= 0 y por debajo del umbral, así que esto nunca
+          // bloquea a nadie por un problema nuestro.
+          msEnFormulario:
+            abiertoEnRef.current === null
+              ? -1
+              : Date.now() - abiertoEnRef.current,
         }),
       );
     } catch {
@@ -642,6 +664,11 @@ export function CotizacionForm() {
           {error}
         </p>
       )}
+
+      {/* Invisible salvo que Cloudflare considere sospechoso al visitante.
+          Va antes del botón para que, si aparece un desafío, quede a la
+          vista junto a la acción y no perdido más arriba. */}
+      <Turnstile onToken={setTurnstileToken} />
 
       <Button
         type="submit"

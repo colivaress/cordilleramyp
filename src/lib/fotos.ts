@@ -8,29 +8,31 @@
  */
 
 /**
- * Lo que el `<input type="file">` OFRECE en el selector del sistema.
+ * El `accept` de los inputs de foto.
  *
- * 🔴 TIENE QUE SER EL COMODÍN `image/*`. NO volver a poner la lista
- * explícita de MIME ("image/jpeg,image/png,…"): con una lista explícita,
- * Chrome en Android resuelve el intent solo contra el selector de fotos y
- * **la cámara desaparece del menú** — el botón abre Google Fotos directo,
- * sin ofrecer "Tomar foto". Reportado desde producción el 19-10 con video:
- * en el iPhone el mismo código muestra Fototeca / Tomar foto / Seleccionar
- * archivo; en Android, solo la galería.
+ * ⚠️ OJO CON LA HISTORIA DE ESTE VALOR, porque ya costó dos despliegues.
  *
- * Es la misma clase de trampa que `capture="environment"`, que se sacó en el
- * PR #113 por quitar la galería. Los dos atributos recortan el menú del
- * sistema de formas que no se ven hasta probar en un teléfono de verdad, y
- * cada uno esconde una mitad distinta:
+ * El 19-10 se cambió de la lista explícita de MIME a este comodín creyendo
+ * que eso devolvía la cámara en Android. **No la devolvió**: se probó en
+ * producción, con video, y el comportamiento fue idéntico. El `accept` NO
+ * es la palanca de ese problema — otros proyectos hicieron el mismo cambio
+ * y también lo revirtieron por no tener efecto.
  *
- *   capture="environment"  → solo cámara, sin galería
- *   accept="image/jpeg,…"  → solo galería, sin cámara  (en Android)
- *   accept="image/*"       → las dos                   ✅
+ * La causa real es que en Android moderno un solo <input> no puede ofrecer
+ * cámara y galería a la vez: con `capture` abre la cámara, y sin `capture`
+ * Chrome entrega el selector de fotos del sistema, que no tiene cámara. Eso
+ * se resolvió con DOS inputs y dos botones (ver `BotonesFoto` en
+ * ChecklistItemRow.tsx), no tocando este valor.
  *
- * Esto NO relaja qué archivos se aceptan: `accept` es un filtro del
- * selector, nunca una validación — se salta arrastrando un archivo o
- * eligiendo "todos los archivos" en el propio selector. La restricción de
- * formato vive en `esFotoPermitida`, que es donde sí se puede hacer cumplir.
+ * Entonces, ¿por qué queda el comodín? Porque es lo correcto por otra razón,
+ * más chica: la lista explícita no aportaba seguridad —`accept` es un filtro
+ * del selector, nunca una validación: se salta arrastrando un archivo o
+ * eligiendo "todos los archivos"— y en cambio sí escondía archivos HEIC
+ * legítimos en algunos selectores de escritorio. La restricción de formato
+ * de verdad vive en `esFotoPermitida`, abajo.
+ *
+ * Si alguien vuelve a tocar esto buscando arreglar la cámara: el problema no
+ * está acá.
  */
 export const FORMATOS_FOTO = "image/*";
 
