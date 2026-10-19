@@ -260,8 +260,13 @@ export function ChecklistItemRow({
                 <Input
                   id={`foto-${item.key}`}
                   type="file"
+                  // §2.8 pide dos orígenes: cámara Y galería. NO agregar
+                  // `capture="environment"` — en celular ese atributo abre la
+                  // cámara directo y saca del menú la galería y los archivos,
+                  // que es exactamente la mitad de lo que pide la spec.
+                  // Sin él, el celular ofrece las dos (una toma extra para
+                  // quien va a fotografiar en el momento).
                   accept={FORMATOS_FOTO}
-                  capture="environment"
                   disabled={estadoGuardado === "guardando"}
                   onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
                 />
@@ -338,8 +343,9 @@ function FotoSlotInput({
           <Input
             id={inputId}
             type="file"
+            // Mismo criterio que el input de arriba: sin `capture`, para que
+            // el celular ofrezca galería además de cámara (§2.8).
             accept={FORMATOS_FOTO}
-            capture="environment"
             disabled={disabled || estadoGuardado === "guardando"}
             onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
           />
