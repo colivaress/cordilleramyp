@@ -3,6 +3,9 @@
 import Image from "next/image";
 import { CameraIcon, Trash2Icon } from "lucide-react";
 import { InfoPopover } from "@/components/InfoPopover";
+// El `accept` del input: `image/*` y nada más — ver el comentario en
+// @/lib/fotos, una lista explícita de MIME esconde la cámara en Android.
+import { FORMATOS_FOTO } from "@/lib/fotos";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -68,8 +71,6 @@ const OPCIONES: { value: ItemEstado; label: string }[] = [
   { value: "no_aplica", label: "No aplica" },
 ];
 
-// §2.8: solo formatos de imagen fotográfica.
-export const FORMATOS_FOTO = "image/jpeg,image/png,image/webp,image/heic,image/heif";
 
 export function ChecklistItemRow({
   indice,
