@@ -88,15 +88,20 @@ export type Database = {
           comentarios: string | null
           correo: string
           correo_interno_enviado: boolean
+          cotizacion_enviada_at: string | null
+          cotizada_at: string | null
+          cotizada_por: string | null
           created_at: string
           destino: string
           direccion_comercial: string | null
+          estado: Database["public"]["Enums"]["cotizacion_estado"]
           fecha_estimada: string
           giro: string | null
           id: string
           ip_solicitante: string | null
           nombre: string
           numero_solicitud: number
+          observaciones_cotizacion: string | null
           origen: string
           peso: string
           razon_social: string | null
@@ -107,6 +112,8 @@ export type Database = {
           tiene_whatsapp: boolean
           tipo_carga: string
           tipo_solicitante: Database["public"]["Enums"]["cotizacion_solicitante"]
+          validez_dias: number | null
+          valor_neto: number | null
         }
         Insert: {
           acuse_enviado?: boolean
@@ -114,15 +121,20 @@ export type Database = {
           comentarios?: string | null
           correo: string
           correo_interno_enviado?: boolean
+          cotizacion_enviada_at?: string | null
+          cotizada_at?: string | null
+          cotizada_por?: string | null
           created_at?: string
           destino: string
           direccion_comercial?: string | null
+          estado?: Database["public"]["Enums"]["cotizacion_estado"]
           fecha_estimada: string
           giro?: string | null
           id?: string
           ip_solicitante?: string | null
           nombre: string
           numero_solicitud?: never
+          observaciones_cotizacion?: string | null
           origen: string
           peso: string
           razon_social?: string | null
@@ -133,6 +145,8 @@ export type Database = {
           tiene_whatsapp?: boolean
           tipo_carga: string
           tipo_solicitante: Database["public"]["Enums"]["cotizacion_solicitante"]
+          validez_dias?: number | null
+          valor_neto?: number | null
         }
         Update: {
           acuse_enviado?: boolean
@@ -140,15 +154,20 @@ export type Database = {
           comentarios?: string | null
           correo?: string
           correo_interno_enviado?: boolean
+          cotizacion_enviada_at?: string | null
+          cotizada_at?: string | null
+          cotizada_por?: string | null
           created_at?: string
           destino?: string
           direccion_comercial?: string | null
+          estado?: Database["public"]["Enums"]["cotizacion_estado"]
           fecha_estimada?: string
           giro?: string | null
           id?: string
           ip_solicitante?: string | null
           nombre?: string
           numero_solicitud?: never
+          observaciones_cotizacion?: string | null
           origen?: string
           peso?: string
           razon_social?: string | null
@@ -159,8 +178,18 @@ export type Database = {
           tiene_whatsapp?: boolean
           tipo_carga?: string
           tipo_solicitante?: Database["public"]["Enums"]["cotizacion_solicitante"]
+          validez_dias?: number | null
+          valor_neto?: number | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "cotizaciones_fletes_cotizada_por_fkey"
+            columns: ["cotizada_por"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       destinatarios_correo: {
         Row: {
@@ -632,6 +661,7 @@ export type Database = {
       }
     }
     Enums: {
+      cotizacion_estado: "nueva" | "cotizada" | "ganada" | "perdida"
       cotizacion_solicitante: "particular" | "empresa"
       item_estado: "conforme" | "no_conforme" | "no_aplica"
       item_modo: "estado" | "fotos"

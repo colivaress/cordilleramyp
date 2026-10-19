@@ -1,8 +1,7 @@
-import fs from "node:fs";
-import path from "node:path";
 import { performance } from "node:perf_hooks";
 import sharp from "sharp";
 import { renderToBuffer } from "@react-pdf/renderer";
+import { logoDataUri } from "./logo";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { firmarRutas } from "@/lib/storage";
@@ -40,24 +39,8 @@ const fmtCorta = (v: string | null) =>
 // informe tarda ~1 min. Con el resize baja a pocos segundos y el PDF de ~5 MB a
 // unos cientos de KB.
 
-// §8: logo real de la empresa. Se lee y redimensiona una sola vez por proceso.
-let logoCache: string | null | undefined;
-async function logoDataUri(): Promise<string | null> {
-  if (logoCache !== undefined) return logoCache;
-  try {
-    const buf = await fs.promises.readFile(
-      path.join(process.cwd(), "public", "logo-cordillera-mp.png"),
-    );
-    const chico = await sharp(buf)
-      .resize({ width: 520, withoutEnlargement: true })
-      .png({ compressionLevel: 9, palette: true })
-      .toBuffer();
-    logoCache = `data:image/png;base64,${chico.toString("base64")}`;
-  } catch {
-    logoCache = null;
-  }
-  return logoCache;
-}
+// §8: el logo vive ahora en ./logo.ts — lo comparten este informe y la
+// cotización de fletes, con una sola caché por proceso.
 
 /** Descarga una imagen y la comprime para el PDF (JPEG ~1400px para fotos). */
 async function fotoDataUri(url: string | undefined): Promise<string | null> {

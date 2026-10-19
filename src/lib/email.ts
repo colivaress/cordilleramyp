@@ -89,19 +89,34 @@ function obtenerTransporte() {
   return cache;
 }
 
-export async function enviarInformePorCorreo(opts: {
+/**
+ * Correo HTML con un PDF adjunto y el logo embebido. Lo usan el informe de
+ * inspección (§4.1) y la cotización de fletes.
+ *
+ * `etiquetaLog` solo cambia el prefijo de la línea de tiempo que se escribe
+ * en el log del servidor, para poder distinguir en producción un envío lento
+ * de informe de uno de cotización.
+ *
+ * `responderA` pone un `Reply-To` distinto del remitente: la cotización lo
+ * usa para que, al responder, el correo le llegue a quien la emitió y no a
+ * la casilla genérica desde la que sale.
+ */
+export async function enviarCorreoConPdf(opts: {
   destinatarios: string[];
   asunto: string;
   /** Cuerpo en HTML (§4.1) — se envía como `html:`, no como texto plano. */
   cuerpoHtml: string;
   pdf: Buffer;
   nombreArchivo: string;
+  responderA?: string;
+  etiquetaLog?: string;
 }): Promise<ResultadoEnvio> {
   const { transporter, from } = obtenerTransporte();
 
   const mail: Mail.Options = {
     from,
     to: opts.destinatarios,
+    ...(opts.responderA ? { replyTo: opts.responderA } : {}),
     subject: opts.asunto,
     html: opts.cuerpoHtml,
     attachments: [
@@ -123,9 +138,24 @@ export async function enviarInformePorCorreo(opts: {
   const t0 = performance.now();
   const info = await transporter.sendMail(mail);
   console.log(
-    `[informe] SMTP sendMail: ${Math.round(performance.now() - t0)}ms -> ${info.messageId}`,
+    `[${opts.etiquetaLog ?? "informe"}] SMTP sendMail: ${Math.round(performance.now() - t0)}ms -> ${info.messageId}`,
   );
   return { ok: true, messageId: info.messageId };
+}
+
+/**
+ * §4.1 — envío del informe de inspección. Se mantiene como función propia
+ * (en vez de que cada llamador use `enviarCorreoConPdf` directo) para no
+ * tocar los sitios que ya la llaman ni su línea de log `[informe]`.
+ */
+export async function enviarInformePorCorreo(opts: {
+  destinatarios: string[];
+  asunto: string;
+  cuerpoHtml: string;
+  pdf: Buffer;
+  nombreArchivo: string;
+}): Promise<ResultadoEnvio> {
+  return enviarCorreoConPdf({ ...opts, etiquetaLog: "informe" });
 }
 
 /**

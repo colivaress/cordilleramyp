@@ -616,3 +616,46 @@ export function construirAcuseCotizacion(d: DatosCotizacion): {
 
   return { asunto, html };
 }
+
+/**
+ * Correo con el que se le envía la cotización al interesado, con el PDF
+ * adjunto. No repite el desglose completo (eso está en el PDF): solo el
+ * total y hasta cuándo vale, que es lo que la persona necesita ver en la
+ * bandeja sin abrir nada.
+ */
+export function construirCorreoEnvioCotizacion(d: {
+  numeroSolicitud: number;
+  nombre: string;
+  origen: string;
+  destino: string;
+  totalFormateado: string;
+  valeHasta: string;
+  emitidaPor: string;
+}): { asunto: string; html: string } {
+  const asunto = sinSaltosDeLinea(
+    `Cotización de flete N° ${d.numeroSolicitud} — Cordillera M&P`,
+  );
+
+  const html = `<div lang="es" style="font-family: Arial, Helvetica, sans-serif; color: #1a2233; font-size: 14px; line-height: 1.6; max-width: 600px;">
+    ${encabezadoLogo}
+
+    <p style="margin: 0 0 12px;">Hola ${esc(d.nombre)},</p>
+
+    <p style="margin: 0 0 16px;">Adjuntamos la cotización del flete que nos solicitó, de <strong>${esc(d.origen)}</strong> a <strong>${esc(d.destino)}</strong>.</p>
+
+    <table style="border-collapse: collapse; width: 100%; margin: 0 0 20px;">
+      ${filaCot("Total (IVA incluido)", d.totalFormateado)}
+      ${filaCot("Válida hasta", d.valeHasta)}
+      ${filaCot("N° de solicitud", String(d.numeroSolicitud))}
+    </table>
+
+    <p style="margin: 0 0 12px;">El detalle completo, con el desglose de neto e IVA y las condiciones del servicio, está en el PDF adjunto.</p>
+
+    <p style="margin: 0 0 16px;">Si quiere avanzar, o si necesita ajustar algo de lo cotizado, responda este correo y lo vemos.</p>
+
+    <p style="margin: 20px 0 0;">Atentamente,<br />${esc(d.emitidaPor)}<br />Cordillera M&amp;P</p>
+    <p style="margin: 4px 0 0; font-size: 12px; color: #64748b;">Sociedad Cordillera M&amp;P SPA — Puente Alto, Región Metropolitana.</p>
+  </div>`;
+
+  return { asunto, html };
+}
