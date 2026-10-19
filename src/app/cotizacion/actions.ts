@@ -9,6 +9,7 @@ import {
   construirCorreoCotizacion,
   type DatosCotizacion,
 } from "@/lib/mensajes";
+import { comunaValida, direccionCompleta } from "@/lib/chile";
 import { normalizarRut, rutValido } from "@/lib/rut";
 import { enlaceTel, enlaceWhatsApp, normalizarTelefonoCl } from "@/lib/telefono";
 import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
@@ -44,8 +45,12 @@ export type EntradaCotizacion = {
   rutEmpresa: string;
   giro: string;
   direccionComercial: string;
-  origen: string;
-  destino: string;
+  origenCalle: string;
+  origenRegion: string;
+  origenComuna: string;
+  destinoCalle: string;
+  destinoRegion: string;
+  destinoComuna: string;
   tipoCarga: string;
   peso: string;
   /** "YYYY-MM-DD" */
@@ -114,13 +119,37 @@ function validar(
     };
   }
 
-  const origen = limpiar(e.origen);
-  const destino = limpiar(e.destino);
+  const origenCalle = limpiar(e.origenCalle);
+  const origenRegion = limpiar(e.origenRegion);
+  const origenComuna = limpiar(e.origenComuna);
+  const destinoCalle = limpiar(e.destinoCalle);
+  const destinoRegion = limpiar(e.destinoRegion);
+  const destinoComuna = limpiar(e.destinoComuna);
   const tipoCarga = limpiar(e.tipoCarga);
   const peso = limpiar(e.peso);
 
-  if (!origen) return { ok: false, mensaje: "Falta la dirección de origen." };
-  if (!destino) return { ok: false, mensaje: "Falta la dirección de destino." };
+  if (!origenCalle) {
+    return { ok: false, mensaje: "Falta la calle y número de origen." };
+  }
+  // `comunaValida` verifica el PAR: que la comuna exista Y pertenezca a esa
+  // región. Los combos del navegador ya lo garantizan, pero esto no es una
+  // repetición ociosa — el endpoint es público y un POST armado a mano
+  // mandaría cualquier cosa.
+  if (!comunaValida(origenRegion, origenComuna)) {
+    return {
+      ok: false,
+      mensaje: "Elige la región y la comuna de origen.",
+    };
+  }
+  if (!destinoCalle) {
+    return { ok: false, mensaje: "Falta la calle y número de destino." };
+  }
+  if (!comunaValida(destinoRegion, destinoComuna)) {
+    return {
+      ok: false,
+      mensaje: "Elige la región y la comuna de destino.",
+    };
+  }
   if (!tipoCarga) return { ok: false, mensaje: "Falta el tipo de carga." };
   if (!peso) return { ok: false, mensaje: "Falta el peso o tonelaje." };
 
@@ -172,8 +201,8 @@ function validar(
     ["correo", correo, MAX_CORTO],
     ["tipo de carga", tipoCarga, MAX_CORTO],
     ["peso", peso, MAX_CORTO],
-    ["origen", origen, MAX_LARGO],
-    ["destino", destino, MAX_LARGO],
+    ["origen", origenCalle, MAX_LARGO],
+    ["destino", destinoCalle, MAX_LARGO],
     ["razón social", razonSocial ?? "", MAX_CORTO],
     ["giro", giro ?? "", MAX_CORTO],
     ["dirección comercial", direccionComercial ?? "", MAX_LARGO],
@@ -202,8 +231,12 @@ function validar(
       rut_empresa: rutEmpresa,
       giro,
       direccion_comercial: direccionComercial,
-      origen,
-      destino,
+      origen_calle: origenCalle,
+      origen_region: origenRegion,
+      origen_comuna: origenComuna,
+      destino_calle: destinoCalle,
+      destino_region: destinoRegion,
+      destino_comuna: destinoComuna,
       tipo_carga: tipoCarga,
       peso,
       fecha_estimada: fechaEstimada,
@@ -294,8 +327,14 @@ export async function enviarSolicitudCotizacion(
     rutEmpresa: f.rut_empresa ?? null,
     giro: f.giro ?? null,
     direccionComercial: f.direccion_comercial ?? null,
-    origen: f.origen,
-    destino: f.destino,
+    // Las plantillas de correo reciben la dirección ya armada en una línea:
+    // no les corresponde saber que viene en tres pedazos.
+    origen: direccionCompleta(f.origen_calle, f.origen_comuna, f.origen_region),
+    destino: direccionCompleta(
+      f.destino_calle,
+      f.destino_comuna,
+      f.destino_region,
+    ),
     tipoCarga: f.tipo_carga,
     peso: f.peso,
     fechaEstimada: f.fecha_estimada,

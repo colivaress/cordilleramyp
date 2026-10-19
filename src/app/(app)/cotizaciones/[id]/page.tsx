@@ -186,8 +186,18 @@ export default async function CotizacionDetallePage({
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <Dato etiqueta="Origen">{s.origen}</Dato>
-            <Dato etiqueta="Destino">{s.destino}</Dato>
+            <Dato etiqueta="Origen">
+              {s.origen_calle}
+              <div className="text-xs font-normal text-muted-foreground">
+                {s.origen_comuna}, {s.origen_region}
+              </div>
+            </Dato>
+            <Dato etiqueta="Destino">
+              {s.destino_calle}
+              <div className="text-xs font-normal text-muted-foreground">
+                {s.destino_comuna}, {s.destino_region}
+              </div>
+            </Dato>
             <Dato etiqueta="Tipo de carga">{s.tipo_carga}</Dato>
             <Dato etiqueta="Peso / tonelaje">{s.peso}</Dato>
             <Dato etiqueta="Fecha estimada">{fmtFecha(s.fecha_estimada)}</Dato>

@@ -1,5 +1,6 @@
 import { renderToBuffer } from "@react-pdf/renderer";
 import type { Database } from "@/lib/supabase/database.types";
+import { direccionCompleta } from "@/lib/chile";
 import { fechaValidez } from "@/lib/dinero";
 import { nombreCompleto } from "@/lib/mensajes";
 import { formatearRut } from "@/lib/rut";
@@ -48,8 +49,12 @@ export async function generarCotizacionPdf(opts: {
     giro: s.giro,
     direccionComercial: s.direccion_comercial,
 
-    origen: s.origen,
-    destino: s.destino,
+    origen: direccionCompleta(s.origen_calle, s.origen_comuna, s.origen_region),
+    destino: direccionCompleta(
+      s.destino_calle,
+      s.destino_comuna,
+      s.destino_region,
+    ),
     tipoCarga: s.tipo_carga,
     peso: s.peso,
     fechaEstimada: fmtFecha(fechaDeColumna(s.fecha_estimada)),
