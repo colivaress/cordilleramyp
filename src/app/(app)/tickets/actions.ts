@@ -202,7 +202,8 @@ async function prepararRevision(
   const { data: items } = await supabase
     .from("checklist_items")
     .select("key, modo")
-    .eq("tipo", opts.tipoInspeccion);
+    .eq("tipo", opts.tipoInspeccion)
+    .eq("activo", true);
   const filas = (items ?? []).map((i) => ({
     ticket_id: opts.ticketId,
     revision_numero: opts.numeroRevision,
@@ -287,7 +288,8 @@ async function cerrarRevision(
   const { data: items } = await supabase
     .from("checklist_items")
     .select("key, modo, fotos_requeridas")
-    .eq("tipo", tipoInspeccion);
+    .eq("tipo", tipoInspeccion)
+    .eq("activo", true);
   const { data: respuestas } = await supabase
     .from("ticket_checklist_respuestas")
     .select("id, item_key, estado, observacion, foto_url")
