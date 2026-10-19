@@ -141,14 +141,14 @@ export default function Home() {
               <div className="relative h-[320px] min-[880px]:h-[520px]">
                 <Image
                   src="/images/about-bodega.jpg"
-                  alt="Descarga de bobinas en planta"
+                  alt="Operarios encarpando un camión en planta, con casco y chaleco reflectante"
                   fill
                   sizes="(min-width: 880px) 50vw, 100vw"
                   className="object-cover"
                 />
               </div>
               <div className="absolute inset-x-0 bottom-0 bg-[linear-gradient(0deg,rgba(17,19,21,.85),transparent)] px-[18px] pt-4 pb-3 text-[13px] text-[#EEE9DD]">
-                Maniobra de descarga en planta — personal calificado, EPP completo
+                Maniobra de encarpe en planta — Personal calificado.
               </div>
             </div>
           </Reveal>
