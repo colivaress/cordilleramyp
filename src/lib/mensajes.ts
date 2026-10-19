@@ -494,7 +494,14 @@ const botonCot = (href: string, texto: string, color: string) =>
  */
 export function construirCorreoCotizacion(
   d: DatosCotizacion,
-  enlaces: { tel: string | null; whatsapp: string | null },
+  enlaces: {
+    tel: string | null;
+    whatsapp: string | null;
+    /** La solicitud no pasó la verificación antibot. Puede ser real (script
+     *  bloqueado, sin JS) o puede ser basura: hay que mirarla antes de
+     *  llamar. Al solicitante NO se le mandó acuse de recibo. */
+    sinVerificar?: boolean;
+  },
 ): { asunto: string; html: string } {
   const quien = nombreCompleto(d.nombre, d.apellido);
   const asunto = sinSaltosDeLinea(
@@ -538,6 +545,12 @@ export function construirCorreoCotizacion(
     ${encabezadoLogo}
 
     <p style="margin: 0 0 8px;">Nueva solicitud de cotización de flete desde el sitio web.</p>
+
+    ${
+      enlaces.sinVerificar
+        ? `<p style="margin: 0 0 16px; font-size: 13px; color: #92400e; background:#fffbeb; border:1px solid #fde68a; padding:10px 12px;"><strong>Esta solicitud no pasó la verificación antibot.</strong> Puede ser real (alguien con el navegador bloqueando scripts) o puede ser basura automática. Conviene revisarla antes de llamar. Al solicitante no se le envió el acuse de recibo.</p>`
+        : ""
+    }
 
     <h3 style="margin: 18px 0 8px; font-size: 15px;">Quién solicita</h3>
     <table style="border-collapse: collapse; width: 100%; margin: 0 0 20px;">
