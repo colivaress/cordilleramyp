@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import { Barlow_Condensed, Inter } from "next/font/google";
 import Image from "next/image";
+import Link from "next/link";
 import { Header } from "@/components/landing/Header";
+import { claseLanding } from "./fuentes-landing";
 import { Reveal } from "@/components/landing/Reveal";
 import { ScrollToButton } from "@/components/landing/ScrollToButton";
 
@@ -24,23 +25,12 @@ export const metadata: Metadata = {
 };
 
 /**
- * Portada pública de Cordillera M&P. Tipografía propia de la portada
- * (Barlow Condensed + Inter) aplicada solo en este árbol vía la clase
- * `.variable` de next/font — el resto de la app (login, dashboard, etc.)
- * sigue con font-sans (Geist) del layout raíz, sin tocarlo.
+ * Portada pública de Cordillera M&P. La tipografía (Barlow Condensed + Inter)
+ * se aplica con `claseLanding`, declarada una sola vez en
+ * `src/app/fuentes-landing.ts` y compartida con `/cotizacion` — el resto de la
+ * app (login, dashboard, etc.) sigue con font-sans (Geist) del layout raíz,
+ * sin tocarlo.
  */
-const barlowCondensed = Barlow_Condensed({
-  variable: "--font-landing-heading",
-  weight: ["500", "600", "700"],
-  subsets: ["latin"],
-});
-
-const inter = Inter({
-  variable: "--font-landing-body",
-  weight: ["400", "500", "600", "700"],
-  subsets: ["latin"],
-});
-
 const kicker = "mb-2.5 font-landing-body text-[14.5px] font-semibold text-landing-orange";
 const sectionTitle =
   "mb-5 max-w-[640px] font-landing-heading text-[clamp(30px,4vw,44px)] font-bold leading-[1.02] tracking-[0.01em] text-landing-charcoal";
@@ -51,7 +41,7 @@ const btnGhost =
 
 export default function Home() {
   return (
-    <div className={`${barlowCondensed.variable} ${inter.variable} font-landing-body leading-[1.55] text-landing-charcoal antialiased`}>
+    <div className={claseLanding}>
       <Header />
 
       {/* HERO */}
@@ -79,8 +69,15 @@ export default function Home() {
             Encarpe, amarre técnico y transporte terrestre para la gran industria — con el
             estándar de seguridad que exige cada tramo de la ruta.
           </p>
+          {/* La acción de conversión (pedir una cotización) es la única en
+              naranjo; las dos de navegación quedan en "ghost". Antes había
+              dos naranjas compitiendo entre sí y ninguna llevaba a un
+              formulario. */}
           <div className="flex flex-wrap gap-3.5">
-            <ScrollToButton targetId="servicios" className={btnPrimary}>
+            <Link href="/cotizacion" className={btnPrimary}>
+              Cotizar un flete
+            </Link>
+            <ScrollToButton targetId="servicios" className={btnGhost}>
               Ver nuestros servicios
             </ScrollToButton>
             <ScrollToButton targetId="nosotros" className={btnGhost}>
@@ -409,6 +406,27 @@ export default function Home() {
         </div>
       </section>
 
+      {/* CTA DE COTIZACIÓN — al final, para quien ya leyó y bajó hasta acá.
+          El botón del hero sirve a quien llega decidido; este, a quien se
+          convenció leyendo. */}
+      <section className="bg-landing-orange py-14 text-center min-[880px]:py-16">
+        <div className="mx-auto max-w-[1180px] px-5 min-[880px]:px-7">
+          <h2 className="mx-auto mb-3.5 max-w-[640px] font-landing-heading text-[clamp(28px,4vw,40px)] font-bold leading-[1.05] tracking-[0.01em] text-white">
+            ¿Necesita mover una carga?
+          </h2>
+          <p className="mx-auto mb-7 max-w-[520px] text-[16px] text-white/90">
+            Cuéntenos origen, destino y qué transporta. Le respondemos con una
+            cotización a su medida.
+          </p>
+          <Link
+            href="/cotizacion"
+            className="inline-block cursor-pointer rounded-[3px] bg-white px-[30px] py-4 font-landing-body text-[15.5px] font-semibold text-landing-charcoal transition-colors duration-150 hover:bg-landing-cream"
+          >
+            Cotizar un flete
+          </Link>
+        </div>
+      </section>
+
       {/* FOOTER */}
       <footer className="bg-landing-charcoal px-0 pt-[60px] pb-[26px] text-[#9AA2AB]">
         <div className="mx-auto max-w-[1180px] px-5 min-[880px]:px-7">
@@ -440,6 +458,9 @@ export default function Home() {
             </div>
             <div>
               <h4 className="mb-4 text-[14px] font-semibold text-white">Servicios</h4>
+              <Link href="/cotizacion" className="mb-[11px] block w-full text-left font-landing-body text-[14px] text-[#9AA2AB] hover:text-landing-paper">
+                Cotizar un flete
+              </Link>
               <ScrollToButton targetId="servicios" className="mb-[11px] block w-full cursor-pointer border-none bg-none text-left font-landing-body text-[14px] text-[#9AA2AB] hover:text-landing-paper">
                 Encarpe y amarre
               </ScrollToButton>

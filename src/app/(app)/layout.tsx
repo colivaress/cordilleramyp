@@ -52,6 +52,16 @@ export default async function AppLayout({
                 >
                   Inspecciones
                 </Link>
+                {/* Solicitudes que llegan por el formulario público de la
+                    portada (§ "Cotización de fletes"). Mismo alcance que
+                    Usuarios y Configuración: administrador y administrador
+                    de contrato; el supervisor no las ve, ni acá ni por RLS. */}
+                <Link
+                  href="/cotizaciones"
+                  className={buttonVariants({ variant: "ghost" })}
+                >
+                  Cotizaciones
+                </Link>
                 <Link
                   href="/usuarios"
                   className={buttonVariants({ variant: "ghost" })}
