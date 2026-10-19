@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { CameraIcon, Trash2Icon } from "lucide-react";
+import { CameraIcon, ImageIcon, Trash2Icon } from "lucide-react";
 import { InfoPopover } from "@/components/InfoPopover";
 // El `accept` del input: `image/*` y nada más — ver el comentario en
 // @/lib/fotos, una lista explícita de MIME esconde la cámara en Android.
@@ -64,6 +64,84 @@ export const respuestaVacia = (cantidadFotos = 0): RespuestaEditable => ({
   fotoPreviewUrl: null,
   fotos: Array.from({ length: cantidadFotos }, slotVacio),
 });
+
+/**
+ * Los DOS botones para agregar una foto: cámara y galería, cada uno con su
+ * propio <input type="file">.
+ *
+ * 🔴 POR QUÉ DOS Y NO UNO. En Android moderno un solo input no puede ofrecer
+ * las dos cosas, y pelearlo cuesta despliegues:
+ *
+ *     con capture="environment"  -> abre la cámara directo, sin galería
+ *     sin capture                -> Chrome entrega el SELECTOR DE FOTOS del
+ *                                   sistema (el de Google Fotos), que por
+ *                                   diseño no tiene opción de cámara
+ *
+ * El `accept` no es la palanca: se probó pasar de la lista explícita de MIME
+ * al comodín `image/*` y en Android no cambió nada (verificado en producción
+ * el 19-10, con video). En iOS da igual: el menú nativo ofrece las tres
+ * opciones con cualquiera de las dos configuraciones, y por eso el iPhone
+ * nunca manifestó el problema.
+ *
+ * Con dos inputs no dependemos de lo que el sistema decida mostrar: cada
+ * botón abre exactamente una cosa, en Android y en iOS.
+ *
+ * El `accept` queda igual en los dos como pista para el selector, pero la
+ * validación real de formato NO está acá — está en `esFotoPermitida`, que
+ * corre antes de subir (ver @/lib/fotos).
+ */
+function BotonesFoto({
+  idBase,
+  deshabilitado,
+  onFoto,
+}: {
+  idBase: string;
+  deshabilitado: boolean;
+  onFoto: (file: File | null) => void;
+}) {
+  const clase = cn(
+    buttonVariants({ variant: "outline" }),
+    "w-fit peer-focus-visible:border-ring peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50",
+    deshabilitado && "pointer-events-none opacity-50",
+  );
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      <div>
+        <input
+          id={`${idBase}-camara`}
+          type="file"
+          accept={FORMATOS_FOTO}
+          // Este SÍ lleva capture: es el botón cuyo trabajo es abrir la
+          // cámara. El de al lado deliberadamente no lo lleva.
+          capture="environment"
+          disabled={deshabilitado}
+          onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
+          className="peer sr-only"
+        />
+        <label htmlFor={`${idBase}-camara`} className={clase}>
+          <CameraIcon />
+          Tomar foto
+        </label>
+      </div>
+
+      <div>
+        <input
+          id={`${idBase}-galeria`}
+          type="file"
+          accept={FORMATOS_FOTO}
+          disabled={deshabilitado}
+          onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
+          className="peer sr-only"
+        />
+        <label htmlFor={`${idBase}-galeria`} className={clase}>
+          <ImageIcon />
+          Subir foto
+        </label>
+      </div>
+    </div>
+  );
+}
 
 const OPCIONES: { value: ItemEstado; label: string }[] = [
   { value: "conforme", label: "Conforme" },
@@ -269,32 +347,11 @@ export function ChecklistItemRow({
                     navegador ("Seleccionar archivo — ningún archivo
                     seleccionado"), no se puede cambiar por CSS, y en celular
                     se corta a media palabra. La etiqueta sí la controlamos. */}
-                <input
-                  id={`foto-${item.key}`}
-                  type="file"
-                  // §2.8 pide dos orígenes: cámara Y galería. NO agregar
-                  // `capture="environment"` — en celular ese atributo abre la
-                  // cámara directo y saca del menú la galería y los archivos,
-                  // que es exactamente la mitad de lo que pide la spec.
-                  // Sin él, el celular ofrece las dos (una toma extra para
-                  // quien va a fotografiar en el momento).
-                  accept={FORMATOS_FOTO}
-                  disabled={estadoGuardadoFotoFalla === "guardando"}
-                  onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
-                  className="peer sr-only"
+                <BotonesFoto
+                  idBase={`foto-${item.key}`}
+                  deshabilitado={estadoGuardadoFotoFalla === "guardando"}
+                  onFoto={onFoto}
                 />
-                <label
-                  htmlFor={`foto-${item.key}`}
-                  className={cn(
-                    buttonVariants({ variant: "outline" }),
-                    "w-fit peer-focus-visible:border-ring peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50",
-                    estadoGuardadoFotoFalla === "guardando" &&
-                      "pointer-events-none opacity-50",
-                  )}
-                >
-                  <CameraIcon />
-                  Agregar foto
-                </label>
                 {estadoGuardadoFotoFalla === "guardando" ? (
                   <IndicadorGuardado
                     estado={estadoGuardadoFotoFalla}
@@ -302,8 +359,7 @@ export function ChecklistItemRow({
                   />
                 ) : (
                   <span className="text-xs text-muted-foreground">
-                    Elegir una imagen o tomarla con la cámara. Se guarda al
-                    instante.
+                    Se guarda al instante.
                   </span>
                 )}
               </>
@@ -367,28 +423,11 @@ function FotoSlotInput({
         <>
           {/* Mismo patrón que el input de arriba: oculto y disparado desde la
               etiqueta, porque el texto del control nativo no es editable. */}
-          <input
-            id={inputId}
-            type="file"
-            // Mismo criterio que el input de arriba: sin `capture`, para que
-            // el celular ofrezca galería además de cámara (§2.8).
-            accept={FORMATOS_FOTO}
-            disabled={disabled || estadoGuardado === "guardando"}
-            onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
-            className="peer sr-only"
+          <BotonesFoto
+            idBase={inputId}
+            deshabilitado={disabled || estadoGuardado === "guardando"}
+            onFoto={onFoto}
           />
-          <label
-            htmlFor={inputId}
-            className={cn(
-              buttonVariants({ variant: "outline" }),
-              "w-fit peer-focus-visible:border-ring peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50",
-              (disabled || estadoGuardado === "guardando") &&
-                "pointer-events-none opacity-50",
-            )}
-          >
-            <CameraIcon />
-            Agregar foto
-          </label>
           {estadoGuardado === "guardando" ? (
             <IndicadorGuardado
               estado={estadoGuardado}
@@ -396,8 +435,7 @@ function FotoSlotInput({
             />
           ) : (
             <span className="text-xs text-muted-foreground">
-              Elegir una imagen o tomarla con la cámara. Se guarda al
-              instante.
+              Se guarda al instante.
             </span>
           )}
         </>
