@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireRol } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { direccionCompleta } from "@/lib/chile";
 import { formatearCLP, calcularTotales } from "@/lib/dinero";
 import { nombreCompleto } from "@/lib/mensajes";
 import { Badge } from "@/components/ui/badge";
@@ -108,15 +109,38 @@ export default async function CotizacionesPage() {
                           </div>
                         )}
                       </TableCell>
+                      {/* La comuna manda en la celda y la calle va debajo:
+                          es la comuna la que dice de un vistazo si el flete
+                          es local o a regiones, que es lo que se está
+                          escaneando al mirar esta lista. */}
                       <TableCell className="max-w-[18rem]">
-                        <div className="truncate" title={f.origen}>
-                          {f.origen}
+                        <div
+                          className="truncate"
+                          title={direccionCompleta(
+                            f.origen_calle,
+                            f.origen_comuna,
+                            f.origen_region,
+                          )}
+                        >
+                          {f.origen_comuna}
+                          <span className="text-xs text-muted-foreground">
+                            {" "}
+                            · {f.origen_calle}
+                          </span>
                         </div>
                         <div
-                          className="truncate text-xs text-muted-foreground"
-                          title={f.destino}
+                          className="truncate"
+                          title={direccionCompleta(
+                            f.destino_calle,
+                            f.destino_comuna,
+                            f.destino_region,
+                          )}
                         >
-                          → {f.destino}
+                          → {f.destino_comuna}
+                          <span className="text-xs text-muted-foreground">
+                            {" "}
+                            · {f.destino_calle}
+                          </span>
                         </div>
                       </TableCell>
                       <TableCell className="max-w-[12rem]">
