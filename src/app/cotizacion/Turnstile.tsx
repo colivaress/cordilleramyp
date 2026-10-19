@@ -51,7 +51,16 @@ export function Turnstile({
   // vez que el formulario cambia de estado: Turnstile cobra una validación
   // por render, y re-montarlo en cada tecla sería absurdo.
   const onTokenRef = useRef(onToken);
-  onTokenRef.current = onToken;
+  // La ref se actualiza en un efecto, NO durante el render. Escribirla
+  // mientras React renderiza es lo que marca `react-hooks/refs`, y no es un
+  // falso positivo: un render que React descarta dejaría la ref pisada con el
+  // callback de un árbol que nunca se montó. Acá no hay forma de quedar con
+  // uno viejo, porque esta ref solo se lee desde los callbacks de Turnstile:
+  // llegan asíncronos bastante después del commit, nunca durante el render ni
+  // dentro del efecto de montaje.
+  useEffect(() => {
+    onTokenRef.current = onToken;
+  });
 
   useEffect(() => {
     const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
