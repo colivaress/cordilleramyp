@@ -1,10 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import { Trash2Icon } from "lucide-react";
+import { CameraIcon, Trash2Icon } from "lucide-react";
 import { InfoPopover } from "@/components/InfoPopover";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { IndicadorGuardado } from "@/components/ui/estado-accion";
@@ -257,7 +256,12 @@ export function ChecklistItemRow({
               </div>
             ) : (
               <>
-                <Input
+                {/* El input va oculto y se dispara desde la etiqueta de al
+                    lado. Motivo: el texto del control nativo lo pone el
+                    navegador ("Seleccionar archivo — ningún archivo
+                    seleccionado"), no se puede cambiar por CSS, y en celular
+                    se corta a media palabra. La etiqueta sí la controlamos. */}
+                <input
                   id={`foto-${item.key}`}
                   type="file"
                   // §2.8 pide dos orígenes: cámara Y galería. NO agregar
@@ -269,7 +273,20 @@ export function ChecklistItemRow({
                   accept={FORMATOS_FOTO}
                   disabled={estadoGuardado === "guardando"}
                   onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
+                  className="peer sr-only"
                 />
+                <label
+                  htmlFor={`foto-${item.key}`}
+                  className={cn(
+                    buttonVariants({ variant: "outline" }),
+                    "w-fit peer-focus-visible:border-ring peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50",
+                    estadoGuardado === "guardando" &&
+                      "pointer-events-none opacity-50",
+                  )}
+                >
+                  <CameraIcon />
+                  Agregar foto
+                </label>
                 {estadoGuardado === "guardando" ? (
                   <IndicadorGuardado
                     estado={estadoGuardado}
@@ -340,7 +357,9 @@ function FotoSlotInput({
         </div>
       ) : (
         <>
-          <Input
+          {/* Mismo patrón que el input de arriba: oculto y disparado desde la
+              etiqueta, porque el texto del control nativo no es editable. */}
+          <input
             id={inputId}
             type="file"
             // Mismo criterio que el input de arriba: sin `capture`, para que
@@ -348,7 +367,20 @@ function FotoSlotInput({
             accept={FORMATOS_FOTO}
             disabled={disabled || estadoGuardado === "guardando"}
             onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
+            className="peer sr-only"
           />
+          <label
+            htmlFor={inputId}
+            className={cn(
+              buttonVariants({ variant: "outline" }),
+              "w-fit peer-focus-visible:border-ring peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50",
+              (disabled || estadoGuardado === "guardando") &&
+                "pointer-events-none opacity-50",
+            )}
+          >
+            <CameraIcon />
+            Agregar foto
+          </label>
           {estadoGuardado === "guardando" ? (
             <IndicadorGuardado
               estado={estadoGuardado}
