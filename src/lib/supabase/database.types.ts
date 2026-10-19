@@ -39,6 +39,7 @@ export type Database = {
     Tables: {
       checklist_items: {
         Row: {
+          activo: boolean
           exigencia: string | null
           fotos_maximas: number | null
           fotos_requeridas: number | null
@@ -49,6 +50,7 @@ export type Database = {
           tipo: string
         }
         Insert: {
+          activo?: boolean
           exigencia?: string | null
           fotos_maximas?: number | null
           fotos_requeridas?: number | null
@@ -59,6 +61,7 @@ export type Database = {
           tipo: string
         }
         Update: {
+          activo?: boolean
           exigencia?: string | null
           fotos_maximas?: number | null
           fotos_requeridas?: number | null

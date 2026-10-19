@@ -57,7 +57,13 @@ export default async function NuevaInspeccionPage() {
   // destinatarios ya configurados para un tipo deshabilitado.
   const [{ data: items }, { data: tipos }, { count: totalActivos }, { data: transportesCatalogo }] =
     await Promise.all([
-      supabase.from("checklist_items").select("*").order("orden"),
+      // Solo ítems activos: un ítem dado de baja (checklist_items.activo)
+      // no aparece en inspecciones nuevas, pero sigue en los informes viejos.
+      supabase
+        .from("checklist_items")
+        .select("*")
+        .eq("activo", true)
+        .order("orden"),
       supabase
         .from("tipos_inspeccion")
         .select("*")
