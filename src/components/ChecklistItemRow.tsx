@@ -1,10 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import { Trash2Icon } from "lucide-react";
+import { CameraIcon, Trash2Icon } from "lucide-react";
 import { InfoPopover } from "@/components/InfoPopover";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { IndicadorGuardado } from "@/components/ui/estado-accion";
@@ -84,14 +83,21 @@ export function ChecklistItemRow({
   onFotoModo,
   onQuitarFotoModo,
   estadoGuardadoFoto,
+  estadoGuardadoFotoFalla = "idle",
 }: {
   indice: number;
   item: ChecklistItem;
   valor: RespuestaEditable;
-  /** Nivel 1 (retroalimentación visual) — cubre el select de estado, la
-   *  observación y (modo 'estado') su única foto: un solo indicador por
-   *  fila, igual granularidad que antes. */
+  /** Nivel 1 (retroalimentación visual) — cubre el select de estado y la
+   *  observación. NO cubre la foto: ver `estadoGuardadoFotoFalla`. */
   estadoGuardado: EstadoGuardado;
+  /** Modo 'estado': estado propio de la subida de la foto de la falla.
+   *  Va aparte de `estadoGuardado` porque antes compartían clave, y
+   *  cualquier guardado del ítem —elegir "No conforme", escribir la
+   *  observación, borrar la foto— pintaba "Subiendo foto…" en la zona de
+   *  la foto sin que nadie estuviera subiendo nada (reportado 19-10).
+   *  Mismo criterio que `estadoGuardadoFoto` ya usa en modo 'fotos'. */
+  estadoGuardadoFotoFalla?: EstadoGuardado;
   onEstado: (estado: ItemEstado) => void;
   onObservacion: (texto: string) => void;
   onFoto: (file: File | null) => void;
@@ -257,7 +263,12 @@ export function ChecklistItemRow({
               </div>
             ) : (
               <>
-                <Input
+                {/* El input va oculto y se dispara desde la etiqueta de al
+                    lado. Motivo: el texto del control nativo lo pone el
+                    navegador ("Seleccionar archivo — ningún archivo
+                    seleccionado"), no se puede cambiar por CSS, y en celular
+                    se corta a media palabra. La etiqueta sí la controlamos. */}
+                <input
                   id={`foto-${item.key}`}
                   type="file"
                   // §2.8 pide dos orígenes: cámara Y galería. NO agregar
@@ -267,12 +278,25 @@ export function ChecklistItemRow({
                   // Sin él, el celular ofrece las dos (una toma extra para
                   // quien va a fotografiar en el momento).
                   accept={FORMATOS_FOTO}
-                  disabled={estadoGuardado === "guardando"}
+                  disabled={estadoGuardadoFotoFalla === "guardando"}
                   onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
+                  className="peer sr-only"
                 />
-                {estadoGuardado === "guardando" ? (
+                <label
+                  htmlFor={`foto-${item.key}`}
+                  className={cn(
+                    buttonVariants({ variant: "outline" }),
+                    "w-fit peer-focus-visible:border-ring peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50",
+                    estadoGuardadoFotoFalla === "guardando" &&
+                      "pointer-events-none opacity-50",
+                  )}
+                >
+                  <CameraIcon />
+                  Agregar foto
+                </label>
+                {estadoGuardadoFotoFalla === "guardando" ? (
                   <IndicadorGuardado
-                    estado={estadoGuardado}
+                    estado={estadoGuardadoFotoFalla}
                     textoGuardando="Subiendo foto…"
                   />
                 ) : (
@@ -340,7 +364,9 @@ function FotoSlotInput({
         </div>
       ) : (
         <>
-          <Input
+          {/* Mismo patrón que el input de arriba: oculto y disparado desde la
+              etiqueta, porque el texto del control nativo no es editable. */}
+          <input
             id={inputId}
             type="file"
             // Mismo criterio que el input de arriba: sin `capture`, para que
@@ -348,7 +374,20 @@ function FotoSlotInput({
             accept={FORMATOS_FOTO}
             disabled={disabled || estadoGuardado === "guardando"}
             onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
+            className="peer sr-only"
           />
+          <label
+            htmlFor={inputId}
+            className={cn(
+              buttonVariants({ variant: "outline" }),
+              "w-fit peer-focus-visible:border-ring peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50",
+              (disabled || estadoGuardado === "guardando") &&
+                "pointer-events-none opacity-50",
+            )}
+          >
+            <CameraIcon />
+            Agregar foto
+          </label>
           {estadoGuardado === "guardando" ? (
             <IndicadorGuardado
               estado={estadoGuardado}

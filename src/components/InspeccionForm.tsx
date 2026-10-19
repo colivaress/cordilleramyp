@@ -434,6 +434,12 @@ export function InspeccionForm({
   const guardadoObsGeneral = useEstadoGuardado();
   const guardadoPendientes = useEstadoGuardado();
   const claveFotoModo = (key: string, orden: number) => `${key}:${orden}`;
+  /** Clave propia para la subida de la foto de la falla (modo 'estado').
+   *  Antes compartía la clave del ítem, así que cualquier guardado del ítem
+   *  —elegir "No conforme", escribir la observación, borrar la foto— pintaba
+   *  "Subiendo foto…" en la zona de la foto sin que nadie subiera nada.
+   *  El sufijo no numérico no puede chocar con `claveFotoModo`. */
+  const claveFotoFalla = (key: string) => `${key}:falla`;
 
   // El checklist a mostrar depende del tipo elegido — mientras el supervisor
   // no haya avanzado al paso 2, cambiar el tipo reinicia las respuestas
@@ -983,7 +989,9 @@ export function InspeccionForm({
       return;
     }
     try {
-      await guardadoItems.ejecutar(key, async () => {
+      // Clave propia de la foto, no la del ítem: así "Subiendo foto…" sale
+      // en la zona de la foto solo cuando hay una subida de verdad en curso.
+      await guardadoItems.ejecutar(claveFotoFalla(key), async () => {
         const { blob, ext } = await comprimirImagen(file);
         const path = await subirArchivoAsegurando(
           "fallas",
@@ -1643,6 +1651,9 @@ export function InspeccionForm({
                       estadoGuardadoFoto={(orden) =>
                         guardadoItems.estadoDe(claveFotoModo(item.key, orden))
                       }
+                      estadoGuardadoFotoFalla={guardadoItems.estadoDe(
+                        claveFotoFalla(item.key),
+                      )}
                     />
                   ))}
                 </div>
