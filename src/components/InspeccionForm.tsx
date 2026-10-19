@@ -22,6 +22,7 @@ import {
   type RespuestaEditable,
 } from "@/components/ChecklistItemRow";
 import { SignaturePad } from "@/components/SignaturePad";
+import { esFotoPermitida } from "@/lib/fotos";
 import { ChecklistProgreso } from "@/components/ChecklistProgreso";
 import { ContenidoBoton, IndicadorGuardado } from "@/components/ui/estado-accion";
 import { OverlayBloqueante } from "@/components/ui/overlay-bloqueante";
@@ -983,8 +984,11 @@ export function InspeccionForm({
 
   async function onFotoItem(key: string, file: File | null) {
     if (!file) return;
-    // §2.8: solo imágenes fotográficas (rechaza PDF, video, etc.).
-    if (file.type && !file.type.startsWith("image/")) {
+    // §2.8: solo imágenes fotográficas (rechaza PDF, video, etc.). Esta es
+    // la validación REAL — el `accept` del input es `image/*` (tiene que
+    // serlo, si no Android esconde la cámara) y por lo tanto deja pasar
+    // cosas como un SVG, que acá sí se rechazan.
+    if (!esFotoPermitida(file.type)) {
       toast.error("El archivo debe ser una imagen (JPG, PNG, WEBP o HEIC).");
       return;
     }
@@ -1067,7 +1071,7 @@ export function InspeccionForm({
   // ítem), no contra foto_url directamente.
   async function onFotoModoItem(key: string, orden: number, file: File | null) {
     if (!file) return;
-    if (file.type && !file.type.startsWith("image/")) {
+    if (!esFotoPermitida(file.type)) {
       toast.error("El archivo debe ser una imagen (JPG, PNG, WEBP o HEIC).");
       return;
     }
