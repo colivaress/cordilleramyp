@@ -81,6 +81,87 @@ export type Database = {
           },
         ]
       }
+      cotizaciones_fletes: {
+        Row: {
+          acuse_enviado: boolean
+          apellido: string
+          comentarios: string | null
+          correo: string
+          correo_interno_enviado: boolean
+          created_at: string
+          destino: string
+          direccion_comercial: string | null
+          fecha_estimada: string
+          giro: string | null
+          id: string
+          ip_solicitante: string | null
+          nombre: string
+          numero_solicitud: number
+          origen: string
+          peso: string
+          razon_social: string | null
+          requiere_encarpe: boolean
+          rut: string
+          rut_empresa: string | null
+          telefono: string
+          tiene_whatsapp: boolean
+          tipo_carga: string
+          tipo_solicitante: Database["public"]["Enums"]["cotizacion_solicitante"]
+        }
+        Insert: {
+          acuse_enviado?: boolean
+          apellido: string
+          comentarios?: string | null
+          correo: string
+          correo_interno_enviado?: boolean
+          created_at?: string
+          destino: string
+          direccion_comercial?: string | null
+          fecha_estimada: string
+          giro?: string | null
+          id?: string
+          ip_solicitante?: string | null
+          nombre: string
+          numero_solicitud?: never
+          origen: string
+          peso: string
+          razon_social?: string | null
+          requiere_encarpe: boolean
+          rut: string
+          rut_empresa?: string | null
+          telefono: string
+          tiene_whatsapp?: boolean
+          tipo_carga: string
+          tipo_solicitante: Database["public"]["Enums"]["cotizacion_solicitante"]
+        }
+        Update: {
+          acuse_enviado?: boolean
+          apellido?: string
+          comentarios?: string | null
+          correo?: string
+          correo_interno_enviado?: boolean
+          created_at?: string
+          destino?: string
+          direccion_comercial?: string | null
+          fecha_estimada?: string
+          giro?: string | null
+          id?: string
+          ip_solicitante?: string | null
+          nombre?: string
+          numero_solicitud?: never
+          origen?: string
+          peso?: string
+          razon_social?: string | null
+          requiere_encarpe?: boolean
+          rut?: string
+          rut_empresa?: string | null
+          telefono?: string
+          tiene_whatsapp?: boolean
+          tipo_carga?: string
+          tipo_solicitante?: Database["public"]["Enums"]["cotizacion_solicitante"]
+        }
+        Relationships: []
+      }
       destinatarios_correo: {
         Row: {
           activo: boolean
@@ -551,6 +632,7 @@ export type Database = {
       }
     }
     Enums: {
+      cotizacion_solicitante: "particular" | "empresa"
       item_estado: "conforme" | "no_conforme" | "no_aplica"
       item_modo: "estado" | "fotos"
       notificacion_tipo: "whatsapp" | "email"
