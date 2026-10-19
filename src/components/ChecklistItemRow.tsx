@@ -83,14 +83,21 @@ export function ChecklistItemRow({
   onFotoModo,
   onQuitarFotoModo,
   estadoGuardadoFoto,
+  estadoGuardadoFotoFalla = "idle",
 }: {
   indice: number;
   item: ChecklistItem;
   valor: RespuestaEditable;
-  /** Nivel 1 (retroalimentación visual) — cubre el select de estado, la
-   *  observación y (modo 'estado') su única foto: un solo indicador por
-   *  fila, igual granularidad que antes. */
+  /** Nivel 1 (retroalimentación visual) — cubre el select de estado y la
+   *  observación. NO cubre la foto: ver `estadoGuardadoFotoFalla`. */
   estadoGuardado: EstadoGuardado;
+  /** Modo 'estado': estado propio de la subida de la foto de la falla.
+   *  Va aparte de `estadoGuardado` porque antes compartían clave, y
+   *  cualquier guardado del ítem —elegir "No conforme", escribir la
+   *  observación, borrar la foto— pintaba "Subiendo foto…" en la zona de
+   *  la foto sin que nadie estuviera subiendo nada (reportado 19-10).
+   *  Mismo criterio que `estadoGuardadoFoto` ya usa en modo 'fotos'. */
+  estadoGuardadoFotoFalla?: EstadoGuardado;
   onEstado: (estado: ItemEstado) => void;
   onObservacion: (texto: string) => void;
   onFoto: (file: File | null) => void;
@@ -271,7 +278,7 @@ export function ChecklistItemRow({
                   // Sin él, el celular ofrece las dos (una toma extra para
                   // quien va a fotografiar en el momento).
                   accept={FORMATOS_FOTO}
-                  disabled={estadoGuardado === "guardando"}
+                  disabled={estadoGuardadoFotoFalla === "guardando"}
                   onChange={(e) => onFoto(e.target.files?.[0] ?? null)}
                   className="peer sr-only"
                 />
@@ -280,16 +287,16 @@ export function ChecklistItemRow({
                   className={cn(
                     buttonVariants({ variant: "outline" }),
                     "w-fit peer-focus-visible:border-ring peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50",
-                    estadoGuardado === "guardando" &&
+                    estadoGuardadoFotoFalla === "guardando" &&
                       "pointer-events-none opacity-50",
                   )}
                 >
                   <CameraIcon />
                   Agregar foto
                 </label>
-                {estadoGuardado === "guardando" ? (
+                {estadoGuardadoFotoFalla === "guardando" ? (
                   <IndicadorGuardado
-                    estado={estadoGuardado}
+                    estado={estadoGuardadoFotoFalla}
                     textoGuardando="Subiendo foto…"
                   />
                 ) : (
