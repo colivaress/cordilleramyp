@@ -13,6 +13,11 @@ import { comunaValida, direccionCompleta } from "@/lib/chile";
 import { normalizarRut, rutValido } from "@/lib/rut";
 import { enlaceTel, enlaceWhatsApp, normalizarTelefonoCl } from "@/lib/telefono";
 import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
+import {
+  decidirPorTurnstile,
+  turnstileConfigurado,
+  verificarTurnstile,
+} from "@/lib/turnstile";
 
 /**
  * Destinatario interno de las solicitudes de cotización. Es una casilla fija
@@ -26,6 +31,30 @@ const CORREO_COTIZACIONES =
 /** Cuántas solicitudes admite una misma IP dentro de la ventana. */
 const LIMITE_POR_IP = 5;
 const VENTANA_MINUTOS = 60;
+
+/**
+ * Cuántas solicitudes admite un mismo CORREO en 24 horas.
+ *
+ * Es un límite distinto del de IP y ataca otro problema: cada solicitud
+ * aceptada le manda un acuse de recibo a la dirección que escribió quien
+ * llenó el formulario. Sin este tope, un bot que rote IPs puede usarnos
+ * para bombardear a un tercero — y el remitente es la casilla de la
+ * empresa, la MISMA que manda los informes de inspección. Si esa casilla se
+ * marca por abuso, se cae también el envío de informes.
+ */
+const LIMITE_POR_CORREO = 3;
+const VENTANA_CORREO_HORAS = 24;
+
+/**
+ * Tiempo mínimo creíble para llenar el formulario, en milisegundos.
+ *
+ * Son ~15 campos, dos selectores encadenados y una fecha. Una persona no lo
+ * hace en menos de cuatro segundos; un script sí. El valor lo manda el
+ * cliente, así que un bot puede mentirlo — igual que el honeypot, esto
+ * filtra a los automatismos genéricos, no a uno apuntado a este formulario.
+ * Para eso está Turnstile.
+ */
+const MS_MINIMO_LLENADO = 4000;
 
 /** Topes de largo. Un endpoint público sin tope es una invitación a llenarnos
  *  la tabla con un solo POST. */
@@ -63,6 +92,11 @@ export type EntradaCotizacion = {
    * Si viene con algo, es un bot que rellenó todos los inputs del formulario.
    */
   sitioWeb: string;
+  /** Token de Cloudflare Turnstile. Vacío si el script no cargó o si la
+   *  protección no está configurada. */
+  turnstileToken: string;
+  /** Milisegundos entre que se abrió el formulario y se envió. */
+  msEnFormulario: number;
 };
 
 /**
@@ -267,13 +301,55 @@ export async function enviarSolicitudCotizacion(
     return { ok: true, numeroSolicitud: 0 };
   }
 
+  // 2. Tiempo de llenado. Mismo criterio que el honeypot: éxito falso, para
+  //    no enseñarle al bot cuál es el umbral.
+  if (
+    typeof entrada.msEnFormulario === "number" &&
+    entrada.msEnFormulario >= 0 &&
+    entrada.msEnFormulario < MS_MINIMO_LLENADO
+  ) {
+    console.warn(
+      `[cotizacion] formulario enviado en ${entrada.msEnFormulario}ms, descartado`,
+    );
+    return { ok: true, numeroSolicitud: 0 };
+  }
+
   const validacion = validar(entrada);
   if (!validacion.ok) return { ok: false, mensaje: validacion.mensaje };
 
   const supabase = createAdminClient();
   const ip = await ipDelVisitante();
 
-  // 2. Límite por IP. Si la consulta del límite falla, NO se bloquea el envío:
+  // 3. Turnstile. La política según el resultado:
+  //
+  //      ok              -> todo normal
+  //      sin_configurar  -> como antes de existir esto (no rompe nada)
+  //      rechazado       -> hubo token y Cloudflare lo rechazó: es un bot.
+  //                         Se corta acá, con éxito falso.
+  //      sin_token /
+  //      error           -> AMBIGUO. Puede ser un bot sin JS, o una persona
+  //                         real con el script bloqueado o un problema de red
+  //                         de Cloudflare. No se pierde el negocio: la
+  //                         solicitud se guarda y a Jaime le llega igual, con
+  //                         un aviso. Lo que NO se manda es el acuse al
+  //                         solicitante — que es justamente el camino por el
+  //                         que nos podrían usar para spamear a un tercero.
+  const turnstile = await verificarTurnstile(entrada.turnstileToken, ip);
+  const decision = decidirPorTurnstile(turnstile.estado, turnstileConfigurado());
+
+  if (decision.descartar) {
+    const codigos =
+      turnstile.estado === "rechazado" ? turnstile.codigos.join(", ") : "";
+    console.warn(`[cotizacion] Turnstile rechazó el token: ${codigos}`);
+    return { ok: true, numeroSolicitud: 0 };
+  }
+  if (decision.avisarSinVerificar) {
+    console.warn(
+      `[cotizacion] solicitud sin verificar (${turnstile.estado}): se guarda y se avisa a ${CORREO_COTIZACIONES}, sin acuse al solicitante`,
+    );
+  }
+
+  // 4. Límite por IP. Si la consulta del límite falla, NO se bloquea el envío:
   //    perder una solicitud real por un problema nuestro es peor que dejar
   //    pasar una de más.
   if (ip) {
@@ -297,7 +373,35 @@ export async function enviarSolicitudCotizacion(
     }
   }
 
-  // 3. Guardar PRIMERO, mandar correos después. Si el SMTP falla, la
+  // 5. Límite por CORREO. Ataca el escenario que el límite por IP no cubre:
+  //    un bot que rota IPs poniendo siempre la misma dirección de víctima,
+  //    para que nuestra casilla le mande acuses de recibo una y otra vez.
+  {
+    const desde = new Date(
+      Date.now() - VENTANA_CORREO_HORAS * 60 * 60 * 1000,
+    ).toISOString();
+    const { count, error } = await supabase
+      .from("cotizaciones_fletes")
+      .select("id", { count: "exact", head: true })
+      .eq("correo", validacion.fila.correo)
+      .gte("created_at", desde);
+
+    if (error) {
+      console.error(
+        "[cotizacion] no se pudo verificar el límite por correo",
+        error,
+      );
+    } else if ((count ?? 0) >= LIMITE_POR_CORREO) {
+      // Éxito falso: a quien esté detrás no se le confirma que el tope
+      // existe ni cuál es.
+      console.warn(
+        `[cotizacion] tope por correo alcanzado para ${validacion.fila.correo}`,
+      );
+      return { ok: true, numeroSolicitud: 0 };
+    }
+  }
+
+  // 6. Guardar PRIMERO, mandar correos después. Si el SMTP falla, la
   //    solicitud igual queda registrada y se puede recuperar — al revés, un
   //    correo enviado sobre una fila que no se guardó no deja rastro.
   const { data, error } = await supabase
@@ -342,9 +446,11 @@ export async function enviarSolicitudCotizacion(
     comentarios: f.comentarios ?? null,
   };
 
-  // 4. Correo interno. Un fallo acá NO se le muestra al interesado: su
+  // 7. Correo interno. Un fallo acá NO se le muestra al interesado: su
   //    solicitud sí se recibió. Queda el log y la bandera en false para
-  //    poder encontrar las que no avisaron.
+  //    poder encontrar las que no avisaron. Este correo se manda SIEMPRE,
+  //    verificada o no: es interno, no le llega a un tercero, y es la
+  //    forma de que Jaime se entere de una solicitud que quizá sea real.
   const textoWhatsApp = `Hola ${datos.nombre}, le escribimos de Cordillera M&P por su solicitud de cotización N° ${numeroSolicitud}.`;
   try {
     const { asunto, html } = construirCorreoCotizacion(datos, {
@@ -352,6 +458,9 @@ export async function enviarSolicitudCotizacion(
       whatsapp: datos.tieneWhatsapp
         ? enlaceWhatsApp(datos.telefono, textoWhatsApp)
         : null,
+      // Jaime tiene que saber que esta no pasó la verificación antes de
+      // llamar: puede ser real, o puede ser basura.
+      sinVerificar: decision.avisarSinVerificar,
     });
     await enviarCorreoHtml({
       destinatarios: [CORREO_COTIZACIONES],
@@ -369,24 +478,37 @@ export async function enviarSolicitudCotizacion(
     );
   }
 
-  // 5. Acuse de recibo al interesado. También aislado: que no le llegue el
-  //    acuse no invalida la solicitud ni debe mostrarle un error.
-  try {
-    const { asunto, html } = construirAcuseCotizacion(datos);
-    await enviarCorreoHtml({
-      destinatarios: [datos.correo],
-      asunto,
-      cuerpoHtml: html,
-    });
-    await supabase
-      .from("cotizaciones_fletes")
-      .update({ acuse_enviado: true })
-      .eq("numero_solicitud", numeroSolicitud);
-  } catch (err) {
-    console.error(
-      `[cotizacion] acuse de recibo de la solicitud ${numeroSolicitud} no se pudo enviar`,
-      err,
+  // 8. Acuse de recibo al interesado. ESTA ES LA PUERTA QUE IMPORTA: es el
+  //    único correo que sale hacia una dirección que escribió un
+  //    desconocido. Si la solicitud no pasó Turnstile, no se manda —
+  //    nadie puede usar el formulario para que nuestra casilla le escriba
+  //    a un tercero. Quien sea real igual queda registrado y Jaime lo
+  //    contacta; lo único que pierde es la copia por correo.
+  //
+  //    También aislado: que no le llegue el acuse no invalida la
+  //    solicitud ni debe mostrarle un error.
+  if (!decision.enviarAcuse) {
+    console.warn(
+      `[cotizacion] acuse NO enviado para la solicitud ${numeroSolicitud}: no pasó la verificación`,
     );
+  } else {
+    try {
+      const { asunto, html } = construirAcuseCotizacion(datos);
+      await enviarCorreoHtml({
+        destinatarios: [datos.correo],
+        asunto,
+        cuerpoHtml: html,
+      });
+      await supabase
+        .from("cotizaciones_fletes")
+        .update({ acuse_enviado: true })
+        .eq("numero_solicitud", numeroSolicitud);
+    } catch (err) {
+      console.error(
+        `[cotizacion] acuse de recibo de la solicitud ${numeroSolicitud} no se pudo enviar`,
+        err,
+      );
+    }
   }
 
   return { ok: true, numeroSolicitud };
