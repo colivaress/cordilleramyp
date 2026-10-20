@@ -83,8 +83,7 @@ export const CAMPOS = [
   { clave: "tasa_sis", tipo: "tasa", grupo: "empleador", etiqueta: "SIS" },
   { clave: "tasa_expectativa_vida", tipo: "tasa", grupo: "empleador", etiqueta: "Cotización de expectativa de vida" },
   { clave: "tasa_rentabilidad_protegida", tipo: "tasa", grupo: "empleador", etiqueta: "Rentabilidad protegida" },
-  { clave: "tasa_mutual_base", tipo: "tasa", grupo: "empleador", etiqueta: "Mutual, tasa base" },
-  { clave: "tasa_mutual_adicional", tipo: "tasa", grupo: "empleador", etiqueta: "Mutual, adicional por riesgo" },
+  { clave: "tasa_mutual_base", tipo: "tasa", grupo: "empleador", etiqueta: "Mutual, tasa básica (legal)" },
 ] as const;
 
 export type ClaveCampo = (typeof CAMPOS)[number]["clave"];
@@ -476,5 +475,91 @@ export function desdeBase(
       tramosImpuesto: tramosImpuesto!,
       tramosAsignacionFamiliar: tramosAsignacionFamiliar!,
     },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tasa adicional de mutual: de la EMPRESA, con vigencia (no del período)
+// ─────────────────────────────────────────────────────────────────────────
+
+export type TramoMutualAdicional = {
+  /** Día 1 de un mes, "AAAA-MM-01". */
+  vigenteDesde: string;
+  /** Día 1 de un mes, exclusivo; null = sigue vigente. */
+  vigenteHasta: string | null;
+  tasa: number;
+};
+
+/** "2026-10" → "2026-10-01": fechas comparables como texto (ISO). */
+export function primerDiaPeriodo(anio: number, mes: number): string {
+  return `${codigoPeriodo(anio, mes)}-01`;
+}
+
+/**
+ * La tasa adicional vigente en el mes del período. La base garantiza que
+ * los tramos no se solapan (exclude) y que parten el día 1, así que un mes
+ * cae entero en uno solo. Si ninguno lo cubre, error con nombre: nunca 0
+ * por defecto.
+ */
+export function mutualAdicionalVigente(
+  tramos: TramoMutualAdicional[],
+  anio: number,
+  mes: number,
+): Resultado<number> {
+  const dia = primerDiaPeriodo(anio, mes);
+  const t = tramos.find(
+    (t) => t.vigenteDesde <= dia && (t.vigenteHasta === null || dia < t.vigenteHasta),
+  );
+  if (!t || !esNumero(t.tasa))
+    return {
+      ok: false,
+      errores: [`Falta la tasa adicional de mutual vigente en ${nombrePeriodo(anio, mes)}.`],
+    };
+  return { ok: true, valor: t.tasa };
+}
+
+export type CambioMutual =
+  | { tipo: "corregir"; id: string; tasa: number }
+  | {
+      tipo: "nuevo";
+      /** Tramo que contenía el mes y se corta ahí (su hasta pasa a `desde`). */
+      cortar: { id: string; vigenteHasta: string } | null;
+      insertar: { vigenteDesde: string; vigenteHasta: string | null; tasa: number };
+    };
+
+/**
+ * Qué escribir para que la tasa `tasa` rija desde el mes (anio, mes):
+ *   - si ya hay un tramo que parte ese mismo mes, se corrige su tasa;
+ *   - si el mes cae dentro de otro tramo, ese se corta ahí y el nuevo hereda
+ *     su fin (una revisión a mitad de un tramo cerrado no lo alarga);
+ *   - si cae en un hueco, el nuevo llega hasta el siguiente tramo o queda
+ *     abierto.
+ * Así nunca quedan solapes (que la base además rechaza) ni se borra nada.
+ */
+export function planCambioMutual(
+  tramos: (TramoMutualAdicional & { id: string })[],
+  anio: number,
+  mes: number,
+  tasa: number,
+): CambioMutual {
+  const desde = primerDiaPeriodo(anio, mes);
+  const mismo = tramos.find((t) => t.vigenteDesde === desde);
+  if (mismo) return { tipo: "corregir", id: mismo.id, tasa };
+  const contiene = tramos.find(
+    (t) => t.vigenteDesde < desde && (t.vigenteHasta === null || desde < t.vigenteHasta),
+  );
+  if (contiene)
+    return {
+      tipo: "nuevo",
+      cortar: { id: contiene.id, vigenteHasta: desde },
+      insertar: { vigenteDesde: desde, vigenteHasta: contiene.vigenteHasta, tasa },
+    };
+  const siguiente = tramos
+    .filter((t) => t.vigenteDesde > desde)
+    .sort((a, b) => a.vigenteDesde.localeCompare(b.vigenteDesde))[0];
+  return {
+    tipo: "nuevo",
+    cortar: null,
+    insertar: { vigenteDesde: desde, vigenteHasta: siguiente?.vigenteDesde ?? null, tasa },
   };
 }

@@ -179,9 +179,9 @@ check(
   v.data && { uf_mes: v.data.uf_mes, tasa_sis: v.data.tasa_sis },
 );
 v = await C.from("rrhh_parametros_periodo").select("anio");
-check("Adm. contrato lee los períodos", !v.error && v.data.length === 1, v.error?.message ?? v.data?.length);
+check("Adm. contrato NO lee los períodos (configuración del sistema)", !v.error && v.data.length === 0, v.error?.message ?? v.data?.length);
 v = await C.from("rrhh_afp_periodo").select("afp");
-check("Adm. contrato lee las comisiones", !v.error && v.data.length === 7, v.error?.message ?? v.data?.length);
+check("Adm. contrato NO lee las comisiones", !v.error && v.data.length === 0, v.error?.message ?? v.data?.length);
 v = await C.from("rrhh_parametros_periodo").insert(periodo(2026, 11));
 check("Adm. contrato no puede cargar un período", !!v.error, v.error?.message);
 v = await C.from("rrhh_parametros_periodo").update({ utm: 1 }).eq("anio", 2026).select();
@@ -206,6 +206,29 @@ v = await A.from("rrhh_parametros_periodo").insert({ ...periodo(2027, 1), tramos
 check("Tramos que no son un arreglo se rechazan (check)", !!v.error, v.error?.message);
 v = (await srv.from("rrhh_afp_periodo").select("comision").eq("anio", 2026).eq("afp", "uno").single()).data;
 check("La comisión quedó en lo que fijó el administrador", v?.comision === 0.5, v);
+
+console.log("\n— rrhh_mutual_adicional (de la empresa, con vigencia) —");
+v = await A.from("rrhh_mutual_adicional")
+  .insert({ vigente_desde: "2026-01-01", vigente_hasta: "2027-01-01", tasa: 0.5 })
+  .select("tasa")
+  .single();
+check("Administrador registra un tramo con RETURNING", !v.error && v.data?.tasa === 0.5, v.error?.message ?? v.data);
+v = await A.from("rrhh_mutual_adicional").insert({ vigente_desde: "2026-06-01", vigente_hasta: null, tasa: 0.9 });
+check("Un tramo que se solapa se rechaza (exclude)", !!v.error, v.error?.message);
+v = await A.from("rrhh_mutual_adicional").insert({ vigente_desde: "2027-01-15", tasa: 0.9 });
+check("Un tramo que no parte el día 1 se rechaza", !!v.error, v.error?.message);
+v = await A.from("rrhh_mutual_adicional").insert({ vigente_desde: "2027-01-01", tasa: 0.9 }).select("id");
+check("Un tramo contiguo sí se acepta", !v.error && v.data.length === 1, v.error?.message);
+v = await C.from("rrhh_mutual_adicional").select("tasa");
+check("Adm. contrato NO lee la tasa adicional", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await C.from("rrhh_mutual_adicional").insert({ vigente_desde: "2030-01-01", tasa: 1 });
+check("Adm. contrato no puede registrar tasas", !!v.error, v.error?.message);
+v = await S1.from("rrhh_mutual_adicional").select("tasa");
+check("Supervisor no lee la tasa adicional", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await S1.from("rrhh_mutual_adicional").update({ tasa: 9 }).gte("tasa", 0).select();
+check("Supervisor no puede cambiar la tasa (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await A.from("rrhh_mutual_adicional").delete().gte("tasa", 0).select();
+check("Nadie borra un tramo (ni admin): 0 filas", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
 
 console.log("\n— personal: lectura —");
 v = await pers(S3);

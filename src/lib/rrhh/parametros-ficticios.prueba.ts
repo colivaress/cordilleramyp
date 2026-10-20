@@ -39,7 +39,6 @@ export function formularioFicticio(anio = 2026, mes = 10): FormularioParametros 
       tasa_expectativa_vida: "1",
       tasa_rentabilidad_protegida: "1",
       tasa_mutual_base: "1",
-      tasa_mutual_adicional: "0,5",
     },
     comisionAfp: Object.fromEntries(
       AFPS.map((a, i) => [a, `0,${i + 1}`]),

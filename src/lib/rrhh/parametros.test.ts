@@ -8,6 +8,8 @@ import {
   leerCodigoPeriodo,
   leerDecimal,
   leerFormulario,
+  mutualAdicionalVigente,
+  planCambioMutual,
   type FormularioParametros,
 } from "./parametros.ts";
 // Valores FICTICIOS: viven en un archivo aparte que lo dice en el nombre.
@@ -179,4 +181,52 @@ test("copiar al período siguiente deja UF y UTM vacías y copia lo demás", () 
   const r = leerFormulario(f);
   assert.equal(r.ok, false);
   if (!r.ok) assert.equal(r.errores.length, 3);
+});
+
+// ── Tasa adicional de mutual (de la empresa, con vigencia) ──────────────
+
+const tramosMutual = [
+  { id: "a", vigenteDesde: "2026-01-01", vigenteHasta: "2027-01-01", tasa: 0.5 },
+  { id: "b", vigenteDesde: "2027-01-01", vigenteHasta: null, tasa: 0.9 },
+];
+
+test("mutual adicional: se toma la del tramo que cubre el mes", () => {
+  assert.deepEqual(mutualAdicionalVigente(tramosMutual, 2026, 12), { ok: true, valor: 0.5 });
+  assert.deepEqual(mutualAdicionalVigente(tramosMutual, 2027, 1), { ok: true, valor: 0.9 });
+  assert.deepEqual(mutualAdicionalVigente(tramosMutual, 2030, 6), { ok: true, valor: 0.9 });
+});
+
+test("mutual adicional: un mes sin tramo es un error con nombre, no 0", () => {
+  assert.deepEqual(mutualAdicionalVigente(tramosMutual, 2025, 12), {
+    ok: false,
+    errores: ["Falta la tasa adicional de mutual vigente en diciembre 2025."],
+  });
+  assert.equal(mutualAdicionalVigente([], 2026, 10).ok, false);
+});
+
+test("mutual adicional: un cambio a mitad de un tramo lo corta ahí", () => {
+  assert.deepEqual(planCambioMutual(tramosMutual, 2026, 7, 0.7), {
+    tipo: "nuevo",
+    cortar: { id: "a", vigenteHasta: "2026-07-01" },
+    insertar: { vigenteDesde: "2026-07-01", vigenteHasta: "2027-01-01", tasa: 0.7 },
+  });
+  assert.deepEqual(planCambioMutual(tramosMutual, 2029, 1, 1.1), {
+    tipo: "nuevo",
+    cortar: { id: "b", vigenteHasta: "2029-01-01" },
+    insertar: { vigenteDesde: "2029-01-01", vigenteHasta: null, tasa: 1.1 },
+  });
+});
+
+test("mutual adicional: el mismo mes de inicio corrige; un hueco llega hasta el siguiente", () => {
+  assert.deepEqual(planCambioMutual(tramosMutual, 2027, 1, 0.95), { tipo: "corregir", id: "b", tasa: 0.95 });
+  assert.deepEqual(planCambioMutual(tramosMutual, 2025, 3, 0.4), {
+    tipo: "nuevo",
+    cortar: null,
+    insertar: { vigenteDesde: "2025-03-01", vigenteHasta: "2026-01-01", tasa: 0.4 },
+  });
+  assert.deepEqual(planCambioMutual([], 2026, 10, 0.5), {
+    tipo: "nuevo",
+    cortar: null,
+    insertar: { vigenteDesde: "2026-10-01", vigenteHasta: null, tasa: 0.5 },
+  });
 });

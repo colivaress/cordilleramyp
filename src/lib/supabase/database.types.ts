@@ -396,6 +396,41 @@ export type Database = {
           },
         ]
       }
+      rrhh_mutual_adicional: {
+        Row: {
+          created_at: string
+          id: string
+          tasa: number
+          updated_by: string | null
+          vigente_desde: string
+          vigente_hasta: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          tasa: number
+          updated_by?: string | null
+          vigente_desde: string
+          vigente_hasta?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          tasa?: number
+          updated_by?: string | null
+          vigente_desde?: string
+          vigente_hasta?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rrhh_mutual_adicional_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rrhh_parametros_periodo: {
         Row: {
           anio: number
@@ -407,7 +442,6 @@ export type Database = {
           tasa_afc_trabajador_indefinido: number
           tasa_afp_obligatoria: number
           tasa_expectativa_vida: number
-          tasa_mutual_adicional: number
           tasa_mutual_base: number
           tasa_rentabilidad_protegida: number
           tasa_salud_minima: number
@@ -432,7 +466,6 @@ export type Database = {
           tasa_afc_trabajador_indefinido: number
           tasa_afp_obligatoria: number
           tasa_expectativa_vida: number
-          tasa_mutual_adicional: number
           tasa_mutual_base: number
           tasa_rentabilidad_protegida: number
           tasa_salud_minima: number
@@ -457,7 +490,6 @@ export type Database = {
           tasa_afc_trabajador_indefinido?: number
           tasa_afp_obligatoria?: number
           tasa_expectativa_vida?: number
-          tasa_mutual_adicional?: number
           tasa_mutual_base?: number
           tasa_rentabilidad_protegida?: number
           tasa_salud_minima?: number

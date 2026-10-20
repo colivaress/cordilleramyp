@@ -9,6 +9,7 @@ import {
 } from "@/lib/rrhh/parametros";
 import { formatearCLP } from "@/lib/dinero";
 import { IrAPeriodo } from "@/components/rrhh/IrAPeriodo";
+import { MutualAdicional } from "@/components/rrhh/MutualAdicional";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -36,13 +37,17 @@ export default async function ParametrosPage() {
   await requireEditarMontos();
   const supabase = await createClient();
 
-  const [{ data: periodos }, { data: afps }] = await Promise.all([
+  const [{ data: periodos }, { data: afps }, { data: mutual }] = await Promise.all([
     supabase
       .from("rrhh_parametros_periodo")
       .select("*")
       .order("anio", { ascending: false })
       .order("mes", { ascending: false }),
     supabase.from("rrhh_afp_periodo").select("anio, mes, afp, comision"),
+    supabase
+      .from("rrhh_mutual_adicional")
+      .select("vigente_desde, vigente_hasta, tasa")
+      .order("vigente_desde"),
   ]);
 
   // Mes actual en Chile, no en la zona del servidor (UTC).
@@ -80,6 +85,16 @@ export default async function ParametrosPage() {
           <IrAPeriodo anio={hoy.anio} mes={hoy.mes} />
         </CardContent>
       </Card>
+
+      <MutualAdicional
+        anio={hoy.anio}
+        mes={hoy.mes}
+        tramos={(mutual ?? []).map((t) => ({
+          vigenteDesde: t.vigente_desde,
+          vigenteHasta: t.vigente_hasta,
+          tasa: t.tasa,
+        }))}
+      />
 
       <Card>
         <CardHeader>

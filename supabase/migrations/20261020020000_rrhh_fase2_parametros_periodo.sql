@@ -18,10 +18,17 @@
 -- La forma de los jsonb la valida la app (al guardar y al leer); acá solo se
 -- garantiza que sean arreglos no vacíos.
 --
--- Lectura: administrador y administrador de contrato (son indicadores
--- públicos, pero no hace falta abrirlos a supervisores). Escritura: solo
--- administrador. Sin delete: un período se corrige, no se borra.
--- es_admin()/es_admin_contrato() consultan `personal`, no estas tablas:
+-- Mutual: la tasa BÁSICA es legal e igual para todas las empresas → va en el
+-- período (si cambia la ley, los meses anteriores conservan la suya). La
+-- ADICIONAL diferenciada depende del riesgo de la empresa, no del mes (se
+-- revisa cada dos años): va en rrhh_mutual_adicional con vigencia, una sola
+-- vez, en vez de repetirse en doce filas al año que se pueden desincronizar.
+--
+-- Lectura y escritura: SOLO administrador. Son configuración del sistema, no
+-- montos de un trabajador: el administrador de contrato no los necesita, y
+-- así la RLS dice lo mismo que la pantalla (requireEditarMontos). Sin
+-- delete: un período se corrige, no se borra.
+-- es_admin() consulta `personal`, no estas tablas:
 -- seguros en INSERT ... RETURNING (lección de 20260908221710).
 
 begin;
@@ -51,7 +58,6 @@ create table public.rrhh_parametros_periodo (
   tasa_expectativa_vida numeric(7, 4) not null check (tasa_expectativa_vida >= 0 and tasa_expectativa_vida < 100),
   tasa_rentabilidad_protegida numeric(7, 4) not null check (tasa_rentabilidad_protegida >= 0 and tasa_rentabilidad_protegida < 100),
   tasa_mutual_base numeric(7, 4) not null check (tasa_mutual_base >= 0 and tasa_mutual_base < 100),
-  tasa_mutual_adicional numeric(7, 4) not null check (tasa_mutual_adicional >= 0 and tasa_mutual_adicional < 100),
 
   tramos_impuesto jsonb not null check (
     jsonb_typeof(tramos_impuesto) = 'array' and jsonb_array_length(tramos_impuesto) > 0
@@ -90,7 +96,7 @@ revoke all on public.rrhh_afp_periodo from anon;
 
 create policy rrhh_parametros_periodo_select on public.rrhh_parametros_periodo
   for select to authenticated
-  using (private.es_admin() or private.es_admin_contrato());
+  using (private.es_admin());
 
 create policy rrhh_parametros_periodo_insert on public.rrhh_parametros_periodo
   for insert to authenticated
@@ -103,13 +109,47 @@ create policy rrhh_parametros_periodo_update on public.rrhh_parametros_periodo
 
 create policy rrhh_afp_periodo_select on public.rrhh_afp_periodo
   for select to authenticated
-  using (private.es_admin() or private.es_admin_contrato());
+  using (private.es_admin());
 
 create policy rrhh_afp_periodo_insert on public.rrhh_afp_periodo
   for insert to authenticated
   with check (private.es_admin());
 
 create policy rrhh_afp_periodo_update on public.rrhh_afp_periodo
+  for update to authenticated
+  using (private.es_admin())
+  with check (private.es_admin());
+
+-- Tasa adicional diferenciada de mutual de LA EMPRESA, con vigencia. Las
+-- fechas son siempre el día 1 de un mes (vigente_hasta exclusivo, null =
+-- sigue vigente), así un período cae entero en un solo tramo, y dos tramos
+-- no pueden solaparse (exclude): para un mes hay una tasa o ninguna, nunca
+-- dos. El cálculo la busca por el mes del período; si no hay, falla.
+create table public.rrhh_mutual_adicional (
+  id uuid primary key default gen_random_uuid(),
+  vigente_desde date not null check (extract(day from vigente_desde) = 1),
+  vigente_hasta date check (extract(day from vigente_hasta) = 1 and vigente_hasta > vigente_desde),
+  tasa numeric(7, 4) not null check (tasa >= 0 and tasa < 100),
+  created_at timestamptz not null default now(),
+  updated_by uuid references public.personal(id),
+  exclude using gist (daterange(vigente_desde, vigente_hasta, '[)') with &&)
+);
+
+comment on table public.rrhh_mutual_adicional is
+  'Tasa adicional diferenciada de mutual de la empresa (en porcentaje), por vigencia mensual sin solapes. La tasa básica legal está en rrhh_parametros_periodo.tasa_mutual_base.';
+
+alter table public.rrhh_mutual_adicional enable row level security;
+revoke all on public.rrhh_mutual_adicional from anon;
+
+create policy rrhh_mutual_adicional_select on public.rrhh_mutual_adicional
+  for select to authenticated
+  using (private.es_admin());
+
+create policy rrhh_mutual_adicional_insert on public.rrhh_mutual_adicional
+  for insert to authenticated
+  with check (private.es_admin());
+
+create policy rrhh_mutual_adicional_update on public.rrhh_mutual_adicional
   for update to authenticated
   using (private.es_admin())
   with check (private.es_admin());

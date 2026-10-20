@@ -1,12 +1,18 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
-import { desdeBase, type ParametrosPeriodo, type Resultado } from "@/lib/rrhh/parametros";
+import {
+  desdeBase,
+  mutualAdicionalVigente,
+  type ParametrosPeriodo,
+  type Resultado,
+} from "@/lib/rrhh/parametros";
 
 type Cliente = SupabaseClient<Database>;
 
 /**
- * Trae los parámetros de un período desde la base. Es la puerta por la que
- * el cálculo (fase 4) obtiene sus indicadores: si el período no está o está
+ * Trae los parámetros de un período desde la base. El cálculo (fase 4) no la
+ * llama directo sino por `cargarParametrosCalculo`, que además exige la tasa
+ * adicional de mutual vigente. Si el período no está o está
  * incompleto, devuelve `{ ok: false, errores }` con mensajes listos para
  * mostrar ("Faltan los parámetros previsionales de octubre 2026."). Un
  * error de red/RLS también es `ok: false`: nunca se calcula a medias.
@@ -25,6 +31,35 @@ export async function cargarParametrosPeriodo(
     return { ok: false, errores: ["No se pudieron leer los parámetros previsionales. Intenta de nuevo."] };
   }
   return desdeBase(anio, mes, periodo.data, afps.data);
+}
+
+/**
+ * Todo lo que el cálculo de un mes necesita leer de configuración: los
+ * parámetros del período y la tasa adicional de mutual de la empresa
+ * vigente ese mes. Si falta cualquiera de los dos, junta los mensajes de
+ * ambos y no devuelve nada utilizable.
+ */
+export async function cargarParametrosCalculo(
+  supabase: Cliente,
+  anio: number,
+  mes: number,
+): Promise<Resultado<{ periodo: ParametrosPeriodo; tasaMutualAdicional: number }>> {
+  const [periodo, mutual] = await Promise.all([
+    cargarParametrosPeriodo(supabase, anio, mes),
+    supabase.from("rrhh_mutual_adicional").select("vigente_desde, vigente_hasta, tasa"),
+  ]);
+  if (mutual.error) {
+    console.error("[cargarParametrosCalculo]", mutual.error);
+    return { ok: false, errores: ["No se pudo leer la tasa adicional de mutual. Intenta de nuevo."] };
+  }
+  const tasa = mutualAdicionalVigente(
+    mutual.data.map((t) => ({ vigenteDesde: t.vigente_desde, vigenteHasta: t.vigente_hasta, tasa: t.tasa })),
+    anio,
+    mes,
+  );
+  const errores = [...(periodo.ok ? [] : periodo.errores), ...(tasa.ok ? [] : tasa.errores)];
+  if (!periodo.ok || !tasa.ok) return { ok: false, errores };
+  return { ok: true, valor: { periodo: periodo.valor, tasaMutualAdicional: tasa.valor } };
 }
 
 /** El período cargado más reciente ANTERIOR a (anio, mes), si existe. */
