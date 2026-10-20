@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { buttonVariants } from "@/components/ui/button";
 import { formatearCLP } from "@/lib/dinero";
 import { nombreCompleto } from "@/lib/mensajes";
 import { puedeEditarMontos } from "@/lib/rrhh/acceso";
@@ -52,6 +54,19 @@ export default async function RrhhPage() {
 
   return (
     <div className="space-y-6">
+      {/* Parámetros previsionales: solo administrador (spec RRHH §3). La
+          página tiene su propia guarda; esto solo evita mostrar una puerta
+          cerrada al administrador de contrato. */}
+      {puedeEditarMontos(perfil.rol) && (
+        <div className="flex justify-end">
+          <Link
+            href="/rrhh/parametros"
+            className={buttonVariants({ variant: "outline" })}
+          >
+            Parámetros previsionales
+          </Link>
+        </div>
+      )}
       <Card>
         <CardHeader>
           <CardTitle>RRHH</CardTitle>
