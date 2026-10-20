@@ -73,20 +73,23 @@ const check = (desc, ok, detalle) => {
 const linkRrhh = (html) => /href="\/rrhh"/.test(html);
 const AVISO_SOLO_LECTURA = "solo un administrador puede modificarlos";
 
-const [cA, cC, cS1] = [await cookiesDe("A"), await cookiesDe("C"), await cookiesDe("S1")];
+const [cA, cC, cS1, cS3] = [await cookiesDe("A"), await cookiesDe("C"), await cookiesDe("S1"), await cookiesDe("S3")];
 let r;
 
 console.log("\n— Administrador —");
 r = await pedir("/rrhh", cA);
 check("entra a /rrhh", r.status === 200, r.status);
-check("ve el líquido vigente de S1 y S2 (no el de vigencia futura)", r.html.includes("$810.000") && r.html.includes("$950.000") && !r.html.includes("$1.000.000"));
+// prueba-rls-rrhh.mjs deja a S2 desvinculado: sale en la otra pestaña.
+check("Activos: ve el líquido vigente de S1 (la corrección) y no a S2", r.html.includes("$810.000") && !r.html.includes("$950.000"));
+r = await pedir("/rrhh?pestana=desvinculados", cA);
+check("Desvinculados: S2 con su líquido vigente, no el de vigencia futura", r.html.includes("$950.000") && !r.html.includes("$1.000.000") && !r.html.includes("$810.000"));
 check("no ve el aviso de solo lectura", !r.html.includes(AVISO_SOLO_LECTURA));
 check("tiene el link RRHH en la barra", linkRrhh(r.html));
 
 console.log("\n— Administrador de contrato —");
 r = await pedir("/rrhh", cC);
 check("entra a /rrhh", r.status === 200, r.status);
-check("ve los montos", r.html.includes("$810.000") && r.html.includes("$950.000"));
+check("ve los montos", r.html.includes("$810.000"));
 check("ve el aviso de solo lectura", r.html.includes(AVISO_SOLO_LECTURA));
 check("tiene el link RRHH en la barra", linkRrhh(r.html));
 
@@ -202,6 +205,90 @@ check(
     ]),
   tramos,
 );
+
+// ── Fase 3: ficha del trabajador ────────────────────────────────────────
+// prueba-rls-rrhh.mjs dejó: ficha de S1 (RUT 11.111.111-1, contrato.pdf,
+// jornada "Turno A") y de S2 (desvinculado); S3 sin ficha.
+const srv = createServerClient(URL, env.SERVICE_ROLE_KEY, { cookies: { getAll: () => [], setAll: () => {} } });
+const idDe = async (k) =>
+  (await srv.from("personal").select("id").eq("email", `rls.${k.toLowerCase()}@test.cordilleramyp.local`).single()).data.id;
+const [S1, S3] = [await idDe("S1"), await idDe("S3")];
+const linkMisDatos = (html) => /href="\/mis-datos"/.test(html);
+
+console.log("\n— Ficha: acceso por ruta —");
+r = await pedir(`/rrhh/${S1}`, cA);
+check("admin abre la ficha de S1 y puede registrar sueldo", r.status === 200 && r.html.includes("11.111.111-1") && r.html.includes("Registrar cambio"), r.status);
+check("…con antigüedad calculada y su documento", r.html.includes("años y") && r.html.includes("contrato.pdf"));
+const htmlFichaAdmin = r.html;
+r = await pedir(`/rrhh/${S1}`, cC);
+check("adm. contrato abre la ficha pero sin el formulario de sueldo", r.status === 200 && r.html.includes("11.111.111-1") && !r.html.includes("Registrar cambio") && r.html.includes(AVISO_SOLO_LECTURA), r.status);
+for (const ruta of ["/rrhh/jornadas", "/rrhh/tipos-documento"]) {
+  r = await pedir(ruta, cC);
+  check(`adm. contrato entra a ${ruta}`, r.status === 200, r.status);
+}
+for (const ruta of [`/rrhh/${S1}`, "/rrhh/jornadas", "/rrhh/tipos-documento"]) {
+  r = await pedir(ruta, cS1);
+  check(`supervisor escribiendo ${ruta} rebota`, sinPermiso(r), { status: r.status, location: r.location });
+}
+r = await pedir("/rrhh/no-es-un-id", cA);
+check("un id que no es uuid da 404", r.status === 404, r.status);
+
+console.log("\n— Mis datos —");
+r = await pedir("/mis-datos", cS1);
+check("S1 ve su propia ficha y su documento", r.status === 200 && r.html.includes("11.111.111-1") && r.html.includes("contrato.pdf") && r.html.includes("Turno A"), r.status);
+check("…y no ve datos de S2", !r.html.includes("22.222.222-2") && !r.html.includes("cedula.pdf"));
+check("S1 tiene el link Mis datos en la barra", linkMisDatos(r.html));
+r = await pedir("/mis-datos", cS3);
+check("S3 sin ficha ve el aviso, no la ficha de otro", r.status === 200 && r.html.includes("Todavía no tienes una ficha") && !r.html.includes("11.111.111-1"), r.status);
+r = await pedir("/dashboard", cS3);
+check("S3 sin ficha no tiene el link Mis datos", r.status === 200 && !linkMisDatos(r.html), r.status);
+
+console.log("\n— Ficha: Server Actions —");
+const ID_REM = await idAccion(htmlFichaAdmin, "registrarRemuneracion");
+const ID_FICHA = await idAccion(htmlFichaAdmin, "guardarFicha");
+const ID_DOCS = await idAccion(htmlFichaAdmin, "registrarDocumentos");
+const rem = { vigente_desde: "2026-12", liquido_pactado: "900.000", colacion: "0", movilizacion: "20.000", comentario: "Reajuste de prueba" };
+g = await llamarAccion(`/rrhh/${S1}`, ID_REM, cC, S1, rem);
+check("adm. contrato registrando sueldo directo: rechazado", rechazada(g), { status: g.status, redirect: g.redirect, resultado: g.resultado });
+g = await llamarAccion(`/rrhh/${S1}`, ID_REM, cA, S1, { ...rem, colacion: "" });
+check("admin sin colación: no se guarda como 0", g.resultado?.ok === false && g.resultado.errores?.includes("Falta la colación (escribe 0 si no tiene)."), g.resultado);
+g = await llamarAccion(`/rrhh/${S1}`, ID_REM, cA, S1, rem);
+check("admin registra un cambio de sueldo", g.resultado?.ok === true, g.resultado ?? g.status);
+const { data: ultimo } = await srv
+  .from("rrhh_remuneracion_base")
+  .select("liquido_pactado, movilizacion, comentario, created_by, vigente_desde")
+  .eq("personal_id", S1)
+  .order("created_at", { ascending: false })
+  .limit(1)
+  .single();
+check(
+  "…queda como fila nueva, rige el 1 de diciembre, con autor de la sesión",
+  ultimo.liquido_pactado === 900000 && ultimo.vigente_desde === "2026-12-01" && ultimo.comentario === "Reajuste de prueba" && ultimo.created_by === (await idDe("A")),
+  ultimo,
+);
+r = await pedir(`/rrhh/${S1}`, cA);
+check("…y aparece en el historial con el valor anterior", r.html.includes("$810.000 → $900.000") && r.html.includes("Reajuste de prueba"));
+
+const fichaS3 = {
+  rut: "33.333.333-3", cargo: "Operario", area: "", fecha_ingreso: "2024-01-10", tipo_contrato: "indefinido",
+  fecha_termino_contrato: "", afp: "uno", sistema_salud: "fonasa", isapre: "", plan_isapre_uf: "", afecto_afc: true, cargas_familiares: "0",
+};
+g = await llamarAccion(`/rrhh/${S3}`, ID_FICHA, cS1, S3, fichaS3);
+check("supervisor guardando una ficha directo: rechazado", rechazada(g), { status: g.status, redirect: g.redirect, resultado: g.resultado });
+g = await llamarAccion(`/rrhh/${S3}`, ID_FICHA, cC, S3, { ...fichaS3, rut: "33.333.333-4" });
+check("adm. contrato con RUT inválido: error con nombre", g.resultado?.ok === false && g.resultado.errores?.[0]?.includes("RUT no es válido"), g.resultado);
+g = await llamarAccion(`/rrhh/${S3}`, ID_FICHA, cC, S3, { ...fichaS3, rut: "11.111.111-1" });
+check("adm. contrato con RUT de otro trabajador: rechazado", g.resultado?.ok === false && /otro trabajador/.test(g.resultado.mensaje), g.resultado);
+g = await llamarAccion(`/rrhh/${S3}`, ID_FICHA, cC, S3, fichaS3);
+check("adm. contrato crea la ficha de S3", g.resultado?.ok === true, g.resultado ?? g.status);
+r = await pedir("/dashboard", cS3);
+check("…y ahora S3 tiene el link Mis datos", linkMisDatos(r.html));
+
+const { data: tipo } = await srv.from("rrhh_tipos_documento").select("id").eq("nombre", "Otros").single();
+g = await llamarAccion(`/rrhh/${S3}`, ID_DOCS, cC, { personalId: S3, tipoId: tipo.id, archivos: [{ ruta: `${S1}/prueba-contrato.pdf`, nombre: "robado.pdf", tamano: 15 }] });
+check("registrar como de S3 un archivo de la carpeta de S1: rechazado", g.resultado?.ok === false && /no corresponde/.test(g.resultado.mensaje), g.resultado);
+g = await llamarAccion(`/rrhh/${S3}`, ID_DOCS, cC, { personalId: S3, tipoId: tipo.id, archivos: [{ ruta: `${S3}/no-existe.pdf`, nombre: "fantasma.pdf", tamano: 15 }] });
+check("registrar un archivo que no está en el bucket: rechazado", g.resultado?.ok === false && /no se alcanzó a subir/.test(g.resultado.mensaje), g.resultado);
 
 console.log(`\n${fallas === 0 ? "TODO OK" : fallas + " FALLA(S)"}`);
 process.exit(fallas ? 1 : 0);

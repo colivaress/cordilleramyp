@@ -67,12 +67,16 @@ export function leerCodigoPeriodo(codigo: string): { anio: number; mes: number }
  *   - "uf":    decimal > 0 (UF o topes en UF).
  *   - "pesos": entero > 0.
  *   - "tasa":  porcentaje, 0 ≤ x < 100 (10 = 10%).
+ *   - "horas": horas semanales, 0 < x ≤ 60.
  */
 export const CAMPOS = [
   { clave: "uf_mes_anterior", tipo: "uf", grupo: "indicadores", etiqueta: "UF del último día del mes anterior" },
   { clave: "uf_mes", tipo: "uf", grupo: "indicadores", etiqueta: "UF del último día del mes" },
   { clave: "utm", tipo: "pesos", grupo: "indicadores", etiqueta: "UTM" },
   { clave: "imm", tipo: "pesos", grupo: "indicadores", etiqueta: "Ingreso mínimo mensual" },
+  // §8: la jornada legal cambia por ley (Ley 21.561, en transición a 40 h). Va
+  // por período para que un mes ya liquidado conserve la que regía.
+  { clave: "jornada_ordinaria_horas", tipo: "horas", grupo: "indicadores", etiqueta: "Jornada ordinaria legal (horas semanales)" },
   { clave: "tope_imponible_afp_uf", tipo: "uf", grupo: "topes", etiqueta: "Tope imponible AFP y salud (UF)" },
   { clave: "tope_imponible_afc_uf", tipo: "uf", grupo: "topes", etiqueta: "Tope imponible seguro de cesantía (UF)" },
   { clave: "tasa_afp_obligatoria", tipo: "tasa", grupo: "trabajador", etiqueta: "Cotización obligatoria AFP" },
@@ -198,6 +202,7 @@ export function letraTramo(i: number): string {
 function validarValor(tipo: (typeof CAMPOS)[number]["tipo"], n: number): boolean {
   if (tipo === "pesos") return Number.isInteger(n) && n > 0;
   if (tipo === "uf") return n > 0;
+  if (tipo === "horas") return n > 0 && n <= 60;
   return n >= 0 && n < 100;
 }
 
@@ -205,6 +210,7 @@ const MENSAJE_RANGO: Record<(typeof CAMPOS)[number]["tipo"], string> = {
   pesos: "debe ser un monto en pesos, sin decimales",
   uf: "debe ser mayor que 0",
   tasa: "debe ser un porcentaje entre 0 y 100 (10 = 10%)",
+  horas: "deben ser horas semanales, entre 0 y 60",
 };
 
 // ─────────────────────────────────────────────────────────────────────────

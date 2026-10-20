@@ -8,7 +8,7 @@ import type { Database } from "@/lib/supabase/database.types";
  */
 export async function firmarRutas(
   supabase: SupabaseClient<Database>,
-  bucket: "firmas" | "fallas",
+  bucket: "firmas" | "fallas" | "documentos-rrhh",
   rutas: (string | null | undefined)[],
   expiraSegundos = 3600,
 ): Promise<Record<string, string>> {

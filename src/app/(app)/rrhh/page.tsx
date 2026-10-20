@@ -3,9 +3,20 @@ import { createClient } from "@/lib/supabase/server";
 import { buttonVariants } from "@/components/ui/button";
 import { formatearCLP } from "@/lib/dinero";
 import { nombreCompleto } from "@/lib/mensajes";
+import { formatearRut, normalizarRut } from "@/lib/rut";
 import { puedeEditarMontos } from "@/lib/rrhh/acceso";
 import { requireModuloRrhh } from "@/lib/rrhh/guardas";
-import { ETIQUETA_ROL } from "@/lib/tipos";
+import {
+  ETIQUETA_TIPO_CONTRATO,
+  TIPOS_CONTRATO,
+  fechaCorta,
+  hoyChile,
+  iniciales,
+  vigenteEn,
+} from "@/lib/rrhh/ficha";
+import { nativeSelectClassName } from "@/components/ui/native-select";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -21,99 +32,183 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-export default async function RrhhPage() {
-  // Guarda en la página, no en un layout (ver guardas.ts). La RLS de
-  // rrhh_remuneracion_base dice lo mismo: un supervisor que llegara acá
-  // igual no vería montos ajenos.
+// Listado de colaboradores (spec RRHH §16.8). Pestañas Activos /
+// Desvinculados en vez de un filtro escondido: la desvinculación es baja
+// lógica y el histórico de un desvinculado no se borra nunca.
+export default async function RrhhPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ pestana?: string; q?: string; area?: string; contrato?: string }>;
+}) {
+  // Guarda en la página, no en un layout (ver guardas.ts). La RLS dice lo
+  // mismo: un supervisor que llegara acá igual no vería montos ajenos.
   const { perfil } = await requireModuloRrhh();
+  const { pestana, q = "", area = "", contrato = "" } = await searchParams;
+  const desvinculados = pestana === "desvinculados";
+  const hoy = hoyChile();
   const supabase = await createClient();
 
-  const [{ data: personal }, { data: remuneraciones }] = await Promise.all([
-    supabase
-      .from("personal")
-      .select("id, nombre, apellido, email, rol")
-      .eq("activo", true)
-      .order("nombre"),
+  const [{ data: personal }, { data: fichas }, { data: remuneraciones }] = await Promise.all([
+    supabase.from("personal").select("id, nombre, apellido, email, rol, activo").order("nombre"),
+    supabase.from("rrhh_fichas").select("personal_id, rut, cargo, area, fecha_ingreso, tipo_contrato, fecha_desvinculacion"),
     supabase
       .from("rrhh_remuneracion_base")
-      .select("personal_id, liquido_pactado, vigente_desde")
-      .lte("vigente_desde", new Date().toISOString().slice(0, 10))
-      .order("vigente_desde", { ascending: false }),
+      .select("personal_id, liquido_pactado, vigente_desde, created_at")
+      .lte("vigente_desde", hoy),
   ]);
 
-  // Vienen de la más nueva a la más vieja: la primera de cada trabajador es
-  // la vigente hoy.
-  const vigente = new Map<string, number>();
-  for (const r of remuneraciones ?? []) {
-    if (!vigente.has(r.personal_id)) vigente.set(r.personal_id, r.liquido_pactado);
-  }
-  const trabajadores = personal ?? [];
+  const fichaDe = new Map((fichas ?? []).map((f) => [f.personal_id, f]));
+  const remDe = new Map<string, NonNullable<typeof remuneraciones>>();
+  for (const r of remuneraciones ?? []) remDe.set(r.personal_id, [...(remDe.get(r.personal_id) ?? []), r]);
+
+  const buscado = q.trim().toLowerCase();
+  const rutBuscado = normalizarRut(q);
+  const todos = (personal ?? []).filter((p) => p.activo || fichaDe.has(p.id));
+  const filas = todos.filter((p) => {
+    const f = fichaDe.get(p.id);
+    if (!!f?.fecha_desvinculacion !== desvinculados) return false;
+    if (area && f?.area !== area) return false;
+    if (contrato && f?.tipo_contrato !== contrato) return false;
+    if (!buscado) return true;
+    return (
+      nombreCompleto(p.nombre, p.apellido).toLowerCase().includes(buscado) ||
+      (p.email ?? "").toLowerCase().includes(buscado) ||
+      (rutBuscado.length >= 3 && (f?.rut ?? "").includes(rutBuscado))
+    );
+  });
+  const areas = [...new Set((fichas ?? []).map((f) => f.area).filter((a): a is string => !!a))].sort();
+  const cuantosDesvinculados = todos.filter((p) => fichaDe.get(p.id)?.fecha_desvinculacion).length;
+  const pestanaUrl = (d: boolean) => (d ? "/rrhh?pestana=desvinculados" : "/rrhh");
 
   return (
     <div className="space-y-6">
-      {/* Parámetros previsionales: solo administrador (spec RRHH §3). La
-          página tiene su propia guarda; esto solo evita mostrar una puerta
-          cerrada al administrador de contrato. */}
-      {puedeEditarMontos(perfil.rol) && (
-        <div className="flex justify-end">
-          <Link
-            href="/rrhh/parametros"
-            className={buttonVariants({ variant: "outline" })}
-          >
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Link href="/rrhh/jornadas" className={buttonVariants({ variant: "outline" })}>
+          Jornadas
+        </Link>
+        <Link href="/rrhh/tipos-documento" className={buttonVariants({ variant: "outline" })}>
+          Tipos de documento
+        </Link>
+        {/* Parámetros previsionales: solo administrador (spec RRHH §3). La
+            página tiene su propia guarda; esto solo evita mostrar una puerta
+            cerrada al administrador de contrato. */}
+        {puedeEditarMontos(perfil.rol) && (
+          <Link href="/rrhh/parametros" className={buttonVariants({ variant: "outline" })}>
             Parámetros previsionales
           </Link>
-        </div>
-      )}
+        )}
+      </div>
       <Card>
         <CardHeader>
           <CardTitle>RRHH</CardTitle>
           <CardDescription>
-            Trabajadores activos de Cordillera M&amp;P y su sueldo líquido
-            pactado vigente.
+            Trabajadores de Cordillera M&amp;P y su sueldo líquido pactado
+            vigente.
             {!puedeEditarMontos(perfil.rol) &&
               " Puedes ver los montos, pero solo un administrador puede modificarlos."}
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          {trabajadores.length === 0 ? (
+        <CardContent className="space-y-4">
+          <nav className="flex gap-1 border-b" aria-label="Estado del trabajador">
+            {[false, true].map((d) => (
+              <Link
+                key={String(d)}
+                href={pestanaUrl(d)}
+                aria-current={d === desvinculados ? "page" : undefined}
+                className={cn(
+                  "-mb-px inline-flex min-h-11 items-center border-b-2 px-4 text-sm font-medium",
+                  d === desvinculados
+                    ? "border-brand-600 text-brand-700"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {d ? `Desvinculados (${cuantosDesvinculados})` : `Activos (${todos.length - cuantosDesvinculados})`}
+              </Link>
+            ))}
+          </nav>
+
+          <form className="flex flex-wrap items-end gap-2" action="/rrhh">
+            {desvinculados && <input type="hidden" name="pestana" value="desvinculados" />}
+            <Input name="q" defaultValue={q} placeholder="Buscar por nombre, RUT o correo" className="w-full sm:w-72" />
+            <select name="area" defaultValue={area} className={nativeSelectClassName} aria-label="Área">
+              <option value="">Todas las áreas</option>
+              {areas.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+            <select name="contrato" defaultValue={contrato} className={nativeSelectClassName} aria-label="Tipo de contrato">
+              <option value="">Todos los contratos</option>
+              {TIPOS_CONTRATO.map((t) => (
+                <option key={t} value={t}>
+                  {ETIQUETA_TIPO_CONTRATO[t]}
+                </option>
+              ))}
+            </select>
+            <button type="submit" className={buttonVariants({ variant: "outline" })}>
+              Filtrar
+            </button>
+          </form>
+
+          {filas.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No hay trabajadores activos.
+              {desvinculados ? "No hay trabajadores desvinculados." : "No hay trabajadores que coincidan."}
             </p>
           ) : (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Trabajador</TableHead>
-                    <TableHead>Rol</TableHead>
+                    <TableHead>Colaborador</TableHead>
+                    <TableHead>RUT</TableHead>
+                    <TableHead>Cargo</TableHead>
+                    <TableHead>Área</TableHead>
+                    <TableHead>Ingreso</TableHead>
                     <TableHead className="text-right">Líquido pactado</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {trabajadores.map((t) => {
-                    const liquido = vigente.get(t.id);
+                  {filas.map((t) => {
+                    const f = fichaDe.get(t.id);
+                    const rem = vigenteEn(remDe.get(t.id) ?? [], hoy);
                     return (
                       <TableRow key={t.id}>
                         <TableCell>
-                          <div>{nombreCompleto(t.nombre, t.apellido)}</div>
-                          {t.email && (
-                            <div className="text-xs text-muted-foreground">
-                              {t.email}
-                            </div>
+                          <Link href={`/rrhh/${t.id}`} className="flex items-center gap-3">
+                            <span
+                              aria-hidden
+                              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700"
+                            >
+                              {iniciales(t.nombre, t.apellido)}
+                            </span>
+                            <span>
+                              <span className="block font-medium text-brand-700 underline-offset-4 hover:underline">
+                                {nombreCompleto(t.nombre, t.apellido)}
+                              </span>
+                              {t.email && <span className="block text-xs text-muted-foreground">{t.email}</span>}
+                            </span>
+                          </Link>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {f ? formatearRut(f.rut) : <Badge className="bg-warning-100 text-warning-700">Sin ficha</Badge>}
+                        </TableCell>
+                        <TableCell>{f?.cargo ?? "—"}</TableCell>
+                        <TableCell>{f?.area ?? "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {f ? fechaCorta(f.fecha_ingreso) : "—"}
+                          {f?.fecha_desvinculacion && (
+                            <span className="block text-xs text-muted-foreground">
+                              hasta {fechaCorta(f.fecha_desvinculacion)}
+                            </span>
                           )}
                         </TableCell>
-                        <TableCell>{ETIQUETA_ROL[t.rol]}</TableCell>
                         <TableCell className="text-right tabular-nums">
-                          {liquido === undefined ? (
-                            <span className="text-muted-foreground">
-                              Sin cargar
-                            </span>
-                          ) : (
-                            formatearCLP(liquido)
-                          )}
+                          {rem ? formatearCLP(rem.liquido_pactado) : <span className="text-muted-foreground">Sin cargar</span>}
                         </TableCell>
                       </TableRow>
                     );
