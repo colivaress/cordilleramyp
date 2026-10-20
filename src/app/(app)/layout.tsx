@@ -3,6 +3,7 @@ import { getSesion } from "@/lib/auth";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Logo } from "@/components/Logo";
+import { puedeEntrarModuloRrhh } from "@/lib/rrhh/acceso";
 
 export default async function AppLayout({
   children,
@@ -75,6 +76,17 @@ export default async function AppLayout({
                   Configuración
                 </Link>
               </>
+            )}
+            {/* Módulo RRHH: mismo alcance que su ruta (requireModuloRrhh) y
+                que la RLS de las tablas rrhh_*. Ocultar el link no es la
+                protección; es solo para no mostrar una puerta cerrada. */}
+            {puedeEntrarModuloRrhh(perfil.rol) && (
+              <Link
+                href="/rrhh"
+                className={buttonVariants({ variant: "ghost" })}
+              >
+                RRHH
+              </Link>
             )}
             {/* §2.6 pedía este link "Nueva inspección" en la barra, solo para
                 supervisor. Se saca por pedido del cliente (2026-10-02): el
