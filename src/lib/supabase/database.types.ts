@@ -367,6 +367,121 @@ export type Database = {
           },
         ]
       }
+      rrhh_afp_periodo: {
+        Row: {
+          afp: Database["public"]["Enums"]["rrhh_afp"]
+          anio: number
+          comision: number
+          mes: number
+        }
+        Insert: {
+          afp: Database["public"]["Enums"]["rrhh_afp"]
+          anio: number
+          comision: number
+          mes: number
+        }
+        Update: {
+          afp?: Database["public"]["Enums"]["rrhh_afp"]
+          anio?: number
+          comision?: number
+          mes?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rrhh_afp_periodo_anio_mes_fkey"
+            columns: ["anio", "mes"]
+            isOneToOne: false
+            referencedRelation: "rrhh_parametros_periodo"
+            referencedColumns: ["anio", "mes"]
+          },
+        ]
+      }
+      rrhh_parametros_periodo: {
+        Row: {
+          anio: number
+          created_at: string
+          imm: number
+          mes: number
+          tasa_afc_empleador_indefinido: number
+          tasa_afc_empleador_plazo_fijo: number
+          tasa_afc_trabajador_indefinido: number
+          tasa_afp_obligatoria: number
+          tasa_expectativa_vida: number
+          tasa_mutual_adicional: number
+          tasa_mutual_base: number
+          tasa_rentabilidad_protegida: number
+          tasa_salud_minima: number
+          tasa_sis: number
+          tope_imponible_afc_uf: number
+          tope_imponible_afp_uf: number
+          tramos_asignacion_familiar: Json
+          tramos_impuesto: Json
+          uf_mes: number
+          uf_mes_anterior: number
+          updated_at: string
+          updated_by: string | null
+          utm: number
+        }
+        Insert: {
+          anio: number
+          created_at?: string
+          imm: number
+          mes: number
+          tasa_afc_empleador_indefinido: number
+          tasa_afc_empleador_plazo_fijo: number
+          tasa_afc_trabajador_indefinido: number
+          tasa_afp_obligatoria: number
+          tasa_expectativa_vida: number
+          tasa_mutual_adicional: number
+          tasa_mutual_base: number
+          tasa_rentabilidad_protegida: number
+          tasa_salud_minima: number
+          tasa_sis: number
+          tope_imponible_afc_uf: number
+          tope_imponible_afp_uf: number
+          tramos_asignacion_familiar: Json
+          tramos_impuesto: Json
+          uf_mes: number
+          uf_mes_anterior: number
+          updated_at?: string
+          updated_by?: string | null
+          utm: number
+        }
+        Update: {
+          anio?: number
+          created_at?: string
+          imm?: number
+          mes?: number
+          tasa_afc_empleador_indefinido?: number
+          tasa_afc_empleador_plazo_fijo?: number
+          tasa_afc_trabajador_indefinido?: number
+          tasa_afp_obligatoria?: number
+          tasa_expectativa_vida?: number
+          tasa_mutual_adicional?: number
+          tasa_mutual_base?: number
+          tasa_rentabilidad_protegida?: number
+          tasa_salud_minima?: number
+          tasa_sis?: number
+          tope_imponible_afc_uf?: number
+          tope_imponible_afp_uf?: number
+          tramos_asignacion_familiar?: Json
+          tramos_impuesto?: Json
+          uf_mes?: number
+          uf_mes_anterior?: number
+          updated_at?: string
+          updated_by?: string | null
+          utm?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rrhh_parametros_periodo_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rrhh_remuneracion_base: {
         Row: {
           created_at: string
@@ -725,6 +840,14 @@ export type Database = {
         | "administrador"
         | "conductor"
         | "administrador_contrato"
+      rrhh_afp:
+        | "capital"
+        | "cuprum"
+        | "habitat"
+        | "modelo"
+        | "planvital"
+        | "provida"
+        | "uno"
       ticket_estado:
         | "en_revision"
         | "finalizada_con_observaciones"
@@ -868,6 +991,15 @@ export const Constants = {
         "administrador",
         "conductor",
         "administrador_contrato",
+      ],
+      rrhh_afp: [
+        "capital",
+        "cuprum",
+        "habitat",
+        "modelo",
+        "planvital",
+        "provida",
+        "uno",
       ],
       ticket_estado: [
         "en_revision",

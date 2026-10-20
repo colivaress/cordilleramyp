@@ -20,6 +20,7 @@
 
 import { execSync } from "node:child_process";
 import { createClient } from "@supabase/supabase-js";
+import { filasFicticias } from "../src/lib/rrhh/parametros-ficticios.prueba.ts";
 
 const env = Object.fromEntries(
   execSync("npx supabase status -o env", { encoding: "utf8" })
@@ -159,6 +160,52 @@ v = await A.from("rrhh_remuneracion_base").delete().eq("personal_id", P.S1.id).s
 check("Nadie borra remuneraciones (ni admin): 0 filas", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
 v = (await srv.from("rrhh_remuneracion_base").select("liquido_pactado").eq("personal_id", P.S1.id).single()).data;
 check("El sueldo de S1 quedó en lo que fijó el administrador", v?.liquido_pactado === 810000, v);
+
+// Valores FICTICIOS, del archivo que lo dice en el nombre: solo prueban permisos.
+const periodo = (anio, mes) => filasFicticias(anio, mes).periodo;
+const afps = (anio, mes, comision) => filasFicticias(anio, mes).afps.map((a) => ({ ...a, comision }));
+
+console.log("\n— rrhh_parametros_periodo / rrhh_afp_periodo —");
+v = await A.from("rrhh_parametros_periodo").upsert(periodo(2026, 10)).select("utm").single();
+check("Administrador carga un período con RETURNING", !v.error && v.data?.utm === 50000, v.error?.message ?? v.data);
+v = await A.from("rrhh_afp_periodo").upsert(afps(2026, 10, 0.5)).select("afp");
+check("Administrador carga las 7 comisiones de AFP", !v.error && v.data.length === 7, v.error?.message ?? v.data?.length);
+v = await A.from("rrhh_parametros_periodo").upsert({ ...periodo(2026, 10), utm: 50001 }).select("utm").single();
+check("Administrador corrige el período (upsert)", !v.error && v.data?.utm === 50001, v.error?.message ?? v.data);
+v = await A.from("rrhh_parametros_periodo").select("uf_mes, tasa_sis, tramos_impuesto").eq("anio", 2026).eq("mes", 10).single();
+check(
+  "numeric llega como número, no como texto (lo exige desdeBase)",
+  typeof v.data?.uf_mes === "number" && v.data.uf_mes === 10100.25 && v.data.tasa_sis === 1.5,
+  v.data && { uf_mes: v.data.uf_mes, tasa_sis: v.data.tasa_sis },
+);
+v = await C.from("rrhh_parametros_periodo").select("anio");
+check("Adm. contrato lee los períodos", !v.error && v.data.length === 1, v.error?.message ?? v.data?.length);
+v = await C.from("rrhh_afp_periodo").select("afp");
+check("Adm. contrato lee las comisiones", !v.error && v.data.length === 7, v.error?.message ?? v.data?.length);
+v = await C.from("rrhh_parametros_periodo").insert(periodo(2026, 11));
+check("Adm. contrato no puede cargar un período", !!v.error, v.error?.message);
+v = await C.from("rrhh_parametros_periodo").update({ utm: 1 }).eq("anio", 2026).select();
+check("Adm. contrato no puede corregir un período (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await C.from("rrhh_afp_periodo").update({ comision: 9 }).eq("anio", 2026).select();
+check("Adm. contrato no puede cambiar comisiones (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await S1.from("rrhh_parametros_periodo").select("anio");
+check("Supervisor no lee períodos", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await S1.from("rrhh_afp_periodo").select("afp");
+check("Supervisor no lee comisiones", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await S1.from("rrhh_parametros_periodo").insert(periodo(2026, 12));
+check("Supervisor no puede cargar un período", !!v.error, v.error?.message);
+v = await S1.from("rrhh_afp_periodo").insert(afps(2026, 10, 9)[0]);
+check("Supervisor no puede escribir comisiones", !!v.error, v.error?.message);
+v = await anon.from("rrhh_parametros_periodo").select("anio");
+check("Anónimo no lee períodos", !!v.error || v.data.length === 0, v.error?.message ?? v.data.length);
+v = await A.from("rrhh_parametros_periodo").delete().eq("anio", 2026).select();
+check("Nadie borra un período (ni admin): 0 filas", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await A.from("rrhh_afp_periodo").insert({ anio: 2027, mes: 1, afp: "uno", comision: 1 });
+check("Una comisión sin su período se rechaza (FK)", !!v.error, v.error?.message);
+v = await A.from("rrhh_parametros_periodo").insert({ ...periodo(2027, 1), tramos_impuesto: {} });
+check("Tramos que no son un arreglo se rechazan (check)", !!v.error, v.error?.message);
+v = (await srv.from("rrhh_afp_periodo").select("comision").eq("anio", 2026).eq("afp", "uno").single()).data;
+check("La comisión quedó en lo que fijó el administrador", v?.comision === 0.5, v);
 
 console.log("\n— personal: lectura —");
 v = await pers(S3);
