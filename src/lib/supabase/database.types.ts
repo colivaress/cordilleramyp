@@ -367,6 +367,48 @@ export type Database = {
           },
         ]
       }
+      rrhh_remuneracion_base: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          liquido_pactado: number
+          personal_id: string
+          vigente_desde: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          liquido_pactado: number
+          personal_id: string
+          vigente_desde: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          liquido_pactado?: number
+          personal_id?: string
+          vigente_desde?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rrhh_remuneracion_base_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rrhh_remuneracion_base_personal_id_fkey"
+            columns: ["personal_id"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ticket_checklist_fotos: {
         Row: {
           created_at: string

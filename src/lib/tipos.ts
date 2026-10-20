@@ -78,3 +78,10 @@ export const ETIQUETA_ITEM: Record<ItemEstado, string> = {
   no_conforme: "No conforme",
   no_aplica: "No aplica",
 };
+
+export const ETIQUETA_ROL: Record<RolUsuario, string> = {
+  administrador: "Administrador",
+  administrador_contrato: "Administrador de contrato",
+  supervisor: "Supervisor",
+  conductor: "Conductor",
+};
