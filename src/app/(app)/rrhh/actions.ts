@@ -47,16 +47,19 @@ export async function guardarFicha(
   if (!r.ok) return { ok: false, mensaje: "Revisa los datos marcados antes de guardar.", errores: r.errores };
 
   const supabase = await createClient();
+  // El contrato y la nómina del banco (§11) necesitan el RUT, que vive en
+  // la cuenta de la persona: sin él no se crea el contrato.
+  const { data: ruts } = await supabase.rpc("rrhh_ruts");
+  if (!ruts?.some((x) => x.personal_id === personalId))
+    return { ok: false, mensaje: "Primero registra el RUT de esta persona en \"Cuenta y acceso\"." };
+
   const { error } = await supabase.from("rrhh_fichas").upsert({
     personal_id: personalId,
     ...r.valor,
     updated_at: new Date().toISOString(),
     updated_by: perfil.id,
   });
-  if (error) {
-    if (error.code === "23505") return { ok: false, mensaje: "Ese RUT ya está en la ficha de otro trabajador." };
-    return errorInesperado("guardarFicha", error);
-  }
+  if (error) return errorInesperado("guardarFicha", error);
   revalidarFicha(personalId);
   return { ok: true };
 }
@@ -115,7 +118,13 @@ export async function asignarJornada(input: {
   return { ok: true };
 }
 
-/** Baja lógica (§16.8): la ficha y su historia quedan; cambia de pestaña. */
+/**
+ * Baja lógica (§16.8): la ficha y su historia quedan; cambia de pestaña Y
+ * se corta el acceso a la app. Las dos cosas las escribe rrhh_desvincular()
+ * en una sola transacción: fecha_desvinculacion es el hecho, activo la
+ * bandera de acceso derivada (ver la migración 20261022020000). Nunca
+ * escribir una sin la otra: la base lo rechaza.
+ */
 export async function desvincular(input: {
   personalId: string;
   fecha: string;
@@ -123,47 +132,39 @@ export async function desvincular(input: {
 }): Promise<ResultadoAccion> {
   const { perfil } = await requireModuloRrhh();
   if (!UUID.test(input.personalId)) return NO_VALIDO;
+  if (input.personalId === perfil.id) return { ok: false, mensaje: "No puedes desvincularte a ti mismo." };
   const motivo = input.motivo.trim();
   if (!fechaValida(input.fecha)) return { ok: false, mensaje: "Elige la fecha de desvinculación." };
   if (!motivo) return { ok: false, mensaje: "Escribe el motivo de la desvinculación." };
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("rrhh_fichas")
-    .update({
-      fecha_desvinculacion: input.fecha,
-      motivo_desvinculacion: motivo,
-      updated_at: new Date().toISOString(),
-      updated_by: perfil.id,
-    })
-    .eq("personal_id", input.personalId)
-    .select("personal_id");
-  if (error) {
-    if (error.code === "23514")
-      return { ok: false, mensaje: "La fecha de desvinculación no puede ser anterior al ingreso." };
-    return errorInesperado("desvincular", error);
-  }
-  if (!data.length) return { ok: false, mensaje: "Primero hay que guardar la ficha del trabajador." };
+  const { error } = await supabase.rpc("rrhh_desvincular", {
+    p_personal_id: input.personalId,
+    p_fecha: input.fecha,
+    p_motivo: motivo,
+  });
+  if (error) return errorDesvinculacion("desvincular", error);
   revalidarFicha(input.personalId);
   return { ok: true };
 }
 
+/** Deshace la desvinculación y devuelve el acceso, en una transacción. */
 export async function reincorporar(personalId: string): Promise<ResultadoAccion> {
-  const { perfil } = await requireModuloRrhh();
+  await requireModuloRrhh();
   if (!UUID.test(personalId)) return NO_VALIDO;
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("rrhh_fichas")
-    .update({
-      fecha_desvinculacion: null,
-      motivo_desvinculacion: null,
-      updated_at: new Date().toISOString(),
-      updated_by: perfil.id,
-    })
-    .eq("personal_id", personalId);
-  if (error) return errorInesperado("reincorporar", error);
+  const { error } = await supabase.rpc("rrhh_reincorporar", { p_personal_id: personalId });
+  if (error) return errorDesvinculacion("reincorporar", error);
   revalidarFicha(personalId);
   return { ok: true };
+}
+
+/** Los mensajes de rrhh_desvincular()/rrhh_reincorporar() son para leer. */
+function errorDesvinculacion(contexto: string, error: { code?: string; message: string }): ResultadoAccion {
+  if (error.code === "P0002" || error.code === "42501") return { ok: false, mensaje: error.message };
+  if (error.code === "23514")
+    return { ok: false, mensaje: "La fecha de desvinculación no puede ser anterior al ingreso." };
+  return errorInesperado(contexto, error);
 }
 
 /**

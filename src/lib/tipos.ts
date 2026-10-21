@@ -1,6 +1,15 @@
 import type { Tables, Enums } from "@/lib/supabase/database.types";
 
-export type Personal = Tables<"personal">;
+/**
+ * Fila de personal SIN el RUT: la columna no es legible con un select
+ * directo (grants por columna, migración 20261022020000); se lee con la
+ * función rrhh_ruts(). Ver COLUMNAS_PERSONAL.
+ */
+export type Personal = Omit<Tables<"personal">, "rut">;
+
+/** Las columnas legibles de personal, para los select (nunca "*"). */
+export const COLUMNAS_PERSONAL =
+  "id, nombre, apellido, rol, telefono, email, activo, created_at, user_id, fecha_nacimiento";
 export type Ticket = Tables<"tickets">;
 export type TicketRevision = Tables<"ticket_revisiones">;
 export type ChecklistItem = Tables<"checklist_items">;
@@ -84,4 +93,5 @@ export const ETIQUETA_ROL: Record<RolUsuario, string> = {
   administrador_contrato: "Administrador de contrato",
   supervisor: "Supervisor",
   conductor: "Conductor",
+  trabajador: "Trabajador",
 };

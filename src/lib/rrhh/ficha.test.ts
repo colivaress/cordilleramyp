@@ -18,11 +18,10 @@ import {
 } from "./jornadas.ts";
 import { mimeDocumento, nombreSeguro, problemaDocumento, rutaDocumento, rutaEsDe } from "./documentos.ts";
 
-// RUT de prueba con dígito verificador correcto, inventado.
+const CARGO = "0b8f6c3e-2a41-4c1b-9d5e-7f0a1b2c3d4e";
 const fichaBase = (): FormularioFicha => ({
-  rut: "11.111.111-1",
-  cargo: "Supervisor de encarpe",
-  area: "Operaciones",
+  cargo_id: CARGO,
+  area_id: "",
   fecha_ingreso: "2019-03-15",
   tipo_contrato: "indefinido",
   fecha_termino_contrato: "",
@@ -34,19 +33,24 @@ const fichaBase = (): FormularioFicha => ({
   cargas_familiares: "2",
 });
 
-test("ficha válida: RUT normalizado y sin datos de Isapre si es Fonasa", () => {
+test("ficha válida: área opcional y sin datos de Isapre si es Fonasa", () => {
   const r = leerFicha({ ...fichaBase(), isapre: "Colmena", plan_isapre_uf: "3,5" });
   assert.equal(r.ok, true);
   if (!r.ok) return;
-  assert.equal(r.valor.rut, "111111111");
+  assert.equal(r.valor.cargo_id, CARGO);
+  assert.equal(r.valor.area_id, null);
   assert.equal(r.valor.isapre, null);
   assert.equal(r.valor.plan_isapre_uf, null);
   assert.equal(r.valor.cargas_familiares, 2);
 });
 
-test("ficha: RUT con dígito verificador malo se rechaza", () => {
-  const r = leerFicha({ ...fichaBase(), rut: "11.111.111-2" });
-  assert.deepEqual(r, { ok: false, errores: ["El RUT no es válido (revisa el dígito verificador)."] });
+test("ficha: el cargo sale del catálogo (un texto libre se rechaza)", () => {
+  let r = leerFicha({ ...fichaBase(), cargo_id: "" });
+  assert.deepEqual(r, { ok: false, errores: ["Elige el cargo."] });
+  r = leerFicha({ ...fichaBase(), cargo_id: "Encarpador" });
+  assert.deepEqual(r, { ok: false, errores: ["Elige el cargo."] });
+  r = leerFicha({ ...fichaBase(), area_id: "Operaciones" });
+  assert.deepEqual(r, { ok: false, errores: ["El área elegida no es válida."] });
 });
 
 test("ficha: plazo fijo exige término; indefinido no lo admite", () => {

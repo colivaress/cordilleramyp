@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { getSesion } from "@/lib/auth";
+import { requireOperativo } from "@/lib/auth";
 import {
   estadoTrasChecklist,
   puedeReinspeccionar,
@@ -383,7 +383,7 @@ async function cerrarRevision(
 export async function iniciarInspeccion(
   input: IniciarInspeccionInput,
 ): Promise<ResultadoAccion<InspeccionResultado>> {
-  const { perfil } = await getSesion();
+  const { perfil } = await requireOperativo();
   if (perfil.rol !== "supervisor")
     return { ok: false, mensaje: "Solo un supervisor puede crear inspecciones." };
   const supabase = await createClient();
@@ -453,7 +453,7 @@ export async function iniciarInspeccion(
     return {
       ok: false,
       mensaje:
-        "No tienes permiso para realizar este tipo de inspección. Pídele a un administrador que te lo asigne en Usuarios.",
+        "No tienes permiso para realizar este tipo de inspección. Pídele a un administrador que te lo asigne en tu ficha de RRHH.",
     };
 
   // Defensa en profundidad — tipo inmutable desde que el ticket existe: se
@@ -672,7 +672,7 @@ export async function obtenerEstadoRevision(input: {
   ticketId: string;
   revisionNumero: number;
 }): Promise<ResultadoAccion<EstadoRevisionHidratado>> {
-  const { perfil } = await getSesion();
+  const { perfil } = await requireOperativo();
   const supabase = await createClient();
 
   const auth = await autorizarRevisionEnCurso(
@@ -776,7 +776,7 @@ export async function obtenerEstadoRevision(input: {
 export async function guardarRespuestaItem(
   input: GuardarRespuestaItemInput,
 ): Promise<ResultadoAccion<{ guardado: boolean }>> {
-  const { perfil } = await getSesion();
+  const { perfil } = await requireOperativo();
   const supabase = await createClient();
   const auth = await autorizarRevisionEnCurso(
     supabase,
@@ -841,7 +841,7 @@ export async function marcarItemsConforme(input: {
   itemKeys: string[];
 }): Promise<ResultadoAccion> {
   if (input.itemKeys.length === 0) return { ok: true };
-  const { perfil } = await getSesion();
+  const { perfil } = await requireOperativo();
   const supabase = await createClient();
   const auth = await autorizarRevisionEnCurso(
     supabase,
@@ -898,7 +898,7 @@ export async function guardarFotoChecklistItem(input: {
   /** null = quitar esa foto. */
   path: string | null;
 }): Promise<ResultadoAccion<{ guardado: boolean }>> {
-  const { perfil } = await getSesion();
+  const { perfil } = await requireOperativo();
   const supabase = await createClient();
   const auth = await autorizarRevisionEnCurso(
     supabase,
@@ -973,7 +973,7 @@ export async function guardarObservacionGeneral(input: {
   revisionNumero: number;
   texto: string;
 }): Promise<ResultadoAccion<{ guardado: boolean }>> {
-  const { perfil } = await getSesion();
+  const { perfil } = await requireOperativo();
   const supabase = await createClient();
   const auth = await autorizarRevisionEnCurso(
     supabase,
@@ -1003,7 +1003,7 @@ export async function guardarFirmaRevision(input: {
   quien: "conductor" | "fiscalizador";
   path: string | null;
 }): Promise<ResultadoAccion> {
-  const { perfil } = await getSesion();
+  const { perfil } = await requireOperativo();
   const supabase = await createClient();
   const auth = await autorizarRevisionEnCurso(
     supabase,
@@ -1035,7 +1035,7 @@ export async function guardarFirmaRevision(input: {
 export async function finalizarInspeccion(input: {
   ticketId: string;
 }): Promise<ResultadoAccion<InspeccionResultado>> {
-  const { perfil } = await getSesion();
+  const { perfil } = await requireOperativo();
   const supabase = await createClient();
 
   const { data: ticket } = await supabase
@@ -1125,7 +1125,7 @@ export async function iniciarReinspeccion(input: {
   conductor: string;
   fechaVencimientoISO: string;
 }): Promise<ResultadoAccion<{ ticketId: string; numeroRevision: number }>> {
-  const { perfil } = await getSesion();
+  const { perfil } = await requireOperativo();
   if (perfil.rol !== "supervisor")
     return {
       ok: false,
@@ -1236,7 +1236,7 @@ export async function finalizarReinspeccion(input: {
   ticketId: string;
   revisionNumero: number;
 }): Promise<ResultadoAccion<{ ticketId: string }>> {
-  const { perfil } = await getSesion();
+  const { perfil } = await requireOperativo();
   const supabase = await createClient();
 
   const { data: ticket } = await supabase
@@ -1518,7 +1518,7 @@ async function hayCoincidenciaOcultaPara(
 export async function buscarPorPatente(
   termino: string,
 ): Promise<ResultadoAccion<ResultadoBusquedaPatente>> {
-  const { perfil } = await getSesion();
+  const { perfil } = await requireOperativo();
   if (perfil.rol !== "supervisor")
     return { ok: false, mensaje: "Solo un supervisor puede buscar por patente." };
 

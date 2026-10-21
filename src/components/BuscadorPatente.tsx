@@ -183,7 +183,7 @@ export function BuscadorPatente({
           ) : (
             <>
               No tienes ningún tipo de inspección asignado — pídele a un
-              administrador que te lo asigne en Usuarios. No se puede buscar
+              administrador que te lo asigne en tu ficha de RRHH. No se puede buscar
               nada mientras tanto.
             </>
           )}

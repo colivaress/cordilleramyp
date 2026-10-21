@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getSesion } from "@/lib/auth";
+import { getSesion, inicioDeRol } from "@/lib/auth";
+import { ETIQUETA_ROL } from "@/lib/tipos";
 import { createClient } from "@/lib/supabase/server";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,9 @@ export default async function AppLayout({
     .maybeSingle();
   const esAdmin = perfil.rol === "administrador";
   const esAdminContrato = perfil.rol === "administrador_contrato";
+  // El trabajador tiene "Mis datos" aunque RRHH no le haya cargado la ficha
+  // todavía: es su única pantalla (spec RRHH §16.7).
+  const esTrabajador = perfil.rol === "trabajador";
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
@@ -31,9 +35,10 @@ export default async function AppLayout({
       >
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2">
           {/* §8: el logo (sin texto al lado) lleva al inicio del rol (admin y
-              supervisor: /dashboard, que se renderiza distinto según el rol). */}
+              supervisor: /dashboard, que se renderiza distinto según el rol;
+              trabajador: /mis-datos). */}
           <Link
-            href="/dashboard"
+            href={inicioDeRol(perfil.rol)}
             aria-label="Ir al inicio"
             className="inline-flex cursor-pointer items-center"
           >
@@ -43,9 +48,10 @@ export default async function AppLayout({
             {/* §2.11: "Dashboard" = analítica, exclusivo administrador —
                 administrador_contrato NO entra ahí (explícito en su
                 alcance), aunque sí ve "Inspecciones" (la tabla completa,
-                de solo lectura) y administra Usuarios/Configuración
-                igual que un administrador. El supervisor no ve
-                ninguno de los cuatro. */}
+                de solo lectura) y administra Configuración igual que
+                un administrador. El supervisor no ve
+                ninguno de los cuatro. "Usuarios" ya no existe: la cuenta
+                de cada persona se administra desde su ficha en RRHH. */}
             {esAdmin && (
               <Link
                 href="/dashboard/analitica"
@@ -64,19 +70,13 @@ export default async function AppLayout({
                 </Link>
                 {/* Solicitudes que llegan por el formulario público de la
                     portada (§ "Cotización de fletes"). Mismo alcance que
-                    Usuarios y Configuración: administrador y administrador
+                    Configuración y RRHH: administrador y administrador
                     de contrato; el supervisor no las ve, ni acá ni por RLS. */}
                 <Link
                   href="/cotizaciones"
                   className={buttonVariants({ variant: "ghost" })}
                 >
                   Cotizaciones
-                </Link>
-                <Link
-                  href="/usuarios"
-                  className={buttonVariants({ variant: "ghost" })}
-                >
-                  Usuarios
                 </Link>
                 <Link
                   href="/configuracion"
@@ -97,7 +97,7 @@ export default async function AppLayout({
                 RRHH
               </Link>
             )}
-            {miFicha && (
+            {(miFicha || esTrabajador) && (
               <Link
                 href="/mis-datos"
                 className={buttonVariants({ variant: "ghost" })}
@@ -121,11 +121,7 @@ export default async function AppLayout({
               {perfil.nombre}
             </span>
             <Badge variant={esAdmin || esAdminContrato ? "default" : "secondary"}>
-              {esAdmin
-                ? "Administrador"
-                : esAdminContrato
-                  ? "Administrador de contrato"
-                  : "Supervisor"}
+              {ETIQUETA_ROL[perfil.rol]}
             </Badge>
             <form action="/auth/signout" method="post">
               <Button type="submit" variant="outline">

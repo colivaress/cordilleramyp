@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { requireModuloRrhh } from "@/lib/rrhh/guardas";
-import { TiposDocumentoLista } from "@/components/rrhh/TiposDocumentoLista";
+import { CatalogoLista } from "@/components/rrhh/CatalogoLista";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -36,8 +36,12 @@ export default async function TiposDocumentoPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <TiposDocumentoLista
-            tipos={(tipos ?? []).map((t) => ({ ...t, documentos: cuenta.get(t.id) ?? 0 }))}
+          <CatalogoLista
+            catalogo="tipos-documento"
+            items={(tipos ?? []).map((t) => ({ ...t, usos: cuenta.get(t.id) ?? 0 }))}
+            etiquetaNuevo="Nuevo tipo"
+            etiquetaItem="Tipo"
+            etiquetaUsos="Documentos"
           />
         </CardContent>
       </Card>

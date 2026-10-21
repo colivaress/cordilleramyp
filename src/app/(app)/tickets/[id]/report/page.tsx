@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import Image from "next/image";
-import { getSesion } from "@/lib/auth";
+import { requireOperativo } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { firmarRutas } from "@/lib/storage";
 import { buttonVariants } from "@/components/ui/button";
@@ -47,7 +47,7 @@ export default async function InformePage({
   const { id } = await params;
   const { rev: revParam } = await searchParams;
   // La vista del informe es la misma para supervisor y administrador — §2.6.
-  const { perfil } = await getSesion();
+  const { perfil } = await requireOperativo();
   const esSupervisor = perfil.rol === "supervisor";
   const supabase = await createClient();
 

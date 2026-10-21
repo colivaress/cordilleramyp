@@ -1,5 +1,4 @@
 import type { Enums } from "@/lib/supabase/database.types";
-import { normalizarRut, rutValido } from "../rut.ts";
 import { AFPS, leerDecimal, type Resultado, type RrhhAfp } from "./parametros.ts";
 
 /**
@@ -23,6 +22,7 @@ export const SISTEMAS_SALUD = ["fonasa", "isapre"] as const satisfies readonly S
 export const ETIQUETA_SALUD: Record<SistemaSalud, string> = { fonasa: "Fonasa", isapre: "Isapre" };
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** "AAAA-MM-DD" real (rechaza 2026-02-30). */
 export function fechaValida(texto: string): boolean {
@@ -35,10 +35,11 @@ export function fechaValida(texto: string): boolean {
 // Datos contractuales y previsionales
 // ─────────────────────────────────────────────────────────────────────────
 
+// El RUT ya no es parte de la ficha: identifica a la persona y vive en
+// personal (sección "Cuenta y acceso"). Cargo y área son ids de catálogo.
 export type FormularioFicha = {
-  rut: string;
-  cargo: string;
-  area: string;
+  cargo_id: string;
+  area_id: string;
   fecha_ingreso: string;
   tipo_contrato: string;
   fecha_termino_contrato: string;
@@ -51,9 +52,8 @@ export type FormularioFicha = {
 };
 
 export type FichaValida = {
-  rut: string;
-  cargo: string;
-  area: string | null;
+  cargo_id: string;
+  area_id: string | null;
   fecha_ingreso: string;
   tipo_contrato: TipoContrato;
   fecha_termino_contrato: string | null;
@@ -68,12 +68,9 @@ export type FichaValida = {
 export function leerFicha(f: FormularioFicha): Resultado<FichaValida> {
   const e: string[] = [];
 
-  const rut = normalizarRut(f.rut);
-  if (!f.rut.trim()) e.push("Falta el RUT.");
-  else if (!rutValido(f.rut)) e.push("El RUT no es válido (revisa el dígito verificador).");
-
-  const cargo = f.cargo.trim();
-  if (!cargo) e.push("Falta el cargo.");
+  if (!UUID.test(f.cargo_id)) e.push("Elige el cargo.");
+  const area = f.area_id.trim();
+  if (area && !UUID.test(area)) e.push("El área elegida no es válida.");
 
   if (!fechaValida(f.fecha_ingreso)) e.push("Falta la fecha de ingreso o no es válida.");
 
@@ -111,9 +108,8 @@ export function leerFicha(f: FormularioFicha): Resultado<FichaValida> {
   return {
     ok: true,
     valor: {
-      rut,
-      cargo,
-      area: f.area.trim() || null,
+      cargo_id: f.cargo_id,
+      area_id: area || null,
       fecha_ingreso: f.fecha_ingreso,
       tipo_contrato: tipo,
       fecha_termino_contrato: tipo === "indefinido" ? null : termino || null,

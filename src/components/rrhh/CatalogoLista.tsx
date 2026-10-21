@@ -17,14 +17,30 @@ import {
 import { ContenidoBoton } from "@/components/ui/estado-accion";
 import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
 import {
-  agregarTipoDocumento,
-  cambiarActivoTipoDocumento,
-  renombrarTipoDocumento,
-} from "@/app/(app)/rrhh/tipos-documento/actions";
+  agregarItemCatalogo,
+  cambiarActivoItemCatalogo,
+  renombrarItemCatalogo,
+  type Catalogo,
+} from "@/app/(app)/rrhh/catalogos/actions";
 
-type Tipo = { id: string; nombre: string; activo: boolean; documentos: number };
+type Item = { id: string; nombre: string; activo: boolean; usos: number };
 
-export function TiposDocumentoLista({ tipos }: { tipos: Tipo[] }) {
+/** Catálogo con baja lógica (tipos de documento, cargos, áreas). "usos" es
+ *  cuántos documentos o fichas lo usan: lo que hay que mirar antes de
+ *  desactivarlo. */
+export function CatalogoLista({
+  catalogo,
+  items,
+  etiquetaNuevo,
+  etiquetaItem,
+  etiquetaUsos,
+}: {
+  catalogo: Catalogo;
+  items: Item[];
+  etiquetaNuevo: string;
+  etiquetaItem: string;
+  etiquetaUsos: string;
+}) {
   const [nombre, setNombre] = useState("");
   const guardado = useEstadoGuardado();
 
@@ -33,10 +49,10 @@ export function TiposDocumentoLista({ tipos }: { tipos: Tipo[] }) {
     if (!nombre.trim() || guardado.pendiente) return;
     try {
       await guardado.ejecutar(async () => {
-        const res = await agregarTipoDocumento({ nombre });
+        const res = await agregarItemCatalogo({ catalogo, nombre });
         if (!res.ok) throw new Error(res.mensaje);
       });
-      toast.success("Tipo agregado.");
+      toast.success("Agregado.");
       setNombre("");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo agregar.");
@@ -47,7 +63,7 @@ export function TiposDocumentoLista({ tipos }: { tipos: Tipo[] }) {
     <div className="grid gap-4">
       <form onSubmit={agregar} className="flex flex-wrap items-end gap-2">
         <div className="grid gap-1.5">
-          <Label htmlFor="tipo-nuevo">Nuevo tipo</Label>
+          <Label htmlFor="tipo-nuevo">{etiquetaNuevo}</Label>
           <Input id="tipo-nuevo" value={nombre} onChange={(e) => setNombre(e.target.value)} />
         </div>
         <Button type="submit" disabled={guardado.pendiente || !nombre.trim()}>
@@ -58,15 +74,15 @@ export function TiposDocumentoLista({ tipos }: { tipos: Tipo[] }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Tipo</TableHead>
-              <TableHead className="text-right">Documentos</TableHead>
+              <TableHead>{etiquetaItem}</TableHead>
+              <TableHead className="text-right">{etiquetaUsos}</TableHead>
               <TableHead>Estado</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {tipos.map((t) => (
-              <FilaTipo key={t.id} t={t} />
+            {items.map((t) => (
+              <FilaItem key={t.id} t={t} catalogo={catalogo} />
             ))}
           </TableBody>
         </Table>
@@ -75,7 +91,7 @@ export function TiposDocumentoLista({ tipos }: { tipos: Tipo[] }) {
   );
 }
 
-function FilaTipo({ t }: { t: Tipo }) {
+function FilaItem({ t, catalogo }: { t: Item; catalogo: Catalogo }) {
   const [editando, setEditando] = useState(false);
   const [nombre, setNombre] = useState(t.nombre);
   const guardado = useEstadoGuardado();
@@ -98,7 +114,7 @@ function FilaTipo({ t }: { t: Tipo }) {
       <TableCell className="font-medium">
         {editando ? <Input value={nombre} onChange={(e) => setNombre(e.target.value)} autoFocus className="w-56" /> : t.nombre}
       </TableCell>
-      <TableCell className="text-right tabular-nums">{t.documentos}</TableCell>
+      <TableCell className="text-right tabular-nums">{t.usos}</TableCell>
       <TableCell>
         {t.activo ? (
           <Badge className="bg-success-100 text-success-700">Activo</Badge>
@@ -112,7 +128,7 @@ function FilaTipo({ t }: { t: Tipo }) {
             <Button
               type="button"
               disabled={guardado.pendiente}
-              onClick={() => correr(() => renombrarTipoDocumento({ id: t.id, nombre }), "Tipo renombrado.")}
+              onClick={() => correr(() => renombrarItemCatalogo({ catalogo, id: t.id, nombre }), "Renombrado.")}
             >
               Guardar
             </Button>
@@ -127,8 +143,8 @@ function FilaTipo({ t }: { t: Tipo }) {
             disabled={guardado.pendiente}
             onClick={() =>
               correr(
-                () => cambiarActivoTipoDocumento({ id: t.id, activo: !t.activo }),
-                t.activo ? "Tipo desactivado." : "Tipo activado.",
+                () => cambiarActivoItemCatalogo({ catalogo, id: t.id, activo: !t.activo }),
+                t.activo ? "Desactivado." : "Activado.",
               )
             }
           >

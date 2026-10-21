@@ -32,12 +32,12 @@ function Dato({ etiqueta, children }: { etiqueta: string; children: React.ReactN
 const fechaHora = (iso: string) =>
   new Date(iso).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short", timeZone: "America/Santiago" });
 
-export function DatosFicha({ ficha }: { ficha: NonNullable<FichaCompleta["ficha"]> }) {
+export function DatosFicha({ ficha, rut }: { ficha: NonNullable<FichaCompleta["ficha"]>; rut: string | null }) {
   return (
     <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <Dato etiqueta="RUT">{formatearRut(ficha.rut)}</Dato>
-      <Dato etiqueta="Cargo">{ficha.cargo}</Dato>
-      <Dato etiqueta="Área">{ficha.area ?? "—"}</Dato>
+      <Dato etiqueta="RUT">{rut ? formatearRut(rut) : "—"}</Dato>
+      <Dato etiqueta="Cargo">{ficha.cargo?.nombre ?? "—"}</Dato>
+      <Dato etiqueta="Área">{ficha.area?.nombre ?? "—"}</Dato>
       <Dato etiqueta="Ingreso">{fechaCorta(ficha.fecha_ingreso)}</Dato>
       <Dato etiqueta="Contrato">
         {ETIQUETA_TIPO_CONTRATO[ficha.tipo_contrato]}

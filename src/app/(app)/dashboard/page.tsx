@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getSesion } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { ROLES_OPERATIVOS, getSesion, inicioDeRol } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -47,6 +48,9 @@ export default async function DashboardPage({
 }) {
   const { mes, estado, supervisor, page } = await searchParams;
   const { perfil } = await getSesion();
+  // /dashboard es donde aterriza todo inicio de sesión: un rol sin
+  // inspecciones (trabajador) sigue a su propio inicio, sin aviso de error.
+  if (!(ROLES_OPERATIVOS as readonly string[]).includes(perfil.rol)) redirect(inicioDeRol(perfil.rol));
   const esAdmin = perfil.rol === "administrador";
   const esSupervisor = perfil.rol === "supervisor";
   // administrador_contrato ve esta pantalla exactamente "como un

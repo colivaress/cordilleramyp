@@ -34,8 +34,8 @@ export default async function NuevaInspeccionPage() {
             No tienes ningún tipo de inspección asignado.
           </p>
           <p className="mt-1 text-sm">
-            Un administrador tiene que asignarte al menos uno desde el panel
-            de Usuarios antes de que puedas crear una inspección.
+            Un administrador tiene que asignarte al menos uno desde tu ficha
+            en RRHH antes de que puedas crear una inspección.
           </p>
         </div>
       </div>

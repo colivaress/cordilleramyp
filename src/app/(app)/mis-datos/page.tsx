@@ -47,7 +47,7 @@ export default async function MisDatosPage() {
               <CardTitle>Contrato y previsión</CardTitle>
             </CardHeader>
             <CardContent>
-              <DatosFicha ficha={ficha} />
+              <DatosFicha ficha={ficha} rut={datos.rut} />
             </CardContent>
           </Card>
           <Card>

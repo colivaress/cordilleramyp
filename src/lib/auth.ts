@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { Personal, RolUsuario } from "@/lib/tipos";
+import { COLUMNAS_PERSONAL, type Personal, type RolUsuario } from "@/lib/tipos";
 
 /**
  * Devuelve el usuario autenticado y su fila en `personal` (rol, nombre, teléfono).
@@ -36,9 +36,11 @@ export const getSesion = cache(async (): Promise<{
 
   if (!user) redirect("/login");
 
+  // Columnas explícitas, nunca "*": rut no es legible con un select directo
+  // (grants por columna) y "*" fallaría entero.
   const { data: perfil, error } = await supabase
     .from("personal")
-    .select("*")
+    .select(COLUMNAS_PERSONAL)
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -64,11 +66,35 @@ export const getSesion = cache(async (): Promise<{
   return { userId: user.id, perfil };
 });
 
+/**
+ * Inicio de cada rol. El trabajador no tiene nada operativo: su única
+ * pantalla es "Mis datos" (spec RRHH §16.7).
+ */
+export function inicioDeRol(rol: RolUsuario): string {
+  return rol === "trabajador" ? "/mis-datos" : "/dashboard";
+}
+
 /** Como getSesion pero exige uno de los roles dados. */
 export async function requireRol(...roles: RolUsuario[]) {
   const sesion = await getSesion();
   if (!roles.includes(sesion.perfil.rol)) {
-    redirect("/dashboard?error=sin_permiso");
+    redirect(`${inicioDeRol(sesion.perfil.rol)}?error=sin_permiso`);
   }
   return sesion;
+}
+
+/**
+ * Los roles que operan inspecciones. Toda pantalla o acción de tickets que
+ * antes solo pedía "una sesión" (getSesion) pide esto: un rol nuevo NO
+ * entra por omisión, hay que agregarlo acá a propósito. Misma regla que
+ * private.es_operativo() en la base.
+ */
+export const ROLES_OPERATIVOS = [
+  "administrador",
+  "administrador_contrato",
+  "supervisor",
+] as const satisfies readonly RolUsuario[];
+
+export function requireOperativo() {
+  return requireRol(...ROLES_OPERATIVOS);
 }
