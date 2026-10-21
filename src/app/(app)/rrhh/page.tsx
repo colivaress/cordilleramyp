@@ -33,12 +33,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { ETIQUETA_ROL } from "@/lib/tipos";
 
 export const dynamic = "force-dynamic";
 
 // Listado de colaboradores (spec RRHH §16.8). Pestañas Activos /
 // Desvinculados en vez de un filtro escondido: la desvinculación es baja
-// lógica y el histórico de un desvinculado no se borra nunca.
+// lógica y el histórico de un desvinculado no se borra nunca. Es la ÚNICA
+// lista de personas (antes había otra en /usuarios): todas aparecen, con o
+// sin contrato, y su cuenta se administra desde la ficha.
 export default async function RrhhPage({
   searchParams,
 }: {
@@ -52,43 +55,58 @@ export default async function RrhhPage({
   const hoy = hoyChile();
   const supabase = await createClient();
 
-  const [{ data: personal }, { data: fichas }, { data: remuneraciones }] = await Promise.all([
-    supabase.from("personal").select("id, nombre, apellido, email, rol, activo").order("nombre"),
-    supabase.from("rrhh_fichas").select("personal_id, rut, cargo, area, fecha_ingreso, tipo_contrato, fecha_desvinculacion"),
-    supabase
-      .from("rrhh_remuneracion_base")
-      .select("personal_id, liquido_pactado, vigente_desde, created_at")
-      .lte("vigente_desde", hoy),
-  ]);
+  const [{ data: personal }, { data: fichas }, { data: remuneraciones }, { data: ruts }, { data: areasCatalogo }] =
+    await Promise.all([
+      supabase.from("personal").select("id, nombre, apellido, email, rol, activo").order("nombre"),
+      supabase
+        .from("rrhh_fichas")
+        .select("personal_id, area_id, fecha_ingreso, tipo_contrato, fecha_desvinculacion, cargo:rrhh_cargos(nombre), area:rrhh_areas(nombre)"),
+      supabase
+        .from("rrhh_remuneracion_base")
+        .select("personal_id, liquido_pactado, vigente_desde, created_at")
+        .lte("vigente_desde", hoy),
+      // El RUT no se lee de personal con un select (grants por columna).
+      supabase.rpc("rrhh_ruts"),
+      supabase.from("rrhh_areas").select("id, nombre").order("nombre"),
+    ]);
 
   const fichaDe = new Map((fichas ?? []).map((f) => [f.personal_id, f]));
+  const rutDe = new Map((ruts ?? []).map((r) => [r.personal_id, r.rut]));
   const remDe = new Map<string, NonNullable<typeof remuneraciones>>();
   for (const r of remuneraciones ?? []) remDe.set(r.personal_id, [...(remDe.get(r.personal_id) ?? []), r]);
 
   const buscado = q.trim().toLowerCase();
   const rutBuscado = normalizarRut(q);
-  const todos = (personal ?? []).filter((p) => p.activo || fichaDe.has(p.id));
+  const todos = personal ?? [];
   const filas = todos.filter((p) => {
     const f = fichaDe.get(p.id);
     if (!!f?.fecha_desvinculacion !== desvinculados) return false;
-    if (area && f?.area !== area) return false;
+    if (area && f?.area_id !== area) return false;
     if (contrato && f?.tipo_contrato !== contrato) return false;
     if (!buscado) return true;
     return (
       nombreCompleto(p.nombre, p.apellido).toLowerCase().includes(buscado) ||
       (p.email ?? "").toLowerCase().includes(buscado) ||
-      (rutBuscado.length >= 3 && (f?.rut ?? "").includes(rutBuscado))
+      (rutBuscado.length >= 3 && (rutDe.get(p.id) ?? "").includes(rutBuscado))
     );
   });
-  const areas = [...new Set((fichas ?? []).map((f) => f.area).filter((a): a is string => !!a))].sort();
   const cuantosDesvinculados = todos.filter((p) => fichaDe.get(p.id)?.fecha_desvinculacion).length;
   const pestanaUrl = (d: boolean) => (d ? "/rrhh?pestana=desvinculados" : "/rrhh");
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-end gap-2">
+        <Link href="/rrhh/nuevo" className={buttonVariants()}>
+          Agregar persona
+        </Link>
         <Link href="/rrhh/jornadas" className={buttonVariants({ variant: "outline" })}>
           Jornadas
+        </Link>
+        <Link href="/rrhh/cargos" className={buttonVariants({ variant: "outline" })}>
+          Cargos
+        </Link>
+        <Link href="/rrhh/areas" className={buttonVariants({ variant: "outline" })}>
+          Áreas
         </Link>
         <Link href="/rrhh/tipos-documento" className={buttonVariants({ variant: "outline" })}>
           Tipos de documento
@@ -106,8 +124,8 @@ export default async function RrhhPage({
         <CardHeader>
           <CardTitle>RRHH</CardTitle>
           <CardDescription>
-            Trabajadores de Cordillera M&amp;P y su sueldo líquido pactado
-            vigente.
+            Todas las personas de Cordillera M&amp;P: su cuenta en la app, su
+            contrato y su sueldo líquido pactado vigente.
             {!puedeEditarMontos(perfil.rol) &&
               " Puedes ver los montos, pero solo un administrador puede modificarlos."}
           </CardDescription>
@@ -136,9 +154,9 @@ export default async function RrhhPage({
             <Input name="q" defaultValue={q} placeholder="Buscar por nombre, RUT o correo" className="w-full sm:w-72" />
             <select name="area" defaultValue={area} className={nativeSelectClassName} aria-label="Área">
               <option value="">Todas las áreas</option>
-              {areas.map((a) => (
-                <option key={a} value={a}>
-                  {a}
+              {(areasCatalogo ?? []).map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.nombre}
                 </option>
               ))}
             </select>
@@ -166,6 +184,7 @@ export default async function RrhhPage({
                   <TableRow>
                     <TableHead>Colaborador</TableHead>
                     <TableHead>RUT</TableHead>
+                    <TableHead>Rol</TableHead>
                     <TableHead>Cargo</TableHead>
                     <TableHead>Área</TableHead>
                     <TableHead>Ingreso</TableHead>
@@ -195,10 +214,19 @@ export default async function RrhhPage({
                           </Link>
                         </TableCell>
                         <TableCell className="whitespace-nowrap">
-                          {f ? formatearRut(f.rut) : <Badge className="bg-warning-100 text-warning-700">Sin ficha</Badge>}
+                          {rutDe.has(t.id) ? formatearRut(rutDe.get(t.id)!) : "—"}
+                          {!f && (
+                            <Badge className="mt-1 block w-fit bg-warning-100 text-warning-700">Sin contrato</Badge>
+                          )}
                         </TableCell>
-                        <TableCell>{f?.cargo ?? "—"}</TableCell>
-                        <TableCell>{f?.area ?? "—"}</TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {ETIQUETA_ROL[t.rol]}
+                          {!t.activo && !f?.fecha_desvinculacion && (
+                            <Badge className="mt-1 block w-fit bg-danger-100 text-danger-700">Acceso suspendido</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>{f?.cargo?.nombre ?? "—"}</TableCell>
+                        <TableCell>{f?.area?.nombre ?? "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">
                           {f ? fechaCorta(f.fecha_ingreso) : "—"}
                           {f?.fecha_desvinculacion && (

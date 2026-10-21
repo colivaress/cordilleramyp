@@ -49,6 +49,7 @@ export type Database = {
           orden: number
           tipo: string
         }
+        ComputedFields: never
         Insert: {
           activo?: boolean
           exigencia?: string | null
@@ -119,6 +120,7 @@ export type Database = {
           validez_dias: number | null
           valor_neto: number | null
         }
+        ComputedFields: never
         Insert: {
           acuse_enviado?: boolean
           apellido: string
@@ -211,6 +213,7 @@ export type Database = {
           id: string
           nombre: string
         }
+        ComputedFields: never
         Insert: {
           activo?: boolean
           cargo?: string | null
@@ -234,6 +237,7 @@ export type Database = {
           recibe_vencimientos: boolean
           tipo_inspeccion: string
         }
+        ComputedFields: never
         Insert: {
           destinatario_id: string
           recibe_informes?: boolean
@@ -272,6 +276,7 @@ export type Database = {
           ticket_id: string
           tipo: Database["public"]["Enums"]["notificacion_tipo"]
         }
+        ComputedFields: never
         Insert: {
           contenido?: string | null
           destinatario: string
@@ -308,9 +313,11 @@ export type Database = {
           id: string
           nombre: string
           rol: Database["public"]["Enums"]["rol_usuario"]
+          rut: string | null
           telefono: string | null
           user_id: string | null
         }
+        ComputedFields: never
         Insert: {
           activo?: boolean
           apellido?: string | null
@@ -320,6 +327,7 @@ export type Database = {
           id?: string
           nombre: string
           rol: Database["public"]["Enums"]["rol_usuario"]
+          rut?: string | null
           telefono?: string | null
           user_id?: string | null
         }
@@ -332,6 +340,7 @@ export type Database = {
           id?: string
           nombre?: string
           rol?: Database["public"]["Enums"]["rol_usuario"]
+          rut?: string | null
           telefono?: string | null
           user_id?: string | null
         }
@@ -342,6 +351,7 @@ export type Database = {
           personal_id: string
           tipo_inspeccion: string
         }
+        ComputedFields: never
         Insert: {
           personal_id: string
           tipo_inspeccion: string
@@ -374,6 +384,7 @@ export type Database = {
           comision: number
           mes: number
         }
+        ComputedFields: never
         Insert: {
           afp: Database["public"]["Enums"]["rrhh_afp"]
           anio: number
@@ -396,6 +407,56 @@ export type Database = {
           },
         ]
       }
+      rrhh_areas: {
+        Row: {
+          activo: boolean
+          created_at: string
+          id: string
+          nombre: string
+          orden: number
+        }
+        ComputedFields: never
+        Insert: {
+          activo?: boolean
+          created_at?: string
+          id?: string
+          nombre: string
+          orden?: number
+        }
+        Update: {
+          activo?: boolean
+          created_at?: string
+          id?: string
+          nombre?: string
+          orden?: number
+        }
+        Relationships: []
+      }
+      rrhh_cargos: {
+        Row: {
+          activo: boolean
+          created_at: string
+          id: string
+          nombre: string
+          orden: number
+        }
+        ComputedFields: never
+        Insert: {
+          activo?: boolean
+          created_at?: string
+          id?: string
+          nombre: string
+          orden?: number
+        }
+        Update: {
+          activo?: boolean
+          created_at?: string
+          id?: string
+          nombre?: string
+          orden?: number
+        }
+        Relationships: []
+      }
       rrhh_documentos: {
         Row: {
           created_at: string
@@ -408,6 +469,7 @@ export type Database = {
           tamano_bytes: number
           tipo_id: string
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           created_by?: string | null
@@ -432,10 +494,10 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "rrhh_documentos_tipo_id_fkey"
-            columns: ["tipo_id"]
+            foreignKeyName: "rrhh_documentos_created_by_fkey"
+            columns: ["created_by"]
             isOneToOne: false
-            referencedRelation: "rrhh_tipos_documento"
+            referencedRelation: "personal"
             referencedColumns: ["id"]
           },
           {
@@ -445,15 +507,22 @@ export type Database = {
             referencedRelation: "personal"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "rrhh_documentos_tipo_id_fkey"
+            columns: ["tipo_id"]
+            isOneToOne: false
+            referencedRelation: "rrhh_tipos_documento"
+            referencedColumns: ["id"]
+          },
         ]
       }
       rrhh_fichas: {
         Row: {
           afecto_afc: boolean
           afp: Database["public"]["Enums"]["rrhh_afp"]
-          area: string | null
+          area_id: string | null
           cargas_familiares: number
-          cargo: string
+          cargo_id: string
           created_at: string
           fecha_desvinculacion: string | null
           fecha_ingreso: string
@@ -462,18 +531,18 @@ export type Database = {
           motivo_desvinculacion: string | null
           personal_id: string
           plan_isapre_uf: number | null
-          rut: string
           sistema_salud: Database["public"]["Enums"]["rrhh_sistema_salud"]
           tipo_contrato: Database["public"]["Enums"]["rrhh_tipo_contrato"]
           updated_at: string
           updated_by: string | null
         }
+        ComputedFields: never
         Insert: {
           afecto_afc?: boolean
           afp: Database["public"]["Enums"]["rrhh_afp"]
-          area?: string | null
+          area_id?: string | null
           cargas_familiares?: number
-          cargo: string
+          cargo_id: string
           created_at?: string
           fecha_desvinculacion?: string | null
           fecha_ingreso: string
@@ -482,7 +551,6 @@ export type Database = {
           motivo_desvinculacion?: string | null
           personal_id: string
           plan_isapre_uf?: number | null
-          rut: string
           sistema_salud: Database["public"]["Enums"]["rrhh_sistema_salud"]
           tipo_contrato: Database["public"]["Enums"]["rrhh_tipo_contrato"]
           updated_at?: string
@@ -491,9 +559,9 @@ export type Database = {
         Update: {
           afecto_afc?: boolean
           afp?: Database["public"]["Enums"]["rrhh_afp"]
-          area?: string | null
+          area_id?: string | null
           cargas_familiares?: number
-          cargo?: string
+          cargo_id?: string
           created_at?: string
           fecha_desvinculacion?: string | null
           fecha_ingreso?: string
@@ -502,7 +570,6 @@ export type Database = {
           motivo_desvinculacion?: string | null
           personal_id?: string
           plan_isapre_uf?: number | null
-          rut?: string
           sistema_salud?: Database["public"]["Enums"]["rrhh_sistema_salud"]
           tipo_contrato?: Database["public"]["Enums"]["rrhh_tipo_contrato"]
           updated_at?: string
@@ -510,9 +577,30 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "rrhh_fichas_area_id_fkey"
+            columns: ["area_id"]
+            isOneToOne: false
+            referencedRelation: "rrhh_areas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rrhh_fichas_cargo_id_fkey"
+            columns: ["cargo_id"]
+            isOneToOne: false
+            referencedRelation: "rrhh_cargos"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "rrhh_fichas_personal_id_fkey"
             columns: ["personal_id"]
             isOneToOne: true
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rrhh_fichas_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
             referencedRelation: "personal"
             referencedColumns: ["id"]
           },
@@ -527,6 +615,7 @@ export type Database = {
           personal_id: string
           vigente_desde: string
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           created_by?: string | null
@@ -544,6 +633,13 @@ export type Database = {
           vigente_desde?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "rrhh_jornada_trabajador_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "rrhh_jornada_trabajador_jornada_id_fkey"
             columns: ["jornada_id"]
@@ -565,15 +661,16 @@ export type Database = {
           activo: boolean
           created_at: string
           created_by: string | null
-          dias: Json
+          dias: NonNullable<Json>
           id: string
           nombre: string
         }
+        ComputedFields: never
         Insert: {
           activo?: boolean
           created_at?: string
           created_by?: string | null
-          dias: Json
+          dias: NonNullable<Json>
           id?: string
           nombre: string
         }
@@ -581,11 +678,19 @@ export type Database = {
           activo?: boolean
           created_at?: string
           created_by?: string | null
-          dias?: Json
+          dias?: NonNullable<Json>
           id?: string
           nombre?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "rrhh_jornadas_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       rrhh_mutual_adicional: {
         Row: {
@@ -596,6 +701,7 @@ export type Database = {
           vigente_desde: string
           vigente_hasta: string | null
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           id?: string
@@ -640,14 +746,15 @@ export type Database = {
           tasa_sis: number
           tope_imponible_afc_uf: number
           tope_imponible_afp_uf: number
-          tramos_asignacion_familiar: Json
-          tramos_impuesto: Json
+          tramos_asignacion_familiar: NonNullable<Json>
+          tramos_impuesto: NonNullable<Json>
           uf_mes: number
           uf_mes_anterior: number
           updated_at: string
           updated_by: string | null
           utm: number
         }
+        ComputedFields: never
         Insert: {
           anio: number
           created_at?: string
@@ -665,8 +772,8 @@ export type Database = {
           tasa_sis: number
           tope_imponible_afc_uf: number
           tope_imponible_afp_uf: number
-          tramos_asignacion_familiar: Json
-          tramos_impuesto: Json
+          tramos_asignacion_familiar: NonNullable<Json>
+          tramos_impuesto: NonNullable<Json>
           uf_mes: number
           uf_mes_anterior: number
           updated_at?: string
@@ -690,8 +797,8 @@ export type Database = {
           tasa_sis?: number
           tope_imponible_afc_uf?: number
           tope_imponible_afp_uf?: number
-          tramos_asignacion_familiar?: Json
-          tramos_impuesto?: Json
+          tramos_asignacion_familiar?: NonNullable<Json>
+          tramos_impuesto?: NonNullable<Json>
           uf_mes?: number
           uf_mes_anterior?: number
           updated_at?: string
@@ -720,6 +827,7 @@ export type Database = {
           personal_id: string
           vigente_desde: string
         }
+        ComputedFields: never
         Insert: {
           colacion?: number
           comentario?: string | null
@@ -767,6 +875,7 @@ export type Database = {
           nombre: string
           orden: number
         }
+        ComputedFields: never
         Insert: {
           activo?: boolean
           created_at?: string
@@ -791,6 +900,7 @@ export type Database = {
           respuesta_id: string
           url: string
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           id?: string
@@ -829,12 +939,16 @@ export type Database = {
           revision_numero: number
           ticket_id: string
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           estado?: Database["public"]["Enums"]["item_estado"] | null
           foto_url?: string | null
           id?: string
           item_key: string
+          // Opcionales a mano: los completa el trigger que congela el ítem
+          // al insertar (migración 20261009010000). El generador los marca
+          // obligatorios porque son NOT NULL sin default.
           item_modo?: Database["public"]["Enums"]["item_modo"]
           item_nombre?: string
           item_orden?: number
@@ -894,6 +1008,7 @@ export type Database = {
           supervisor_id: string | null
           ticket_id: string
         }
+        ComputedFields: never
         Insert: {
           conductor?: string | null
           created_at?: string
@@ -965,6 +1080,7 @@ export type Database = {
           transporte: string
           updated_at: string
         }
+        ComputedFields: never
         Insert: {
           alerta_admin_24h_enviada?: boolean
           alerta_admin_48h_enviada?: boolean
@@ -1038,6 +1154,7 @@ export type Database = {
           clave: string
           titulo: string
         }
+        ComputedFields: never
         Insert: {
           activo?: boolean
           clave: string
@@ -1057,6 +1174,7 @@ export type Database = {
           id: string
           nombre: string
         }
+        ComputedFields: never
         Insert: {
           activo?: boolean
           created_at?: string
@@ -1088,7 +1206,23 @@ export type Database = {
           personal_id: string | null
           vigente_desde: string | null
         }
-        Relationships: []
+        ComputedFields: never
+        Relationships: [
+          {
+            foreignKeyName: "rrhh_remuneracion_base_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rrhh_remuneracion_base_personal_id_fkey"
+            columns: ["personal_id"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Functions: {
@@ -1097,10 +1231,22 @@ export type Database = {
         Returns: number
       }
       estado_acceso_personal: {
-        Args: never
+        Args: Record<PropertyKey, never>
         Returns: {
           alguna_vez_inicio_sesion: boolean
           personal_id: string
+        }[]
+      }
+      rrhh_desvincular: {
+        Args: { p_fecha: string; p_motivo: string; p_personal_id: string }
+        Returns: undefined
+      }
+      rrhh_reincorporar: { Args: { p_personal_id: string }; Returns: undefined }
+      rrhh_ruts: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          personal_id: string
+          rut: string
         }[]
       }
     }
@@ -1115,6 +1261,7 @@ export type Database = {
         | "administrador"
         | "conductor"
         | "administrador_contrato"
+        | "trabajador"
       rrhh_afp:
         | "capital"
         | "cuprum"
@@ -1172,8 +1319,7 @@ export type Tables<
 
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
   TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
@@ -1197,8 +1343,7 @@ export type TablesInsert<
 
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
   TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
@@ -1222,8 +1367,7 @@ export type TablesUpdate<
 
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
+    keyof DefaultSchema["Enums"] | { schema: keyof DatabaseWithoutInternals },
   EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
@@ -1260,6 +1404,8 @@ export const Constants = {
   },
   public: {
     Enums: {
+      cotizacion_estado: ["nueva", "cotizada", "ganada", "perdida"],
+      cotizacion_solicitante: ["particular", "empresa"],
       item_estado: ["conforme", "no_conforme", "no_aplica"],
       item_modo: ["estado", "fotos"],
       notificacion_tipo: ["whatsapp", "email"],
@@ -1268,6 +1414,7 @@ export const Constants = {
         "administrador",
         "conductor",
         "administrador_contrato",
+        "trabajador",
       ],
       rrhh_afp: [
         "capital",
@@ -1289,4 +1436,3 @@ export const Constants = {
     },
   },
 } as const
-

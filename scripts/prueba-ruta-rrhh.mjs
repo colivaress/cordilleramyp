@@ -73,7 +73,13 @@ const check = (desc, ok, detalle) => {
 const linkRrhh = (html) => /href="\/rrhh"/.test(html);
 const AVISO_SOLO_LECTURA = "solo un administrador puede modificarlos";
 
-const [cA, cC, cS1, cS3] = [await cookiesDe("A"), await cookiesDe("C"), await cookiesDe("S1"), await cookiesDe("S3")];
+const [cA, cC, cS1, cS3, cT] = [
+  await cookiesDe("A"),
+  await cookiesDe("C"),
+  await cookiesDe("S1"),
+  await cookiesDe("S3"),
+  await cookiesDe("T"),
+];
 let r;
 
 console.log("\n— Administrador —");
@@ -208,11 +214,12 @@ check(
 
 // ── Fase 3: ficha del trabajador ────────────────────────────────────────
 // prueba-rls-rrhh.mjs dejó: ficha de S1 (RUT 11.111.111-1, contrato.pdf,
-// jornada "Turno A") y de S2 (desvinculado); S3 sin ficha.
+// jornada "Turno A"), de S2 (desvinculado) y de T (RUT 12.345.678-5,
+// contrato-t.pdf); S3 sin ficha ni RUT.
 const srv = createServerClient(URL, env.SERVICE_ROLE_KEY, { cookies: { getAll: () => [], setAll: () => {} } });
 const idDe = async (k) =>
   (await srv.from("personal").select("id").eq("email", `rls.${k.toLowerCase()}@test.cordilleramyp.local`).single()).data.id;
-const [S1, S3] = [await idDe("S1"), await idDe("S3")];
+const [S1, S3, idA, idT] = [await idDe("S1"), await idDe("S3"), await idDe("A"), await idDe("T")];
 const linkMisDatos = (html) => /href="\/mis-datos"/.test(html);
 
 console.log("\n— Ficha: acceso por ruta —");
@@ -269,18 +276,66 @@ check(
 r = await pedir(`/rrhh/${S1}`, cA);
 check("…y aparece en el historial con el valor anterior", r.html.includes("$810.000 → $900.000") && r.html.includes("Reajuste de prueba"));
 
+const { data: cargo } = await srv.from("rrhh_cargos").select("id").limit(1).single();
 const fichaS3 = {
-  rut: "33.333.333-3", cargo: "Operario", area: "", fecha_ingreso: "2024-01-10", tipo_contrato: "indefinido",
+  cargo_id: cargo.id, area_id: "", fecha_ingreso: "2024-01-10", tipo_contrato: "indefinido",
   fecha_termino_contrato: "", afp: "uno", sistema_salud: "fonasa", isapre: "", plan_isapre_uf: "", afecto_afc: true, cargas_familiares: "0",
 };
 g = await llamarAccion(`/rrhh/${S3}`, ID_FICHA, cS1, S3, fichaS3);
 check("supervisor guardando una ficha directo: rechazado", rechazada(g), { status: g.status, redirect: g.redirect, resultado: g.resultado });
-g = await llamarAccion(`/rrhh/${S3}`, ID_FICHA, cC, S3, { ...fichaS3, rut: "33.333.333-4" });
-check("adm. contrato con RUT inválido: error con nombre", g.resultado?.ok === false && g.resultado.errores?.[0]?.includes("RUT no es válido"), g.resultado);
-g = await llamarAccion(`/rrhh/${S3}`, ID_FICHA, cC, S3, { ...fichaS3, rut: "11.111.111-1" });
-check("adm. contrato con RUT de otro trabajador: rechazado", g.resultado?.ok === false && /otro trabajador/.test(g.resultado.mensaje), g.resultado);
+g = await llamarAccion(`/rrhh/${S3}`, ID_FICHA, cC, S3, { ...fichaS3, cargo_id: "Operario" });
+check("adm. contrato con un cargo escrito a mano: rechazado", g.resultado?.ok === false && g.resultado.errores?.includes("Elige el cargo."), g.resultado);
 g = await llamarAccion(`/rrhh/${S3}`, ID_FICHA, cC, S3, fichaS3);
-check("adm. contrato crea la ficha de S3", g.resultado?.ok === true, g.resultado ?? g.status);
+check("sin RUT registrado no se crea el contrato", g.resultado?.ok === false && /RUT/.test(g.resultado.mensaje), g.resultado);
+
+// ── Cuenta y acceso (una sola ficha por persona) ────────────────────────
+console.log("\n— Cuenta: Server Actions, autorización por campo —");
+const ID_CUENTA = await idAccion(htmlFichaAdmin, "guardarCuenta");
+const ID_CREAR = await idAccion(htmlFichaAdmin, "crearPersona");
+const ID_ACCESO = await idAccion(htmlFichaAdmin, "cambiarAcceso");
+const cuentaS3 = {
+  nombre: "S3", apellido: "Prueba", rut: "", email: "", telefono: "56900000002",
+  fechaNacimiento: "1990-01-01", rol: "supervisor", tiposInspeccion: [],
+};
+const rolDe = async (id) => (await srv.from("personal").select("rol").eq("id", id).single()).data.rol;
+const tiposDe = async (id) =>
+  ((await srv.from("personal_tipos_inspeccion").select("tipo_inspeccion").eq("personal_id", id)).data ?? []).map((t) => t.tipo_inspeccion).sort();
+g = await llamarAccion(`/rrhh/${S3}`, ID_CUENTA, cC, S3, { ...cuentaS3, rol: "administrador" });
+check("adm. contrato asciende a administrador llamando la acción: rechazado", g.resultado?.ok === false && /Solo un administrador puede cambiar el rol/.test(g.resultado.mensaje), g.resultado);
+g = await llamarAccion(`/rrhh/${S3}`, ID_CUENTA, cC, S3, { ...cuentaS3, rol: "administrador_contrato" });
+check("adm. contrato cambia supervisor → adm. contrato: rechazado", g.resultado?.ok === false && /rol/.test(g.resultado.mensaje), g.resultado);
+check("…y el rol de S3 sigue siendo supervisor", (await rolDe(S3)) === "supervisor");
+g = await llamarAccion(`/rrhh/${S1}`, ID_CUENTA, cC, S1, { ...cuentaS3, nombre: "S1", telefono: "56911111111", tiposInspeccion: [] });
+check("adm. contrato quita los tipos de S1: rechazado", g.resultado?.ok === false && /tipos de inspección/.test(g.resultado.mensaje), g.resultado);
+check("…y S1 conserva encarpe", JSON.stringify(await tiposDe(S1)) === '["encarpe"]', await tiposDe(S1));
+g = await llamarAccion(`/rrhh/${S3}`, ID_CUENTA, cC, S3, { ...cuentaS3, rut: "33.333.333-4" });
+check("RUT inválido: error con nombre", g.resultado?.ok === false && g.resultado.errores?.[0]?.includes("RUT no es válido"), g.resultado);
+g = await llamarAccion(`/rrhh/${S3}`, ID_CUENTA, cC, S3, { ...cuentaS3, rut: "11.111.111-1" });
+check("RUT de otra persona: rechazado", g.resultado?.ok === false && /otra persona/.test(g.resultado.mensaje), g.resultado);
+g = await llamarAccion(`/rrhh/${S3}`, ID_CUENTA, cC, S3, { ...cuentaS3, rut: "33.333.333-3" });
+check("adm. contrato SÍ edita los datos personales (RUT de S3)", g.resultado?.ok === true, g.resultado ?? g.status);
+g = await llamarAccion(`/rrhh/${idA}`, ID_CUENTA, cC, idA, { ...cuentaS3, nombre: "A", rol: "administrador", telefono: "" });
+check("adm. contrato editando la cuenta de un administrador: rechazado", g.resultado?.ok === false, g.resultado);
+g = await llamarAccion(`/rrhh/${S3}`, ID_CUENTA, cA, S3, { ...cuentaS3, rut: "33.333.333-3", tiposInspeccion: ["encarpe"] });
+check("admin SÍ asigna tipos", g.resultado?.ok === true && JSON.stringify(await tiposDe(S3)) === '["encarpe"]', g.resultado);
+g = await llamarAccion(`/rrhh/${S3}`, ID_CUENTA, cA, S3, { ...cuentaS3, rut: "33.333.333-3", tiposInspeccion: [] });
+check("admin deja a S3 sin tipos de nuevo", g.resultado?.ok === true && (await tiposDe(S3)).length === 0, g.resultado);
+
+const nueva = (rol) => ({
+  nombre: "Nueva", apellido: rol, rut: "", email: `rls.nueva.${rol}@test.cordilleramyp.local`, telefono: "56977777777",
+  fechaNacimiento: "1995-05-05", rol, tiposInspeccion: [],
+});
+g = await llamarAccion("/rrhh/nuevo", ID_CREAR, cC, nueva("administrador"));
+check("adm. contrato crea un administrador llamando la acción: rechazado", g.resultado?.ok === false && /solo puede crear personas con rol Trabajador/.test(g.resultado.mensaje), g.resultado);
+g = await llamarAccion("/rrhh/nuevo", ID_CREAR, cC, nueva("supervisor"));
+check("adm. contrato crea un supervisor: rechazado", g.resultado?.ok === false, g.resultado);
+const { count: creados } = await srv.from("personal").select("id", { count: "exact", head: true }).like("email", "rls.nueva.%");
+check("…y no quedó ninguna fila creada", creados === 0, creados);
+g = await llamarAccion("/rrhh/nuevo", ID_CREAR, cC, nueva("trabajador"));
+check("adm. contrato SÍ crea un trabajador (fila = invitación)", g.resultado?.ok === true && !!g.resultado.id, g.resultado);
+
+g = await llamarAccion(`/rrhh/${S3}`, ID_FICHA, cC, S3, fichaS3);
+check("con RUT, adm. contrato crea la ficha de S3", g.resultado?.ok === true, g.resultado ?? g.status);
 r = await pedir("/dashboard", cS3);
 check("…y ahora S3 tiene el link Mis datos", linkMisDatos(r.html));
 
@@ -289,6 +344,44 @@ g = await llamarAccion(`/rrhh/${S3}`, ID_DOCS, cC, { personalId: S3, tipoId: tip
 check("registrar como de S3 un archivo de la carpeta de S1: rechazado", g.resultado?.ok === false && /no corresponde/.test(g.resultado.mensaje), g.resultado);
 g = await llamarAccion(`/rrhh/${S3}`, ID_DOCS, cC, { personalId: S3, tipoId: tipo.id, archivos: [{ ruta: `${S3}/no-existe.pdf`, nombre: "fantasma.pdf", tamano: 15 }] });
 check("registrar un archivo que no está en el bucket: rechazado", g.resultado?.ok === false && /no se alcanzó a subir/.test(g.resultado.mensaje), g.resultado);
+
+console.log("\n— Trabajador: solo lo suyo, solo lectura —");
+// Una ruta con loading.tsx ya empezó a transmitir cuando corre la guarda:
+// la redirección llega dentro de la respuesta (200 + NEXT_REDIRECT), no
+// como 3xx. Las dos formas valen, siempre que no traiga datos.
+const redirigeA = (r, destino) =>
+  (r.status >= 300 && r.status < 400 && r.location?.endsWith(destino)) ||
+  (r.status === 200 && r.html.includes(`NEXT_REDIRECT;replace;${destino};`));
+const sinPermisoT = (r) => redirigeA(r, "/mis-datos?error=sin_permiso") && !r.html.includes("AA11");
+r = await pedir("/dashboard", cT);
+check("al entrar (/dashboard) sigue a /mis-datos, sin aviso de error", redirigeA(r, "/mis-datos") && !r.html.includes("AA11"), { status: r.status, location: r.location });
+r = await pedir("/mis-datos", cT);
+check("ve su ficha, su RUT y su documento", r.status === 200 && r.html.includes("12.345.678-5") && r.html.includes("contrato-t.pdf"), r.status);
+check("…y nada de otros", !r.html.includes("11.111.111-1") && !r.html.includes(">contrato.pdf<"));
+check("su barra solo tiene Mis datos (sin RRHH)", linkMisDatos(r.html) && !linkRrhh(r.html) && !r.html.includes('href="/dashboard/analitica"'));
+const { data: unTicket } = await srv.from("tickets").select("id").limit(1).single();
+for (const ruta of ["/rrhh", `/rrhh/${S1}`, "/rrhh/nuevo", "/rrhh/cargos", "/rrhh/parametros", "/cotizaciones", "/configuracion", "/dashboard/analitica", "/tickets/new", `/tickets/${unTicket.id}`, `/tickets/${unTicket.id}/report`]) {
+  r = await pedir(ruta, cT);
+  check(`trabajador escribiendo ${ruta} rebota`, sinPermisoT(r), { status: r.status, location: r.location });
+}
+g = await llamarAccion(`/rrhh/${idT}`, ID_CUENTA, cT, idT, { ...cuentaS3, nombre: "T", telefono: "56999999999" });
+check("trabajador editando su cuenta llamando la acción: rechazado", rechazada(g), { status: g.status, redirect: g.redirect, resultado: g.resultado });
+g = await llamarAccion(`/rrhh/${idT}`, ID_FICHA, cT, idT, fichaS3);
+check("trabajador editando su ficha: rechazado", rechazada(g), { status: g.status, redirect: g.redirect, resultado: g.resultado });
+g = await llamarAccion(`/rrhh/${idT}`, ID_DOCS, cT, { personalId: idT, tipoId: tipo.id, archivos: [{ ruta: `${idT}/x.pdf`, nombre: "x.pdf", tamano: 15 }] });
+check("trabajador registrando un documento: rechazado", rechazada(g), { status: g.status, redirect: g.redirect, resultado: g.resultado });
+g = await llamarAccion(`/rrhh/${S1}`, ID_ACCESO, cT, { personalId: S1, activo: false });
+check("trabajador suspendiendo a otro: rechazado", rechazada(g), { status: g.status, redirect: g.redirect, resultado: g.resultado });
+const telT = (await srv.from("personal").select("telefono").eq("id", idT).single()).data.telefono;
+check("…y su fila quedó igual", telT === null, telT);
+
+console.log("\n— /usuarios ya no existe —");
+r = await pedir("/usuarios", cA);
+check("admin escribiendo /usuarios: redirige a /rrhh", r.status >= 300 && r.status < 400 && r.location?.endsWith("/rrhh"), { status: r.status, location: r.location });
+r = await pedir("/usuarios", cS1);
+check("supervisor escribiendo /usuarios: no ve nada (redirige)", r.status >= 300 && r.status < 400 && !r.html, { status: r.status, location: r.location });
+r = await pedir("/rrhh", cA);
+check("la barra del admin ya no tiene Usuarios", r.status === 200 && !r.html.includes('href="/usuarios"'));
 
 console.log(`\n${fallas === 0 ? "TODO OK" : fallas + " FALLA(S)"}`);
 process.exit(fallas ? 1 : 0);

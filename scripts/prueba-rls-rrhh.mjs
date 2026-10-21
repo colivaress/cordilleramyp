@@ -60,6 +60,8 @@ for (const [k, rol, tel] of [
   ["S1", "supervisor", "56911111111"],
   ["S2", "supervisor", "56922222222"],
   ["S3", "supervisor", "56933333333"],
+  // Rol `trabajador` (ficha única): solo lo suyo, solo lectura.
+  ["T", "trabajador", null],
 ]) {
   const email = `rls.${k.toLowerCase()}@test.cordilleramyp.local`;
   const p = must(
@@ -88,15 +90,71 @@ const ticket = {
   patente_rampla: "BB22",
   tipo_inspeccion: "encarpe",
 };
+const ticketS2 = must(
+  await srv
+    .from("tickets")
+    .insert({
+      ...ticket,
+      fecha: new Date().toISOString(),
+      patente_camion: "AA11",
+      estado: "finalizada_con_observaciones",
+      supervisor_id: P.S2.id,
+    })
+    .select("id")
+    .single(),
+  "ticket S2",
+);
+// Filas en las tablas operativas: el barrido del trabajador (al final) solo
+// prueba una política si hay algo que leer, editar o borrar.
+const item = must(await srv.from("checklist_items").select("key, nombre, orden, modo").limit(1).single(), "item");
 must(
-  await srv.from("tickets").insert({
-    ...ticket,
-    fecha: new Date().toISOString(),
-    patente_camion: "AA11",
-    estado: "finalizada_con_observaciones",
+  await srv.from("ticket_revisiones").insert({
+    ticket_id: ticketS2.id,
+    numero_revision: 1,
+    estado_resultante: "finalizada_con_observaciones",
     supervisor_id: P.S2.id,
   }),
-  "ticket S2",
+  "revision S2",
+);
+const respuesta = must(
+  await srv
+    .from("ticket_checklist_respuestas")
+    .insert({
+      ticket_id: ticketS2.id,
+      revision_numero: 1,
+      item_key: item.key,
+      item_nombre: item.nombre,
+      item_orden: item.orden,
+      item_modo: item.modo,
+      estado: "conforme",
+    })
+    .select("id")
+    .single(),
+  "respuesta S2",
+);
+must(await srv.from("ticket_checklist_fotos").insert({ respuesta_id: respuesta.id, url: `${ticketS2.id}/x.jpg` }), "foto S2");
+must(await srv.from("notificaciones").insert({ ticket_id: ticketS2.id, tipo: "email", destinatario: "x@test.cordilleramyp.local" }), "notif");
+must(await srv.from("destinatarios_correo").insert({ nombre: "Dest", email: "dest@test.cordilleramyp.local" }), "dest");
+must(
+  await srv.from("cotizaciones_fletes").insert({
+    tipo_solicitante: "particular",
+    nombre: "N",
+    apellido: "A",
+    rut: "111111111",
+    correo: "c@test.cordilleramyp.local",
+    telefono: "56911111111",
+    tipo_carga: "x",
+    peso: "1",
+    fecha_estimada: "2026-12-01",
+    requiere_encarpe: false,
+    origen_calle: "a",
+    origen_region: "b",
+    origen_comuna: "c",
+    destino_calle: "a",
+    destino_region: "b",
+    destino_comuna: "c",
+  }),
+  "cotizacion",
 );
 must(
   await srv.from("rrhh_remuneracion_base").insert([
@@ -111,7 +169,7 @@ const login = async (k) => {
   must(await c.auth.signInWithPassword({ email: P[k].email, password: CLAVE }), "login " + k);
   return c;
 };
-const [A, C, S1, , S3] = await Promise.all(["A", "C", "S1", "S2", "S3"].map(login));
+const [A, C, S1, , S3, T] = await Promise.all(["A", "C", "S1", "S2", "S3", "T"].map(login));
 const anon = createClient(URL, env.ANON_KEY, opts);
 const nombre = (id) => Object.entries(P).find(([, v]) => v.id === id)?.[0] ?? id;
 
@@ -254,11 +312,54 @@ v = await A.from("rrhh_mutual_adicional").delete().gte("tasa", 0).select();
 check("Nadie borra un tramo (ni admin): 0 filas", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
 
 // ── Fase 3: ficha, jornadas, documentos ─────────────────────────────────
+console.log("\n— rrhh_cargos / rrhh_areas (catálogos con baja lógica) —");
+v = await C.from("rrhh_cargos").insert({ nombre: "Supervisor de encarpe" }).select("id").single();
+check("Adm. contrato agrega un cargo con RETURNING", !v.error && !!v.data?.id, v.error?.message);
+const cargoId = v.data?.id;
+v = await A.from("rrhh_cargos").insert({ nombre: "SUPERVISOR DE ENCARPE" });
+check("El mismo cargo con otras mayúsculas se rechaza", !!v.error, v.error?.message);
+v = await A.from("rrhh_cargos").insert({ nombre: " Encarpador " });
+check("Un nombre con espacios sobrantes se rechaza", !!v.error, v.error?.message);
+v = await S1.from("rrhh_cargos").insert({ nombre: "Gerente" });
+check("Supervisor no agrega cargos", !!v.error, v.error?.message);
+v = await T.from("rrhh_areas").insert({ nombre: "Gerencia" });
+check("Trabajador no agrega áreas", !!v.error, v.error?.message);
+v = await A.from("rrhh_areas").insert({ nombre: "Operaciones" }).select("id").single();
+const areaId = v.data?.id;
+check("Administrador agrega un área", !v.error && !!areaId, v.error?.message);
+v = await A.from("rrhh_cargos").delete().eq("id", cargoId).select();
+check("Un cargo no se borra (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = (await T.from("rrhh_cargos").select("nombre")).data;
+check("El catálogo de cargos se lee con sesión", v?.length === 1, v);
+
+console.log("\n— personal.rut (módulo 11, legible solo con rrhh_ruts()) —");
 // RUT inventados con dígito verificador válido.
-const ficha = (personal_id, rut) => ({
+v = await C.from("personal").update({ rut: "111111111" }).eq("id", P.S1.id).select("id");
+check("Adm. contrato registra el RUT de S1", !v.error && v.data.length === 1, v.error?.message ?? v.data);
+v = await A.from("personal").update({ rut: "123456789" }).eq("id", P.S2.id).select("id");
+check("Un RUT con dígito verificador malo se rechaza (check)", !!v.error, v.error?.message);
+must(await srv.from("personal").update({ rut: "222222222" }).eq("id", P.S2.id), "rut S2");
+must(await srv.from("personal").update({ rut: "123456785" }).eq("id", P.T.id), "rut T");
+v = await A.from("personal").update({ rut: "111111111" }).eq("id", P.S3.id);
+check("Un RUT repetido se rechaza", !!v.error, v.error?.message);
+v = await A.from("personal").select("rut").eq("id", P.S1.id);
+check("Ni el administrador lee rut con un select directo", !!v.error, v.error?.message ?? v.data);
+v = await S1.from("personal").select("*").eq("id", P.S2.id);
+check("S1 no lee el RUT de S2 con select(*) (aunque ve su fila)", !!v.error, v.error?.message ?? v.data);
+const ruts = async (c) => ((await c.rpc("rrhh_ruts")).data ?? []).map((r) => nombre(r.personal_id)).sort();
+v = await ruts(S1);
+check("rrhh_ruts(): S1 solo el suyo", JSON.stringify(v) === '["S1"]', v);
+v = await ruts(T);
+check("rrhh_ruts(): trabajador solo el suyo", JSON.stringify(v) === '["T"]', v);
+v = await ruts(C);
+check("rrhh_ruts(): adm. contrato todos", JSON.stringify(v) === '["S1","S2","T"]', v);
+v = await anon.rpc("rrhh_ruts");
+check("rrhh_ruts(): anónimo rechazado", !!v.error || v.data.length === 0, v.error?.message ?? v.data);
+
+const ficha = (personal_id) => ({
   personal_id,
-  rut,
-  cargo: "Supervisor de encarpe",
+  cargo_id: cargoId,
+  area_id: areaId,
   fecha_ingreso: "2019-03-15",
   tipo_contrato: "indefinido",
   afp: "modelo",
@@ -266,31 +367,54 @@ const ficha = (personal_id, rut) => ({
 });
 
 console.log("\n— rrhh_fichas —");
-v = await C.from("rrhh_fichas").insert(ficha(P.S1.id, "111111111")).select("rut").single();
-check("Adm. contrato crea una ficha con RETURNING", !v.error && v.data?.rut === "111111111", v.error?.message ?? v.data);
-v = await A.from("rrhh_fichas").insert(ficha(P.S2.id, "222222222")).select("rut").single();
+v = await C.from("rrhh_fichas").insert(ficha(P.S1.id)).select("cargo_id").single();
+check("Adm. contrato crea una ficha con RETURNING", !v.error && v.data?.cargo_id === cargoId, v.error?.message ?? v.data);
+v = await A.from("rrhh_fichas").insert(ficha(P.S2.id)).select("cargo_id").single();
 check("Administrador crea una ficha", !v.error, v.error?.message);
-v = await A.from("rrhh_fichas").insert(ficha(P.S3.id, "111111111"));
-check("Un RUT repetido se rechaza", !!v.error, v.error?.message);
-v = await A.from("rrhh_fichas").insert({ ...ficha(P.S3.id, "333333333"), tipo_contrato: "plazo_fijo" });
+v = await A.from("rrhh_fichas").insert(ficha(P.T.id)).select("cargo_id").single();
+check("Administrador crea la ficha del trabajador", !v.error, v.error?.message);
+v = await A.from("rrhh_fichas").insert({ ...ficha(P.S3.id), cargo_id: null });
+check("Una ficha sin cargo se rechaza", !!v.error, v.error?.message);
+v = await A.from("rrhh_fichas").insert({ ...ficha(P.S3.id), tipo_contrato: "plazo_fijo" });
 check("Plazo fijo sin fecha de término se rechaza (check)", !!v.error, v.error?.message);
-v = await A.from("rrhh_fichas").insert({ ...ficha(P.S3.id, "333333333"), sistema_salud: "isapre" });
+v = await A.from("rrhh_fichas").insert({ ...ficha(P.S3.id), sistema_salud: "isapre" });
 check("Isapre sin plan se rechaza (check)", !!v.error, v.error?.message);
 v = (await S1.from("rrhh_fichas").select("personal_id")).data;
 check("S1 solo ve su propia ficha", JSON.stringify(v?.map((f) => nombre(f.personal_id))) === '["S1"]', v);
 v = (await S3.from("rrhh_fichas").select("personal_id")).data;
 check("S3 (sin ficha) no ve ninguna", v?.length === 0, v?.length);
-v = await S1.from("rrhh_fichas").update({ cargo: "Gerente" }).eq("personal_id", P.S1.id).select();
+v = await S1.from("rrhh_fichas").update({ cargas_familiares: 9 }).eq("personal_id", P.S1.id).select();
 check("S1 no puede editar su propia ficha (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
-v = await S1.from("rrhh_fichas").insert(ficha(P.S3.id, "333333333"));
+v = await S1.from("rrhh_fichas").insert(ficha(P.S3.id));
 check("Supervisor no puede crear fichas", !!v.error, v.error?.message);
+v = await A.from("rrhh_fichas").delete().eq("personal_id", P.S2.id).select();
+check("Nadie borra una ficha (ni admin): 0 filas", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+
+console.log("\n— desvinculación: fecha_desvinculacion manda, activo se deriva —");
 v = await C.from("rrhh_fichas")
   .update({ fecha_desvinculacion: "2026-10-01", motivo_desvinculacion: "Prueba" })
   .eq("personal_id", P.S2.id)
   .select("fecha_desvinculacion");
-check("Adm. contrato desvincula (baja lógica)", !v.error && v.data.length === 1, v.error?.message ?? v.data);
-v = await A.from("rrhh_fichas").delete().eq("personal_id", P.S2.id).select();
-check("Nadie borra una ficha (ni admin): 0 filas", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+check("Desvincular escribiendo solo la ficha se rechaza (activo quedaría en true)", !!v.error, v.error?.message ?? v.data);
+v = await C.rpc("rrhh_desvincular", { p_personal_id: P.S2.id, p_fecha: "2026-10-01", p_motivo: "Prueba" });
+check("Adm. contrato desvincula con la acción única", !v.error, v.error?.message);
+v = (await srv.from("rrhh_fichas").select("fecha_desvinculacion").eq("personal_id", P.S2.id).single()).data;
+const activoS2 = (await srv.from("personal").select("activo").eq("id", P.S2.id).single()).data;
+check("Quedaron las dos: fecha en la ficha y acceso cortado", v?.fecha_desvinculacion === "2026-10-01" && activoS2?.activo === false, [v, activoS2]);
+v = await A.from("personal").update({ activo: true }).eq("id", P.S2.id).select("id");
+check("Reactivar el acceso de un desvinculado se rechaza", !!v.error, v.error?.message ?? v.data);
+v = await C.rpc("rrhh_desvincular", { p_personal_id: P.S3.id, p_fecha: "2026-10-01", p_motivo: "Prueba" });
+check("Desvincular a alguien sin contrato falla con mensaje", !!v.error && /contrato/.test(v.error.message), v.error?.message);
+v = await S1.rpc("rrhh_desvincular", { p_personal_id: P.T.id, p_fecha: "2026-10-01", p_motivo: "Prueba" });
+check("Supervisor no puede desvincular", !!v.error, v.error?.message);
+v = await A.rpc("rrhh_reincorporar", { p_personal_id: P.S2.id });
+const s2 = (await srv.from("personal").select("activo").eq("id", P.S2.id).single()).data;
+check("Reincorporar devuelve las dos", !v.error && s2?.activo === true, v.error?.message ?? s2);
+v = await C.rpc("rrhh_desvincular", { p_personal_id: P.S2.id, p_fecha: "2026-10-01", p_motivo: "Prueba" });
+check("S2 queda desvinculado para el resto de la prueba", !v.error, v.error?.message);
+v = await A.from("personal").update({ activo: false }).eq("id", P.S3.id).select("id");
+check("Suspender el acceso sin desvincular sí se puede", !v.error && v.data.length === 1, v.error?.message ?? v.data);
+must(await srv.from("personal").update({ activo: true }).eq("id", P.S3.id), "reactivar S3");
 
 console.log("\n— rrhh_jornadas / rrhh_jornada_trabajador —");
 const dias = [1, 2, 3, 4, 5].map((dia) => ({ dia, entrada: "08:00", salida: "17:00", colacion_minutos: 60 }));
@@ -373,29 +497,164 @@ check("S1 pidiendo la fila del administrador: 0", v?.length === 0, v?.length);
 v = (await S1.from("personal").select("fecha_nacimiento").eq("id", P.S3.id)).data;
 check("S1 no lee fecha_nacimiento de S3", v?.length === 0, v);
 v = await pers(C);
-check("Adm. contrato ve todo personal", v.length === 5, v);
+check("Adm. contrato ve todo personal", v.length === 6, v);
 v = await pers(A);
-check("Administrador ve todo personal", v.length === 5, v);
+check("Administrador ve todo personal", v.length === 6, v);
+v = await pers(T);
+check("Trabajador solo ve su propia fila", JSON.stringify(v) === '["T"]', v);
 v = await anon.from("personal").select("id");
 check("Anónimo no lee personal", !!v.error || v.data.length === 0, v.error?.message ?? v.data.length);
 
 console.log("\n— personal: lo que la app necesita sigue funcionando —");
 v = await S1.from("tickets").select("numero_inspeccion, supervisor:personal!tickets_supervisor_id_fkey(nombre, apellido)");
 check("S1 ve el nombre del supervisor en el ticket ajeno", v.data?.[0]?.supervisor?.nombre === "S2", v.error?.message ?? v.data);
-v = await S1.from("personal").select("*").eq("user_id", (await S1.auth.getUser()).data.user.id).single();
-check("S1 lee su propia fila completa (auth.ts)", !v.error && v.data?.nombre === "S1", v.error?.message);
+v = await S1.from("personal")
+  .select("id, nombre, apellido, rol, telefono, email, activo, created_at, user_id, fecha_nacimiento")
+  .eq("user_id", (await S1.auth.getUser()).data.user.id)
+  .single();
+check("S1 lee su propia fila (columnas de auth.ts)", !v.error && v.data?.nombre === "S1", v.error?.message);
 v = await A.from("personal")
   .insert({ nombre: "Nuevo", apellido: "Prueba", rol: "supervisor", email: "rls.nuevo@test.cordilleramyp.local", telefono: "56944444444" })
   .select("id, nombre")
   .single();
 check("Administrador crea personal con RETURNING", !v.error && v.data?.nombre === "Nuevo", v.error?.message);
-v = await C.from("personal")
-  .insert({ nombre: "Nuevo2", apellido: "Prueba", rol: "supervisor", email: "rls.nuevo2@test.cordilleramyp.local", telefono: "56955555555" })
-  .select("id")
-  .single();
-check("Adm. contrato crea supervisor con RETURNING", !v.error, v.error?.message);
 v = await A.from("personal").update({ telefono: "56900000001" }).eq("id", P.S3.id).select("telefono");
 check("Administrador edita personal", !v.error && v.data.length === 1, v.error?.message ?? v.data);
+
+console.log("\n— rol y tipos de inspección: solo administrador —");
+const nueva = (n, rol) => ({ nombre: n, apellido: "Prueba", rol, email: `rls.${n.toLowerCase()}@test.cordilleramyp.local` });
+v = await C.from("personal").insert(nueva("Nuevo2", "trabajador")).select("id").single();
+check("Adm. contrato crea un trabajador con RETURNING", !v.error && !!v.data?.id, v.error?.message);
+v = await C.from("personal").insert(nueva("Nuevo3", "administrador"));
+check("Adm. contrato NO crea un administrador", !!v.error, v.error?.message);
+v = await C.from("personal").insert(nueva("Nuevo4", "supervisor"));
+check("Adm. contrato NO crea un supervisor (sería asignar un rol)", !!v.error, v.error?.message);
+v = await C.from("personal").insert(nueva("Nuevo5", "administrador_contrato"));
+check("Adm. contrato NO crea otro adm. de contrato", !!v.error, v.error?.message);
+v = await C.from("personal").update({ rol: "administrador" }).eq("id", P.S3.id).select("id");
+check("Adm. contrato NO asciende a administrador", !!v.error || v.data.length === 0, v.error?.message ?? v.data);
+v = await C.from("personal").update({ rol: "administrador_contrato" }).eq("id", P.S3.id).select("id");
+check("Adm. contrato NO cambia un rol (supervisor → adm. contrato)", !!v.error, v.error?.message ?? v.data);
+v = await C.from("personal").update({ rol: "trabajador" }).eq("id", P.S3.id).select("id");
+check("Adm. contrato NO cambia un rol (supervisor → trabajador)", !!v.error, v.error?.message ?? v.data);
+v = await C.from("personal").update({ telefono: "56900000002", rol: "supervisor" }).eq("id", P.S3.id).select("telefono");
+check("Adm. contrato SÍ edita los datos personales (rol sin cambio)", !v.error && v.data.length === 1, v.error?.message ?? v.data);
+v = await C.from("personal").update({ telefono: "56900000003" }).eq("id", P.A.id).select("id");
+check("Adm. contrato NO toca la fila de un administrador (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data);
+v = await T.from("personal").update({ telefono: "56900000004" }).eq("id", P.T.id).select("id");
+check("Trabajador NO edita su propia fila (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data);
+v = await A.from("personal").update({ rol: "administrador_contrato" }).eq("id", P.S3.id).select("rol");
+check("Administrador SÍ cambia un rol", !v.error && v.data?.[0]?.rol === "administrador_contrato", v.error?.message ?? v.data);
+must(await A.from("personal").update({ rol: "supervisor" }).eq("id", P.S3.id), "rol S3 de vuelta");
+v = await C.from("personal_tipos_inspeccion").insert({ personal_id: P.S3.id, tipo_inspeccion: "encarpe" });
+check("Adm. contrato NO asigna tipos de inspección", !!v.error, v.error?.message);
+v = await C.from("personal_tipos_inspeccion").delete().eq("personal_id", P.S1.id).select();
+check("Adm. contrato NO quita tipos de inspección (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await A.from("personal_tipos_inspeccion").insert({ personal_id: P.S3.id, tipo_inspeccion: "encarpe" }).select("personal_id");
+check("Administrador SÍ asigna tipos", !v.error && v.data.length === 1, v.error?.message);
+must(await A.from("personal_tipos_inspeccion").delete().eq("personal_id", P.S3.id), "tipos S3 de vuelta");
+
+console.log("\n— trabajador: solo lectura de lo suyo —");
+const docT = `${P.T.id}/contrato-t.pdf`;
+must(await A.storage.from("documentos-rrhh").upload(docT, pdf, { contentType: "application/pdf" }), "subir doc T");
+must(
+  await A.from("rrhh_documentos").insert({ personal_id: P.T.id, tipo_id: tipoContrato, nombre_archivo: "contrato-t.pdf", ruta: docT, tamano_bytes: 15, mime: "application/pdf" }),
+  "registrar doc T",
+);
+v = (await T.from("rrhh_fichas").select("personal_id")).data;
+check("Trabajador ve su ficha", JSON.stringify(v?.map((f) => nombre(f.personal_id))) === '["T"]', v);
+v = (await T.from("rrhh_documentos").select("nombre_archivo")).data;
+check("Trabajador ve solo sus documentos", JSON.stringify(v?.map((d) => d.nombre_archivo)) === '["contrato-t.pdf"]', v);
+v = await T.storage.from("documentos-rrhh").createSignedUrl(docT, 60);
+check("Trabajador firma la URL de su propio documento", !v.error && !!v.data?.signedUrl, v.error?.message);
+v = await T.storage.from("documentos-rrhh").createSignedUrl(rutaS2, 60);
+check("Trabajador NO firma la URL de un documento ajeno", !!v.error, v.error?.message ?? "la firmó");
+v = await T.storage.from("documentos-rrhh").upload(`${P.T.id}/mio.pdf`, pdf, { contentType: "application/pdf" });
+check("Trabajador NO sube documentos (ni a su carpeta)", !!v.error, v.error?.message);
+v = await T.from("rrhh_documentos").insert({ personal_id: P.T.id, tipo_id: tipoContrato, nombre_archivo: "x.pdf", ruta: `${P.T.id}/x.pdf`, tamano_bytes: 15, mime: "application/pdf" });
+check("Trabajador NO registra documentos", !!v.error, v.error?.message);
+v = await T.from("rrhh_fichas").update({ cargas_familiares: 9 }).eq("personal_id", P.T.id).select();
+check("Trabajador NO edita su ficha (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await T.rpc("rrhh_reincorporar", { p_personal_id: P.T.id });
+check("Trabajador NO usa la acción de reincorporar sobre sí mismo", !!v.error, v.error?.message);
+v = await T.from("tickets").select("id");
+check("Trabajador no ve ningún ticket", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await T.from("tickets").insert({ ...ticket, fecha: new Date().toISOString(), patente_camion: "TT11", supervisor_id: P.T.id });
+check("Trabajador no crea tickets", !!v.error, v.error?.message);
+v = await T.from("destinatarios_correo").select("email");
+check("Trabajador NO lee los correos de los destinatarios", !v.error && v.data.length === 0, v.error?.message ?? v.data);
+v = await S1.from("destinatarios_correo").select("email");
+check("Supervisor SÍ los lee (enviar el informe)", !v.error && v.data.length === 1, v.error?.message ?? v.data);
+
+// Barrido de TODAS las tablas de public como trabajador, en la base misma:
+// un rol nuevo hereda lo que las políticas no previeron. Cuenta qué ve, y
+// cuántas filas lograría actualizar, borrar o insertar (todo en una
+// transacción que se deshace).
+console.log("\n— trabajador: barrido de todas las tablas —");
+const uidT = (await T.auth.getUser()).data.user.id;
+const barrido = execSync(
+  `docker exec -i supabase_db_cordilleraMyP psql -U postgres -v ON_ERROR_STOP=1 -qtA`,
+  {
+    encoding: "utf8",
+    stdio: ["pipe", "pipe", "pipe"],
+    input: `
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"${uidT}","role":"authenticated"}', true);
+create temp table _r (tabla text, ve int, actualiza int, borra int, inserta text) on commit drop;
+do $$
+declare t record; col text; n int; v int; u int; b int; i text;
+begin
+  for t in select c.relname from pg_class c join pg_namespace s on s.oid = c.relnamespace
+           where s.nspname = 'public' and c.relkind = 'r' order by 1 loop
+    select a.attname into col from pg_attribute a join pg_class c on c.oid = a.attrelid
+      join pg_namespace s on s.oid = c.relnamespace
+      where s.nspname = 'public' and c.relname = t.relname and a.attnum > 0 and not a.attisdropped
+        and a.attidentity = '' and a.attgenerated = '' and a.attname <> 'rut' order by a.attnum limit 1;
+    begin execute format('select count(*) from public.%I', t.relname) into v; exception when others then v := -1; end;
+    begin execute format('with x as (update public.%I set %I = %I returning 1) select count(*) from x', t.relname, col, col) into u;
+      exception when others then u := 0; end;
+    begin execute format('with x as (delete from public.%I returning 1) select count(*) from x', t.relname) into b;
+      exception when others then b := 0; end;
+    begin execute format('insert into public.%I default values', t.relname); i := 'SÍ';
+      exception when others then i := 'no'; end;
+    insert into _r values (t.relname, v, u, b, i);
+  end loop;
+end $$;
+select tabla || '|' || ve || '|' || actualiza || '|' || borra || '|' || inserta from _r order by 1;
+rollback;
+`,
+  },
+);
+// Tablas que el trabajador PUEDE leer con filas: las suyas y catálogos sin
+// datos de nadie. Cualquier otra con filas visibles es una fuga.
+const LEE_PERMITIDO = new Set([
+  "personal", // solo su fila (comprobado arriba)
+  "rrhh_fichas",
+  "rrhh_documentos",
+  "rrhh_tipos_documento",
+  "rrhh_cargos",
+  "rrhh_areas",
+  "rrhh_remuneracion_base",
+  "rrhh_jornadas",
+  "rrhh_jornada_trabajador",
+  "checklist_items",
+  "tipos_inspeccion",
+  "transportes",
+]);
+const filasBarrido = barrido.trim().split(/\r?\n/).filter((l) => l.includes("|")).map((l) => l.split("|"));
+check("El barrido recorrió las tablas de public", filasBarrido.length > 20, filasBarrido.length);
+for (const [tabla, ve, actualiza, borra, inserta] of filasBarrido) {
+  if (Number(ve) > 0 && !LEE_PERMITIDO.has(tabla)) check(`Trabajador NO lee ${tabla}`, false, `${ve} filas`);
+  if (Number(actualiza) > 0) check(`Trabajador NO actualiza ${tabla}`, false, `${actualiza} filas`);
+  if (Number(borra) > 0) check(`Trabajador NO borra en ${tabla}`, false, `${borra} filas`);
+  if (inserta === "SÍ") check(`Trabajador NO inserta en ${tabla}`, false, "insertó una fila");
+}
+check(
+  "Barrido: ninguna escritura posible y solo lecturas permitidas",
+  filasBarrido.every(([t, ve, a, b, i]) => (Number(ve) <= 0 || LEE_PERMITIDO.has(t)) && Number(a) === 0 && Number(b) === 0 && i === "no"),
+  filasBarrido.filter(([t, ve, a, b, i]) => (Number(ve) > 0 && !LEE_PERMITIDO.has(t)) || Number(a) > 0 || Number(b) > 0 || i === "SÍ").map((f) => f.join("|")),
+);
 v = await S1.from("tickets")
   .insert({ ...ticket, fecha: new Date().toISOString(), patente_camion: "CC33", supervisor_id: P.S1.id })
   .select("numero_inspeccion")

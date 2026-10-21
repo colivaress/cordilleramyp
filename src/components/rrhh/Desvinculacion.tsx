@@ -10,8 +10,8 @@ import { useEstadoGuardado } from "@/hooks/use-estado-guardado";
 import { desvincular, reincorporar } from "@/app/(app)/rrhh/actions";
 
 /** Desvinculación = baja lógica (§16.8): la ficha, el historial de sueldo y
- *  los documentos se conservan; solo cambia de pestaña. No toca el acceso a
- *  la app (eso se maneja en Usuarios). */
+ *  los documentos se conservan; cambia de pestaña y se corta el acceso a la
+ *  app (las dos cosas en una sola transacción, rrhh_desvincular()). */
 export function Desvinculacion({
   personalId,
   desvinculado,

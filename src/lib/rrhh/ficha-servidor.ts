@@ -14,13 +14,17 @@ type Cliente = SupabaseClient<Database>;
  * trabajador solo recibe lo suyo aunque llame con otro id.
  */
 export async function cargarFichaCompleta(supabase: Cliente, personalId: string, hoy: string) {
-  const [persona, ficha, historial, asignaciones, documentos] = await Promise.all([
+  const [persona, ficha, historial, asignaciones, documentos, ruts] = await Promise.all([
     supabase
       .from("personal")
-      .select("id, nombre, apellido, email, telefono, fecha_nacimiento, rol, activo")
+      .select("id, nombre, apellido, email, telefono, fecha_nacimiento, rol, activo, created_at")
       .eq("id", personalId)
       .maybeSingle(),
-    supabase.from("rrhh_fichas").select("*").eq("personal_id", personalId).maybeSingle(),
+    supabase
+      .from("rrhh_fichas")
+      .select("*, cargo:rrhh_cargos(nombre), area:rrhh_areas(nombre)")
+      .eq("personal_id", personalId)
+      .maybeSingle(),
     supabase
       .from("rrhh_historial_sueldo")
       .select("*")
@@ -37,6 +41,9 @@ export async function cargarFichaCompleta(supabase: Cliente, personalId: string,
       .select("id, nombre_archivo, ruta, tamano_bytes, created_at, tipo:rrhh_tipos_documento(nombre)")
       .eq("personal_id", personalId)
       .order("created_at", { ascending: false }),
+    // El RUT no se lee con un select de personal (grants por columna): esta
+    // función aplica la misma regla de lectura que las tablas rrhh_*.
+    supabase.rpc("rrhh_ruts"),
   ]);
 
   // Autor de cada cambio de sueldo (§16.3). El trabajador en "Mis datos" no
@@ -83,6 +90,7 @@ export async function cargarFichaCompleta(supabase: Cliente, personalId: string,
 
   return {
     persona: persona.data,
+    rut: (ruts.data ?? []).find((r) => r.personal_id === personalId)?.rut ?? null,
     ficha: ficha.data,
     remuneraciones,
     remuneracionVigente: vigenteEn(remuneraciones, hoy),

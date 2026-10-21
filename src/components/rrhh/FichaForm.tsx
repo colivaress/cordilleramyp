@@ -19,17 +19,26 @@ import {
   type FormularioFicha,
 } from "@/lib/rrhh/ficha";
 import { AFPS, NOMBRE_AFP } from "@/lib/rrhh/parametros";
+import { cn } from "@/lib/utils";
+
+type Opcion = { id: string; nombre: string; activo: boolean };
 
 /** Datos contractuales y previsionales. Los editan administrador y
- *  administrador de contrato (no son montos de sueldo). */
+ *  administrador de contrato (no son montos de sueldo). Cargo y área salen
+ *  de su catálogo: un texto libre deja "Encarpador" y "ENCARPADOR" como dos
+ *  cargos distintos y los filtros dejan gente fuera sin avisar. */
 export function FichaForm({
   personalId,
   inicial,
   existe,
+  cargos,
+  areas,
 }: {
   personalId: string;
   inicial: FormularioFicha;
   existe: boolean;
+  cargos: Opcion[];
+  areas: Opcion[];
 }) {
   const [f, setF] = useState(inicial);
   const [errores, setErrores] = useState<string[]>([]);
@@ -53,11 +62,36 @@ export function FichaForm({
           throw new Error(res.mensaje);
         }
       });
-      toast.success("Ficha guardada.");
+      toast.success(existe ? "Contrato actualizado." : "Contrato registrado.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo guardar.");
     }
   }
+
+  // Un cargo o área desactivado sigue apareciendo si es el que ya tiene la
+  // ficha (baja lógica: no desaparece de lo histórico), pero no se ofrece
+  // para elegirlo de nuevo.
+  const catalogo = (id: "cargo_id" | "area_id", etiqueta: string, opciones: Opcion[], vacio: string) => (
+    <div className="grid min-w-0 gap-1.5">
+      <Label htmlFor={`ficha-${id}`}>{etiqueta}</Label>
+      <select
+        id={`ficha-${id}`}
+        className={cn(nativeSelectClassName, "w-full truncate")}
+        value={f[id]}
+        onChange={(e) => set(id, e.target.value)}
+      >
+        <option value="">{vacio}</option>
+        {opciones
+          .filter((o) => o.activo || o.id === inicial[id])
+          .map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.nombre}
+              {!o.activo && " (desactivado)"}
+            </option>
+          ))}
+      </select>
+    </div>
+  );
 
   type CampoTexto = Exclude<keyof FormularioFicha, "afecto_afc">;
   const campo = (id: CampoTexto, etiqueta: string, props: React.ComponentProps<typeof Input> = {}) => (
@@ -76,9 +110,8 @@ export function FichaForm({
   return (
     <form onSubmit={guardar} className="grid gap-4">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {campo("rut", "RUT", { placeholder: "12.345.678-9" })}
-        {campo("cargo", "Cargo")}
-        {campo("area", "Área (opcional)")}
+        {catalogo("cargo_id", "Cargo", cargos, "Elegir…")}
+        {catalogo("area_id", "Área (opcional)", areas, "Sin área")}
         {campo("fecha_ingreso", "Fecha de ingreso", { type: "date" })}
         <div className="grid gap-1.5">
           <Label htmlFor="ficha-tipo_contrato">Tipo de contrato</Label>
@@ -149,7 +182,7 @@ export function FichaForm({
         <Button type="submit" disabled={guardado.pendiente}>
           <ContenidoBoton
             pendiente={guardado.pendiente}
-            texto={existe ? "Guardar cambios" : "Crear ficha"}
+            texto={existe ? "Guardar cambios" : "Registrar contrato"}
             textoPendiente="Guardando…"
           />
         </Button>
