@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getSesion } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Logo } from "@/components/Logo";
@@ -11,6 +12,14 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const { perfil } = await getSesion();
+  // "Mis datos" (RRHH §16.7) solo para quien tiene ficha. Lectura por clave
+  // primaria de la propia fila (la RLS lo permite al dueño).
+  const supabase = await createClient();
+  const { data: miFicha } = await supabase
+    .from("rrhh_fichas")
+    .select("personal_id")
+    .eq("personal_id", perfil.id)
+    .maybeSingle();
   const esAdmin = perfil.rol === "administrador";
   const esAdminContrato = perfil.rol === "administrador_contrato";
 
@@ -86,6 +95,14 @@ export default async function AppLayout({
                 className={buttonVariants({ variant: "ghost" })}
               >
                 RRHH
+              </Link>
+            )}
+            {miFicha && (
+              <Link
+                href="/mis-datos"
+                className={buttonVariants({ variant: "ghost" })}
+              >
+                Mis datos
               </Link>
             )}
             {/* §2.6 pedía este link "Nueva inspección" en la barra, solo para

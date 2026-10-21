@@ -28,6 +28,7 @@ export function formularioFicticio(anio = 2026, mes = 10): FormularioParametros 
       uf_mes: "10.100,25",
       utm: "50.000",
       imm: "400.000",
+      jornada_ordinaria_horas: "40",
       tope_imponible_afp_uf: "80,5",
       tope_imponible_afc_uf: "120,5",
       tasa_afp_obligatoria: "10",

@@ -396,6 +396,197 @@ export type Database = {
           },
         ]
       }
+      rrhh_documentos: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          mime: string
+          nombre_archivo: string
+          personal_id: string
+          ruta: string
+          tamano_bytes: number
+          tipo_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          mime: string
+          nombre_archivo: string
+          personal_id: string
+          ruta: string
+          tamano_bytes: number
+          tipo_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          mime?: string
+          nombre_archivo?: string
+          personal_id?: string
+          ruta?: string
+          tamano_bytes?: number
+          tipo_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rrhh_documentos_tipo_id_fkey"
+            columns: ["tipo_id"]
+            isOneToOne: false
+            referencedRelation: "rrhh_tipos_documento"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rrhh_documentos_personal_id_fkey"
+            columns: ["personal_id"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rrhh_fichas: {
+        Row: {
+          afecto_afc: boolean
+          afp: Database["public"]["Enums"]["rrhh_afp"]
+          area: string | null
+          cargas_familiares: number
+          cargo: string
+          created_at: string
+          fecha_desvinculacion: string | null
+          fecha_ingreso: string
+          fecha_termino_contrato: string | null
+          isapre: string | null
+          motivo_desvinculacion: string | null
+          personal_id: string
+          plan_isapre_uf: number | null
+          rut: string
+          sistema_salud: Database["public"]["Enums"]["rrhh_sistema_salud"]
+          tipo_contrato: Database["public"]["Enums"]["rrhh_tipo_contrato"]
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          afecto_afc?: boolean
+          afp: Database["public"]["Enums"]["rrhh_afp"]
+          area?: string | null
+          cargas_familiares?: number
+          cargo: string
+          created_at?: string
+          fecha_desvinculacion?: string | null
+          fecha_ingreso: string
+          fecha_termino_contrato?: string | null
+          isapre?: string | null
+          motivo_desvinculacion?: string | null
+          personal_id: string
+          plan_isapre_uf?: number | null
+          rut: string
+          sistema_salud: Database["public"]["Enums"]["rrhh_sistema_salud"]
+          tipo_contrato: Database["public"]["Enums"]["rrhh_tipo_contrato"]
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          afecto_afc?: boolean
+          afp?: Database["public"]["Enums"]["rrhh_afp"]
+          area?: string | null
+          cargas_familiares?: number
+          cargo?: string
+          created_at?: string
+          fecha_desvinculacion?: string | null
+          fecha_ingreso?: string
+          fecha_termino_contrato?: string | null
+          isapre?: string | null
+          motivo_desvinculacion?: string | null
+          personal_id?: string
+          plan_isapre_uf?: number | null
+          rut?: string
+          sistema_salud?: Database["public"]["Enums"]["rrhh_sistema_salud"]
+          tipo_contrato?: Database["public"]["Enums"]["rrhh_tipo_contrato"]
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rrhh_fichas_personal_id_fkey"
+            columns: ["personal_id"]
+            isOneToOne: true
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rrhh_jornada_trabajador: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          jornada_id: string
+          personal_id: string
+          vigente_desde: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          jornada_id: string
+          personal_id: string
+          vigente_desde: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          jornada_id?: string
+          personal_id?: string
+          vigente_desde?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rrhh_jornada_trabajador_jornada_id_fkey"
+            columns: ["jornada_id"]
+            isOneToOne: false
+            referencedRelation: "rrhh_jornadas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rrhh_jornada_trabajador_personal_id_fkey"
+            columns: ["personal_id"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rrhh_jornadas: {
+        Row: {
+          activo: boolean
+          created_at: string
+          created_by: string | null
+          dias: Json
+          id: string
+          nombre: string
+        }
+        Insert: {
+          activo?: boolean
+          created_at?: string
+          created_by?: string | null
+          dias: Json
+          id?: string
+          nombre: string
+        }
+        Update: {
+          activo?: boolean
+          created_at?: string
+          created_by?: string | null
+          dias?: Json
+          id?: string
+          nombre?: string
+        }
+        Relationships: []
+      }
       rrhh_mutual_adicional: {
         Row: {
           created_at: string
@@ -436,6 +627,7 @@ export type Database = {
           anio: number
           created_at: string
           imm: number
+          jornada_ordinaria_horas: number | null
           mes: number
           tasa_afc_empleador_indefinido: number
           tasa_afc_empleador_plazo_fijo: number
@@ -460,6 +652,7 @@ export type Database = {
           anio: number
           created_at?: string
           imm: number
+          jornada_ordinaria_horas?: number | null
           mes: number
           tasa_afc_empleador_indefinido: number
           tasa_afc_empleador_plazo_fijo: number
@@ -484,6 +677,7 @@ export type Database = {
           anio?: number
           created_at?: string
           imm?: number
+          jornada_ordinaria_horas?: number | null
           mes?: number
           tasa_afc_empleador_indefinido?: number
           tasa_afc_empleador_plazo_fijo?: number
@@ -516,26 +710,35 @@ export type Database = {
       }
       rrhh_remuneracion_base: {
         Row: {
+          colacion: number
+          comentario: string | null
           created_at: string
           created_by: string | null
           id: string
           liquido_pactado: number
+          movilizacion: number
           personal_id: string
           vigente_desde: string
         }
         Insert: {
+          colacion?: number
+          comentario?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
           liquido_pactado: number
+          movilizacion?: number
           personal_id: string
           vigente_desde: string
         }
         Update: {
+          colacion?: number
+          comentario?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
           liquido_pactado?: number
+          movilizacion?: number
           personal_id?: string
           vigente_desde?: string
         }
@@ -555,6 +758,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      rrhh_tipos_documento: {
+        Row: {
+          activo: boolean
+          created_at: string
+          id: string
+          nombre: string
+          orden: number
+        }
+        Insert: {
+          activo?: boolean
+          created_at?: string
+          id?: string
+          nombre: string
+          orden?: number
+        }
+        Update: {
+          activo?: boolean
+          created_at?: string
+          id?: string
+          nombre?: string
+          orden?: number
+        }
+        Relationships: []
       }
       ticket_checklist_fotos: {
         Row: {
@@ -846,7 +1073,23 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      rrhh_historial_sueldo: {
+        Row: {
+          colacion: number | null
+          colacion_anterior: number | null
+          comentario: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string | null
+          liquido_pactado: number | null
+          liquido_pactado_anterior: number | null
+          movilizacion: number | null
+          movilizacion_anterior: number | null
+          personal_id: string | null
+          vigente_desde: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       contar_tickets_con_patente_exacta: {
@@ -880,6 +1123,8 @@ export type Database = {
         | "planvital"
         | "provida"
         | "uno"
+      rrhh_sistema_salud: "fonasa" | "isapre"
+      rrhh_tipo_contrato: "indefinido" | "plazo_fijo" | "obra_faena"
       ticket_estado:
         | "en_revision"
         | "finalizada_con_observaciones"
@@ -1033,6 +1278,8 @@ export const Constants = {
         "provida",
         "uno",
       ],
+      rrhh_sistema_salud: ["fonasa", "isapre"],
+      rrhh_tipo_contrato: ["indefinido", "plazo_fijo", "obra_faena"],
       ticket_estado: [
         "en_revision",
         "finalizada_con_observaciones",

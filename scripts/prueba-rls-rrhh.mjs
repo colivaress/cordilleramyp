@@ -150,16 +150,39 @@ check("Adm. contrato no puede insertar montos", !!v.error, v.error?.message);
 v = await C.from("rrhh_remuneracion_base").update({ liquido_pactado: 1 }).eq("personal_id", P.S1.id).select();
 check("Adm. contrato no puede editar montos (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
 v = await A.from("rrhh_remuneracion_base")
-  .insert({ personal_id: P.S2.id, liquido_pactado: 1000000, vigente_desde: "2026-11-01" })
+  // Vigencia muy futura a propósito: la prueba de rutas comprueba que no se
+  // muestre, y no debe dejar de cumplirse con el paso del calendario.
+  .insert({ personal_id: P.S2.id, liquido_pactado: 1000000, vigente_desde: "2099-01-01", comentario: "Futuro" })
   .select("liquido_pactado")
   .single();
 check("Administrador inserta con RETURNING", !v.error && v.data?.liquido_pactado === 1000000, v.error?.message ?? v.data);
-v = await A.from("rrhh_remuneracion_base").update({ liquido_pactado: 810000 }).eq("personal_id", P.S1.id).select("liquido_pactado");
-check("Administrador edita montos", !v.error && v.data.length === 1, v.error?.message ?? v.data);
+// Fase 3: la tabla solo se agrega (es el historial de sueldo, §16.3). Una
+// corrección es otra fila con la misma vigencia; nadie edita ni borra.
+v = await A.from("rrhh_remuneracion_base").update({ liquido_pactado: 1 }).eq("personal_id", P.S1.id).select();
+check("Ni el administrador edita una fila de sueldo (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await A.from("rrhh_remuneracion_base")
+  .insert({ personal_id: P.S1.id, liquido_pactado: 810000, vigente_desde: "2026-10-01", comentario: "Corrección", created_by: P.A.id })
+  .select("liquido_pactado")
+  .single();
+check("Administrador corrige con una fila nueva de la misma vigencia", !v.error && v.data?.liquido_pactado === 810000, v.error?.message ?? v.data);
 v = await A.from("rrhh_remuneracion_base").delete().eq("personal_id", P.S1.id).select();
 check("Nadie borra remuneraciones (ni admin): 0 filas", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
-v = (await srv.from("rrhh_remuneracion_base").select("liquido_pactado").eq("personal_id", P.S1.id).single()).data;
-check("El sueldo de S1 quedó en lo que fijó el administrador", v?.liquido_pactado === 810000, v);
+v = (await srv.from("rrhh_remuneracion_base").select("liquido_pactado").eq("personal_id", P.S1.id).order("created_at")).data;
+check("Quedan las dos filas de S1: la original y la corrección", JSON.stringify(v?.map((x) => x.liquido_pactado)) === "[800000,810000]", v);
+
+console.log("\n— rrhh_historial_sueldo (vista con la RLS de quien consulta) —");
+v = (await S1.from("rrhh_historial_sueldo").select("personal_id, liquido_pactado, liquido_pactado_anterior").order("created_at")).data;
+check(
+  "S1 ve solo su historial, con el valor anterior",
+  JSON.stringify(v?.map((h) => [nombre(h.personal_id), h.liquido_pactado, h.liquido_pactado_anterior])) === '[["S1",800000,null],["S1",810000,800000]]',
+  v,
+);
+v = (await S3.from("rrhh_historial_sueldo").select("id")).data;
+check("S3 no ve historial ajeno", v?.length === 0, v?.length);
+v = (await C.from("rrhh_historial_sueldo").select("id")).data;
+check("Adm. contrato ve todo el historial", v?.length === 4, v?.length);
+v = await anon.from("rrhh_historial_sueldo").select("id");
+check("Anónimo no lee el historial", !!v.error || v.data.length === 0, v.error?.message ?? v.data.length);
 
 // Valores FICTICIOS, del archivo que lo dice en el nombre: solo prueban permisos.
 const periodo = (anio, mes) => filasFicticias(anio, mes).periodo;
@@ -229,6 +252,116 @@ v = await S1.from("rrhh_mutual_adicional").update({ tasa: 9 }).gte("tasa", 0).se
 check("Supervisor no puede cambiar la tasa (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
 v = await A.from("rrhh_mutual_adicional").delete().gte("tasa", 0).select();
 check("Nadie borra un tramo (ni admin): 0 filas", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+
+// ── Fase 3: ficha, jornadas, documentos ─────────────────────────────────
+// RUT inventados con dígito verificador válido.
+const ficha = (personal_id, rut) => ({
+  personal_id,
+  rut,
+  cargo: "Supervisor de encarpe",
+  fecha_ingreso: "2019-03-15",
+  tipo_contrato: "indefinido",
+  afp: "modelo",
+  sistema_salud: "fonasa",
+});
+
+console.log("\n— rrhh_fichas —");
+v = await C.from("rrhh_fichas").insert(ficha(P.S1.id, "111111111")).select("rut").single();
+check("Adm. contrato crea una ficha con RETURNING", !v.error && v.data?.rut === "111111111", v.error?.message ?? v.data);
+v = await A.from("rrhh_fichas").insert(ficha(P.S2.id, "222222222")).select("rut").single();
+check("Administrador crea una ficha", !v.error, v.error?.message);
+v = await A.from("rrhh_fichas").insert(ficha(P.S3.id, "111111111"));
+check("Un RUT repetido se rechaza", !!v.error, v.error?.message);
+v = await A.from("rrhh_fichas").insert({ ...ficha(P.S3.id, "333333333"), tipo_contrato: "plazo_fijo" });
+check("Plazo fijo sin fecha de término se rechaza (check)", !!v.error, v.error?.message);
+v = await A.from("rrhh_fichas").insert({ ...ficha(P.S3.id, "333333333"), sistema_salud: "isapre" });
+check("Isapre sin plan se rechaza (check)", !!v.error, v.error?.message);
+v = (await S1.from("rrhh_fichas").select("personal_id")).data;
+check("S1 solo ve su propia ficha", JSON.stringify(v?.map((f) => nombre(f.personal_id))) === '["S1"]', v);
+v = (await S3.from("rrhh_fichas").select("personal_id")).data;
+check("S3 (sin ficha) no ve ninguna", v?.length === 0, v?.length);
+v = await S1.from("rrhh_fichas").update({ cargo: "Gerente" }).eq("personal_id", P.S1.id).select();
+check("S1 no puede editar su propia ficha (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await S1.from("rrhh_fichas").insert(ficha(P.S3.id, "333333333"));
+check("Supervisor no puede crear fichas", !!v.error, v.error?.message);
+v = await C.from("rrhh_fichas")
+  .update({ fecha_desvinculacion: "2026-10-01", motivo_desvinculacion: "Prueba" })
+  .eq("personal_id", P.S2.id)
+  .select("fecha_desvinculacion");
+check("Adm. contrato desvincula (baja lógica)", !v.error && v.data.length === 1, v.error?.message ?? v.data);
+v = await A.from("rrhh_fichas").delete().eq("personal_id", P.S2.id).select();
+check("Nadie borra una ficha (ni admin): 0 filas", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+
+console.log("\n— rrhh_jornadas / rrhh_jornada_trabajador —");
+const dias = [1, 2, 3, 4, 5].map((dia) => ({ dia, entrada: "08:00", salida: "17:00", colacion_minutos: 60 }));
+v = await C.from("rrhh_jornadas").insert({ nombre: "Turno A", dias }).select("id").single();
+check("Adm. contrato crea una jornada con RETURNING", !v.error && !!v.data?.id, v.error?.message);
+const jornadaA = v.data?.id;
+v = await A.from("rrhh_jornadas").insert({ nombre: "Turno B", dias }).select("id").single();
+const jornadaB = v.data?.id;
+v = await A.from("rrhh_jornadas").update({ dias: [{ dia: 1, entrada: "09:00", salida: "18:00", colacion_minutos: 0 }] }).eq("id", jornadaA).select();
+check("El horario de una jornada no se puede cambiar (trigger)", !!v.error && /no se puede modificar/.test(v.error.message), v.error?.message ?? v.data);
+v = await A.from("rrhh_jornadas").update({ activo: false }).eq("id", jornadaB).select("activo");
+check("Sí se puede desactivar", !v.error && v.data?.[0]?.activo === false, v.error?.message ?? v.data);
+v = await C.from("rrhh_jornada_trabajador").insert({ personal_id: P.S1.id, jornada_id: jornadaA, vigente_desde: "2026-01-01" }).select("id");
+check("Adm. contrato asigna jornada con RETURNING", !v.error && v.data.length === 1, v.error?.message);
+v = await S1.from("rrhh_jornada_trabajador").insert({ personal_id: P.S1.id, jornada_id: jornadaB, vigente_desde: "2026-02-01" });
+check("Supervisor no se asigna jornada", !!v.error, v.error?.message);
+v = await A.from("rrhh_jornada_trabajador").update({ jornada_id: jornadaB }).eq("personal_id", P.S1.id).select();
+check("Una asignación no se edita (0 filas): se agrega otra", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = (await S1.from("rrhh_jornadas").select("nombre")).data;
+check("S1 ve solo la jornada que tiene asignada", JSON.stringify(v?.map((j) => j.nombre)) === '["Turno A"]', v);
+v = (await S3.from("rrhh_jornadas").select("nombre")).data;
+check("S3 no ve jornadas", v?.length === 0, v);
+v = (await S1.from("rrhh_jornada_trabajador").select("id, jornada:rrhh_jornadas(nombre)")).data;
+check("S1 lee su asignación con el nombre de la jornada", v?.length === 1 && v[0].jornada?.nombre === "Turno A", v);
+
+console.log("\n— rrhh_tipos_documento / rrhh_documentos / bucket documentos-rrhh —");
+v = (await S3.from("rrhh_tipos_documento").select("nombre")).data;
+check("El catálogo de tipos se lee con sesión (8 tipos, sin antecedentes)", v?.length === 8 && !v.some((t) => /antecedentes/i.test(t.nombre)), v?.map((t) => t.nombre));
+v = await S1.from("rrhh_tipos_documento").insert({ nombre: "Pirata" });
+check("Supervisor no agrega tipos", !!v.error, v.error?.message);
+v = await C.from("rrhh_tipos_documento").insert({ nombre: "Licencia de conducir", orden: 9 }).select("id").single();
+check("Adm. contrato agrega un tipo", !v.error, v.error?.message);
+v = await A.from("rrhh_tipos_documento").delete().eq("nombre", "Licencia de conducir").select();
+check("Un tipo no se borra (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+const tipoContrato = (await A.from("rrhh_tipos_documento").select("id").eq("nombre", "Contrato de trabajo").single()).data.id;
+
+const pdf = new Blob(["%PDF-1.4 prueba"], { type: "application/pdf" });
+const rutaS1 = `${P.S1.id}/prueba-contrato.pdf`;
+const rutaS2 = `${P.S2.id}/prueba-cedula.pdf`;
+v = await C.storage.from("documentos-rrhh").upload(rutaS1, pdf, { contentType: "application/pdf" });
+check("Adm. contrato sube un documento al bucket", !v.error, v.error?.message);
+v = await A.storage.from("documentos-rrhh").upload(rutaS2, pdf, { contentType: "application/pdf" });
+check("Administrador sube un documento al bucket", !v.error, v.error?.message);
+v = await S1.storage.from("documentos-rrhh").upload(`${P.S1.id}/pirata.pdf`, pdf, { contentType: "application/pdf" });
+check("Supervisor no sube ni a su propia carpeta", !!v.error, v.error?.message);
+v = await A.storage.from("documentos-rrhh").upload(`${P.S1.id}/virus.exe`, new Blob(["MZ"]), { contentType: "application/x-msdownload" });
+check("El bucket rechaza un tipo no permitido", !!v.error, v.error?.message);
+v = await C.from("rrhh_documentos")
+  .insert({ personal_id: P.S1.id, tipo_id: tipoContrato, nombre_archivo: "contrato.pdf", ruta: rutaS1, tamano_bytes: 15, mime: "application/pdf" })
+  .select("id");
+check("Adm. contrato registra el documento con RETURNING", !v.error && v.data.length === 1, v.error?.message);
+v = await A.from("rrhh_documentos").insert({ personal_id: P.S2.id, tipo_id: tipoContrato, nombre_archivo: "cedula.pdf", ruta: rutaS2, tamano_bytes: 15, mime: "application/pdf" });
+check("Administrador registra otro", !v.error, v.error?.message);
+v = await A.from("rrhh_documentos").insert({ personal_id: P.S1.id, tipo_id: tipoContrato, nombre_archivo: "x.pdf", ruta: `${P.S2.id}/x.pdf`, tamano_bytes: 15, mime: "application/pdf" });
+check("Un documento con ruta de otro trabajador se rechaza (check)", !!v.error, v.error?.message);
+v = (await S1.from("rrhh_documentos").select("nombre_archivo")).data;
+check("S1 solo ve sus documentos", JSON.stringify(v?.map((d) => d.nombre_archivo)) === '["contrato.pdf"]', v);
+v = await S1.storage.from("documentos-rrhh").download(rutaS1);
+check("S1 descarga su propio documento", !v.error && !!v.data, v.error?.message);
+v = await S1.storage.from("documentos-rrhh").download(rutaS2);
+check("S1 NO descarga el documento de S2", !!v.error, v.error?.message ?? "lo descargó");
+v = await S1.storage.from("documentos-rrhh").createSignedUrl(rutaS2, 60);
+check("S1 NO puede firmar una URL del documento de S2", !!v.error, v.error?.message ?? "la firmó");
+v = await S3.storage.from("documentos-rrhh").list(P.S1.id);
+check("S3 no lista la carpeta de S1", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await C.storage.from("documentos-rrhh").download(rutaS2);
+check("Adm. contrato descarga cualquier documento", !v.error && !!v.data, v.error?.message);
+v = await A.storage.from("documentos-rrhh").remove([rutaS1]);
+check("Nadie borra un documento del bucket (ni admin)", !v.error && v.data.length === 0, v.error?.message ?? v.data);
+v = await anon.storage.from("documentos-rrhh").download(rutaS1);
+check("Anónimo no descarga", !!v.error, v.error?.message ?? "lo descargó");
 
 console.log("\n— personal: lectura —");
 v = await pers(S3);
