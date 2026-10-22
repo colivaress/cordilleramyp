@@ -87,7 +87,7 @@ export function CuentaForm({
   }
 
   const campo = (
-    id: "nombre" | "apellido" | "rut" | "email" | "telefono" | "fechaNacimiento",
+    id: "nombre" | "apellido" | "rut" | "email" | "telefono" | "fechaNacimiento" | "contactoNombre" | "contactoTelefono" | "contactoRelacion",
     etiqueta: string,
     props: React.ComponentProps<typeof Input> = {},
   ) => (
@@ -137,6 +137,19 @@ export function CuentaForm({
           )}
         </div>
       </div>
+
+      <fieldset className="grid gap-2">
+        <legend className="text-sm font-medium">Contacto de emergencia</legend>
+        <p className="text-xs text-muted-foreground">
+          A quién avisar si la persona tiene un accidente. Es un dato de otra persona: lo ven solo los
+          administradores, los administradores de contrato y la propia persona.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {campo("contactoNombre", "Nombre")}
+          {campo("contactoTelefono", "Teléfono", { placeholder: "+56 9 1234 5678", inputMode: "tel" })}
+          {campo("contactoRelacion", "Relación (opcional)", { placeholder: "Esposa, hermano, madre…" })}
+        </div>
+      </fieldset>
 
       <div className="grid gap-1.5">
         <Label>Tipos de inspección</Label>

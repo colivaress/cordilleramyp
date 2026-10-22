@@ -312,7 +312,7 @@ v = await A.from("rrhh_mutual_adicional").delete().gte("tasa", 0).select();
 check("Nadie borra un tramo (ni admin): 0 filas", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
 
 // ── Fase 3: ficha, jornadas, documentos ─────────────────────────────────
-console.log("\n— rrhh_cargos / rrhh_areas (catálogos con baja lógica) —");
+console.log("\n— rrhh_cargos / rrhh_faenas (catálogos con baja lógica) —");
 v = await C.from("rrhh_cargos").insert({ nombre: "Supervisor de encarpe" }).select("id").single();
 check("Adm. contrato agrega un cargo con RETURNING", !v.error && !!v.data?.id, v.error?.message);
 const cargoId = v.data?.id;
@@ -322,15 +322,15 @@ v = await A.from("rrhh_cargos").insert({ nombre: " Encarpador " });
 check("Un nombre con espacios sobrantes se rechaza", !!v.error, v.error?.message);
 v = await S1.from("rrhh_cargos").insert({ nombre: "Gerente" });
 check("Supervisor no agrega cargos", !!v.error, v.error?.message);
-v = await T.from("rrhh_areas").insert({ nombre: "Gerencia" });
-check("Trabajador no agrega áreas", !!v.error, v.error?.message);
-v = await A.from("rrhh_areas").insert({ nombre: "Operaciones" }).select("id").single();
-const areaId = v.data?.id;
-check("Administrador agrega un área", !v.error && !!areaId, v.error?.message);
+v = await T.from("rrhh_faenas").insert({ nombre: "Gerencia" });
+check("Trabajador no agrega faenas", !!v.error, v.error?.message);
+v = await A.from("rrhh_faenas").insert({ nombre: "Operaciones" }).select("id").single();
+const faenaId = v.data?.id;
+check("Administrador agrega una faena", !v.error && !!faenaId, v.error?.message);
 v = await A.from("rrhh_cargos").delete().eq("id", cargoId).select();
 check("Un cargo no se borra (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
 v = (await T.from("rrhh_cargos").select("nombre")).data;
-check("El catálogo de cargos se lee con sesión", v?.length === 1, v);
+check("El catálogo de cargos se lee con sesión", v?.length === 5 && v.some((c) => c.nombre === "Supervisor de encarpe"), v); // 4 sembrados + 1
 
 console.log("\n— personal.rut (módulo 11, legible solo con rrhh_ruts()) —");
 // RUT inventados con dígito verificador válido.
@@ -359,7 +359,7 @@ check("rrhh_ruts(): anónimo rechazado", !!v.error || v.data.length === 0, v.err
 const ficha = (personal_id) => ({
   personal_id,
   cargo_id: cargoId,
-  area_id: areaId,
+  faena_id: faenaId,
   fecha_ingreso: "2019-03-15",
   tipo_contrato: "indefinido",
   afp: "modelo",
@@ -431,14 +431,139 @@ v = await C.from("rrhh_jornada_trabajador").insert({ personal_id: P.S1.id, jorna
 check("Adm. contrato asigna jornada con RETURNING", !v.error && v.data.length === 1, v.error?.message);
 v = await S1.from("rrhh_jornada_trabajador").insert({ personal_id: P.S1.id, jornada_id: jornadaB, vigente_desde: "2026-02-01" });
 check("Supervisor no se asigna jornada", !!v.error, v.error?.message);
-v = await A.from("rrhh_jornada_trabajador").update({ jornada_id: jornadaB }).eq("personal_id", P.S1.id).select();
-check("Una asignación no se edita (0 filas): se agrega otra", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
 v = (await S1.from("rrhh_jornadas").select("nombre")).data;
 check("S1 ve solo la jornada que tiene asignada", JSON.stringify(v?.map((j) => j.nombre)) === '["Turno A"]', v);
 v = (await S3.from("rrhh_jornadas").select("nombre")).data;
 check("S3 no ve jornadas", v?.length === 0, v);
 v = (await S1.from("rrhh_jornada_trabajador").select("id, jornada:rrhh_jornadas(nombre)")).data;
 check("S1 lee su asignación con el nombre de la jornada", v?.length === 1 && v[0].jornada?.nombre === "Turno A", v);
+
+console.log("\n— turnos rotativos: rangos sin solape, corrección y anulación con rastro —");
+const [asigS1] = (await A.from("rrhh_jornada_trabajador").select("id").eq("personal_id", P.S1.id)).data ?? [];
+v = await C.from("rrhh_jornada_trabajador").insert({ personal_id: P.S1.id, jornada_id: jornadaA, vigente_desde: "2026-03-01", vigente_hasta: "2026-03-07" });
+check("Solape con una asignación sin término: la base lo rechaza", v.error?.code === "23P01", v.error?.message ?? "insertó");
+v = await A.from("rrhh_jornada_trabajador").update({ vigente_hasta: "2026-02-28" }).eq("id", asigS1?.id).select("id");
+check("Corregir sin motivo se rechaza", !!v.error && /motivo/.test(v.error.message), v.error?.message ?? v.data);
+v = await A.from("rrhh_jornada_trabajador").update({ jornada_id: jornadaB, motivo_cambio: "x" }).eq("id", asigS1?.id).select("id");
+check("Cambiar la jornada de una asignación se rechaza (se anula y se asigna otra)", !!v.error && /Solo se puede corregir el rango/.test(v.error.message), v.error?.message ?? v.data);
+v = await A.from("rrhh_jornada_trabajador").update({ personal_id: P.S2.id, motivo_cambio: "x" }).eq("id", asigS1?.id).select("id");
+check("Cambiar la persona de una asignación se rechaza", !!v.error, v.error?.message ?? v.data);
+v = await A.from("rrhh_jornada_trabajador").update({ vigente_hasta: "2025-12-31", motivo_cambio: "x" }).eq("id", asigS1?.id).select("id");
+check("Un rango con término antes del inicio se rechaza", !!v.error, v.error?.message ?? v.data);
+v = await A.from("rrhh_jornada_trabajador").update({ vigente_hasta: "2026-02-28", motivo_cambio: " Pasa a turnos rotativos " }).eq("id", asigS1?.id).select("vigente_hasta, updated_by, motivo_cambio");
+check("Administrador corrige el rango con motivo", !v.error && v.data?.[0]?.vigente_hasta === "2026-02-28" && v.data[0].updated_by === P.A.id && v.data[0].motivo_cambio === "Pasa a turnos rotativos", v.error?.message ?? v.data);
+v = await C.from("rrhh_jornada_trabajador").insert([
+  { personal_id: P.S1.id, jornada_id: jornadaA, vigente_desde: "2026-03-01", vigente_hasta: "2026-03-07" },
+  { personal_id: P.S1.id, jornada_id: jornadaA, vigente_desde: "2026-03-08", vigente_hasta: "2026-03-14" },
+]).select("id, vigente_desde");
+check("Rangos contiguos (07 y 08) sí se aceptan", !v.error && v.data?.length === 2, v.error?.message);
+const asigSemana2 = v.data?.find((a) => a.vigente_desde === "2026-03-08")?.id;
+v = await C.from("rrhh_jornada_trabajador").insert({ personal_id: P.S1.id, jornada_id: jornadaA, vigente_desde: "2026-03-07", vigente_hasta: "2026-03-08" });
+check("Un rango que pisa un solo día de otro se rechaza", v.error?.code === "23P01", v.error?.message ?? "insertó");
+v = await C.from("rrhh_jornada_trabajador").insert([
+  { personal_id: P.S2.id, jornada_id: jornadaA, vigente_desde: "2026-03-01", vigente_hasta: "2026-03-31" },
+  { personal_id: P.S1.id, jornada_id: jornadaA, vigente_desde: "2026-03-10", vigente_hasta: "2026-03-12" },
+]);
+check("Lote con un solape: falla completo", v.error?.code === "23P01", v.error?.message ?? "insertó");
+v = (await A.from("rrhh_jornada_trabajador").select("id").eq("personal_id", P.S2.id)).data;
+check("…y no dejó asignada a la otra persona del lote (todo o nada)", v?.length === 0, v);
+v = await C.from("rrhh_jornada_trabajador").update({ anulada_en: new Date().toISOString(), anulada_por: P.A.id, motivo_cambio: "Se cargó a la persona equivocada" }).eq("id", asigSemana2).select("anulada_en, anulada_por");
+check("Adm. contrato anula (el autor lo fija la base, no el cliente)", !v.error && !!v.data?.[0]?.anulada_en && v.data[0].anulada_por === P.C.id, v.error?.message ?? v.data);
+v = (await A.from("rrhh_jornada_trabajador").select("id").eq("personal_id", P.S1.id).eq("vigente_desde", "2026-03-01").single()).data;
+const asigSemana1 = v?.id;
+v = await srv.from("rrhh_jornada_trabajador").update({ anulada_en: new Date().toISOString(), motivo_cambio: "Desde un script" }).eq("id", asigSemana1).select("id");
+check(
+  "Anular sin fila en personal (service role): mensaje en español, no el check",
+  !!v.error && /no tiene ficha de personal asociada/.test(v.error.message) && !/anulacion_completa/.test(v.error.message),
+  v.error?.message ?? v.data,
+);
+v = (await A.from("rrhh_jornada_trabajador").select("anulada_en").eq("id", asigSemana1).single()).data;
+check("…y la asignación sigue vigente", v?.anulada_en === null, v);
+// Una sesión autenticada cuyo auth.uid() no tiene fila en personal (por
+// ejemplo, una cuenta sin ficha). La RLS se salta a propósito con el rol
+// dueño de la tabla para llegar al trigger; lo que se prueba es su mensaje.
+const sinFicha = execSync(`docker exec -i supabase_db_cordilleraMyP psql -U postgres -qtA`, {
+  encoding: "utf8",
+  input: `
+begin;
+create temp table _r (t text) on commit drop;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-000000000999","role":"authenticated"}', true);
+do $$ begin
+  update public.rrhh_jornada_trabajador set anulada_en = now(), motivo_cambio = 'x' where id = '${asigSemana1}';
+  insert into _r values ('ANULÓ');
+exception when others then insert into _r values (sqlerrm);
+end $$;
+select t from _r;
+rollback;
+`,
+});
+check(
+  "Anular desde una cuenta sin fila en personal: mismo mensaje",
+  /no tiene ficha de personal asociada/.test(sinFicha) && !/anulacion_completa/.test(sinFicha),
+  sinFicha.trim(),
+);
+v = await C.from("rrhh_jornada_trabajador").insert({ personal_id: P.S1.id, jornada_id: jornadaA, vigente_desde: "2026-03-10", vigente_hasta: "2026-03-12" }).select("id");
+check("Una anulada ya no bloquea su rango", !v.error && v.data?.length === 1, v.error?.message);
+v = await A.from("rrhh_jornada_trabajador").update({ anulada_en: null, anulada_por: null, motivo_cambio: "revivir" }).eq("id", asigSemana2).select("id");
+check("Una anulada no se puede revivir ni modificar", !!v.error && /anulada/.test(v.error.message), v.error?.message ?? v.data);
+v = await A.from("rrhh_jornada_trabajador").delete().eq("personal_id", P.S1.id).select();
+check("Nadie borra asignaciones (ni admin): 0 filas", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await S1.from("rrhh_jornada_trabajador").update({ vigente_hasta: "2030-01-01", motivo_cambio: "x" }).eq("personal_id", P.S1.id).select();
+check("Supervisor no corrige sus propias asignaciones (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = await T.from("rrhh_jornada_trabajador").update({ vigente_hasta: "2030-01-01", motivo_cambio: "x" }).gte("vigente_desde", "2000-01-01").select();
+check("Trabajador no corrige asignaciones (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = (await A.from("rrhh_jornada_trabajador_cambios").select("accion, hecho_por, motivo").eq("asignacion_id", asigS1?.id).order("hecho_en")).data;
+check(
+  "Rastro de la corrección: alta + corregida, con autor y motivo",
+  JSON.stringify(v?.map((c) => c.accion)) === JSON.stringify(["asignada", "corregida"]) && v[1].hecho_por === P.A.id && v[1].motivo === "Pasa a turnos rotativos",
+  v,
+);
+v = (await A.from("rrhh_jornada_trabajador_cambios").select("accion, hecho_por").eq("asignacion_id", asigSemana2)).data;
+check("Rastro de la anulación con su autor", v?.some((c) => c.accion === "anulada" && c.hecho_por === P.C.id), v);
+v = await A.from("rrhh_jornada_trabajador_cambios").insert({ asignacion_id: asigS1?.id, personal_id: P.S1.id, accion: "asignada", jornada_id: jornadaA, vigente_desde: "2020-01-01" });
+check("Nadie escribe el rastro a mano (ni admin)", !!v.error, v.error?.message);
+v = await A.from("rrhh_jornada_trabajador_cambios").delete().eq("personal_id", P.S1.id).select();
+check("Nadie borra el rastro (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data.length);
+v = (await S1.from("rrhh_jornada_trabajador_cambios").select("personal_id")).data;
+check("S1 lee solo el rastro propio", v?.length > 0 && v.every((c) => c.personal_id === P.S1.id), v);
+v = (await S3.from("rrhh_jornada_trabajador_cambios").select("id")).data;
+check("S3 no lee el rastro de otros", v?.length === 0, v);
+
+console.log("\n— contacto de emergencia (dato de un tercero) —");
+v = await A.from("personal").update({ contacto_emergencia_nombre: "María Prueba", contacto_emergencia_telefono: "56987654321", contacto_emergencia_relacion: "madre" }).eq("id", P.T.id).select("id");
+check("Administrador registra el contacto de T", !v.error && v.data.length === 1, v.error?.message);
+v = await C.from("personal").update({ contacto_emergencia_nombre: "Pedro Prueba", contacto_emergencia_telefono: "56911112222" }).eq("id", P.S1.id).select("id");
+check("Adm. contrato registra el contacto de S1", !v.error && v.data.length === 1, v.error?.message);
+v = await C.from("personal").update({ contacto_emergencia_nombre: "X", contacto_emergencia_telefono: "56911113333" }).eq("id", P.A.id).select("id");
+check("Adm. contrato no toca la fila de un administrador (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data);
+v = await A.from("personal").update({ contacto_emergencia_nombre: null }).eq("id", P.T.id);
+check("Un teléfono sin nombre se rechaza (check)", !!v.error, v.error?.message);
+v = await A.from("personal").update({ contacto_emergencia_nombre: "  " }).eq("id", P.T.id);
+check("…ni con un nombre en blanco", !!v.error, v.error?.message);
+v = await T.from("personal").update({ contacto_emergencia_telefono: "56900000000" }).eq("id", P.T.id).select("id");
+check("T no edita su propio contacto (0 filas)", !v.error && v.data.length === 0, v.error?.message ?? v.data);
+for (const [k, cli] of [["A", A], ["C", C], ["S1", S1], ["T", T]]) {
+  v = await cli.from("personal").select("contacto_emergencia_telefono").eq("id", P.T.id);
+  check(`${k} NO lee el contacto con un select directo`, !!v.error, v.error?.message ?? v.data);
+}
+v = await A.from("personal").select("*").limit(1);
+check("select * de personal falla (hay columnas no legibles)", !!v.error, v.error?.message ?? "leyó");
+const contactos = async (cli) => ((await cli.rpc("rrhh_contactos_emergencia")).data ?? []).map((c) => c.personal_id).sort();
+check("Admin ve todos los contactos", JSON.stringify(await contactos(A)) === JSON.stringify([P.S1.id, P.T.id].sort()), await contactos(A));
+check("Adm. contrato ve todos los contactos", JSON.stringify(await contactos(C)) === JSON.stringify([P.S1.id, P.T.id].sort()), await contactos(C));
+check("T ve solo el suyo", JSON.stringify(await contactos(T)) === JSON.stringify([P.T.id]), await contactos(T));
+check("S1 ve solo el suyo (no el de T)", JSON.stringify(await contactos(S1)) === JSON.stringify([P.S1.id]), await contactos(S1));
+check("S3 no ve ninguno", (await contactos(S3)).length === 0, await contactos(S3));
+v = await createClient(URL, env.ANON_KEY, opts).rpc("rrhh_contactos_emergencia");
+check("Sin sesión no se puede llamar", !!v.error, v.error?.message ?? v.data);
+
+console.log("\n— correo único, cargos sembrados, faenas —");
+v = await srv.from("personal").insert({ nombre: "Dup", rol: "trabajador", email: P.T.email.toUpperCase() });
+check("Un correo repetido (con otras mayúsculas) se rechaza", v.error?.code === "23505" && /personal_email_unico/.test(v.error.message), v.error?.message ?? "insertó");
+v = (await A.from("rrhh_cargos").select("nombre")).data?.map((c) => c.nombre) ?? [];
+check("Cargos sembrados", ["Administrador", "Administrador de contrato", "Supervisor", "Encarpador"].every((n) => v.includes(n)), v);
+v = await A.from("rrhh_areas").select("id");
+check("La tabla rrhh_areas ya no existe (ahora rrhh_faenas)", !!v.error, v.error?.message ?? v.data);
 
 console.log("\n— rrhh_tipos_documento / rrhh_documentos / bucket documentos-rrhh —");
 v = (await S3.from("rrhh_tipos_documento").select("nombre")).data;
@@ -634,10 +759,11 @@ const LEE_PERMITIDO = new Set([
   "rrhh_documentos",
   "rrhh_tipos_documento",
   "rrhh_cargos",
-  "rrhh_areas",
+  "rrhh_faenas",
   "rrhh_remuneracion_base",
   "rrhh_jornadas",
   "rrhh_jornada_trabajador",
+  "rrhh_jornada_trabajador_cambios",
   "checklist_items",
   "tipos_inspeccion",
   "transportes",

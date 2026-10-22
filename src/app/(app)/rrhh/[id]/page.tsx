@@ -7,8 +7,7 @@ import { cargarFichaCompleta } from "@/lib/rrhh/ficha-servidor";
 import {
   escribirDecimal,
 } from "@/lib/rrhh/parametros";
-import { fechaCorta, hoyChile, textoAntiguedad, type FormularioFicha } from "@/lib/rrhh/ficha";
-import { horasSemanales, leerDias } from "@/lib/rrhh/jornadas";
+import { cargoSugerido, fechaCorta, hoyChile, textoAntiguedad, type FormularioFicha } from "@/lib/rrhh/ficha";
 import { nombreCompleto } from "@/lib/mensajes";
 import { ETIQUETA_ROL } from "@/lib/tipos";
 import { FichaForm } from "@/components/rrhh/FichaForm";
@@ -16,8 +15,8 @@ import { CuentaForm } from "@/components/rrhh/CuentaForm";
 import { AccesoCuenta } from "@/components/rrhh/AccesoCuenta";
 import { antiguedadDesde, puedeEditarCuentaDe } from "@/lib/rrhh/cuenta";
 import { formatearRut } from "@/lib/rut";
+import { formatearTelefonoCl } from "@/lib/telefono";
 import { RemuneracionForm } from "@/components/rrhh/RemuneracionForm";
-import { AsignarJornada } from "@/components/rrhh/AsignarJornada";
 import { CargarDocumentos } from "@/components/rrhh/CargarDocumentos";
 import { Desvinculacion } from "@/components/rrhh/Desvinculacion";
 import {
@@ -51,13 +50,12 @@ export default async function FichaTrabajadorPage({ params }: { params: Promise<
 
   const supabase = await createClient();
   const hoy = hoyChile();
-  const [datos, { data: jornadasActivas }, { data: tipos }, { data: cargos }, { data: areas }, { data: tiposInspeccion }, { data: acceso }] =
+  const [datos, { data: tipos }, { data: cargos }, { data: faenas }, { data: tiposInspeccion }, { data: acceso }] =
     await Promise.all([
       cargarFichaCompleta(supabase, id, hoy),
-      supabase.from("rrhh_jornadas").select("id, nombre, dias").eq("activo", true).order("nombre"),
       supabase.from("rrhh_tipos_documento").select("id, nombre").eq("activo", true).order("orden"),
       supabase.from("rrhh_cargos").select("id, nombre, activo").order("nombre"),
-      supabase.from("rrhh_areas").select("id, nombre, activo").order("nombre"),
+      supabase.from("rrhh_faenas").select("id, nombre, activo").order("nombre"),
       supabase.from("personal_tipos_inspeccion").select("tipo_inspeccion").eq("personal_id", id),
       supabase.rpc("estado_acceso_personal"),
     ]);
@@ -80,12 +78,15 @@ export default async function FichaTrabajadorPage({ params }: { params: Promise<
     fechaNacimiento: persona.fecha_nacimiento ?? "",
     rol: persona.rol,
     tiposInspeccion: (tiposInspeccion ?? []).map((t) => t.tipo_inspeccion),
+    contactoNombre: datos.contactoEmergencia?.nombre ?? "",
+    contactoTelefono: datos.contactoEmergencia?.telefono ? formatearTelefonoCl(datos.contactoEmergencia.telefono) : "",
+    contactoRelacion: datos.contactoEmergencia?.relacion ?? "",
   };
 
   const inicialFicha: FormularioFicha = ficha
     ? {
         cargo_id: ficha.cargo_id,
-        area_id: ficha.area_id ?? "",
+        faena_id: ficha.faena_id ?? "",
         fecha_ingreso: ficha.fecha_ingreso,
         tipo_contrato: ficha.tipo_contrato,
         fecha_termino_contrato: ficha.fecha_termino_contrato ?? "",
@@ -97,8 +98,10 @@ export default async function FichaTrabajadorPage({ params }: { params: Promise<
         cargas_familiares: String(ficha.cargas_familiares),
       }
     : {
-        cargo_id: "",
-        area_id: "",
+        // Solo un valor inicial: el cargo es contractual y no sigue al rol
+        // (ver cargoSugerido). Al editar una ficha existente no se toca.
+        cargo_id: cargoSugerido(persona.rol, cargos ?? []),
+        faena_id: "",
         fecha_ingreso: "",
         tipo_contrato: "",
         fecha_termino_contrato: "",
@@ -195,7 +198,7 @@ export default async function FichaTrabajadorPage({ params }: { params: Promise<
             inicial={inicialFicha}
             existe={!!ficha}
             cargos={cargos ?? []}
-            areas={areas ?? []}
+            faenas={faenas ?? []}
           />
         </CardContent>
       </Card>
@@ -226,21 +229,16 @@ export default async function FichaTrabajadorPage({ params }: { params: Promise<
         <CardHeader>
           <CardTitle>Jornada</CardTitle>
           <CardDescription>
-            Las horas extra se miden contra la jornada vigente de cada día. Un
-            cambio de turno se asigna desde una fecha; las anteriores quedan.
+            Las horas se miden contra la jornada asignada a cada día. Aquí se ve el historial; los turnos
+            se asignan y corrigen en{" "}
+            <Link href="/rrhh/turnos" className="text-brand-700 underline underline-offset-4">
+              Turnos
+            </Link>
+            .
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <HistorialJornadas filas={datos.jornadas} vigenteId={datos.jornadaVigente?.id ?? null} />
-          <AsignarJornada
-            personalId={persona.id}
-            hoy={hoy}
-            jornadas={(jornadasActivas ?? []).map((j) => ({
-              id: j.id,
-              nombre: j.nombre,
-              horas: horasSemanales(leerDias(j.dias) ?? []),
-            }))}
-          />
         </CardContent>
       </Card>
 

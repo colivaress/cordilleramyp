@@ -7,7 +7,7 @@ import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
 
 /**
  * Catálogos de RRHH con el mismo patrón: tipos de documento (§16.1), cargos
- * y áreas. Baja lógica: un ítem se desactiva, nunca se borra (una ficha o
+ * y faenas. Baja lógica: un ítem se desactiva, nunca se borra (una ficha o
  * un documento histórico nunca apunta a nada). El catálogo llega como
  * clave y se traduce a tabla ACÁ, nunca se usa un nombre de tabla que
  * mande el navegador.
@@ -15,7 +15,7 @@ import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
 const CATALOGOS = {
   "tipos-documento": { tabla: "rrhh_tipos_documento", articulo: "un tipo de documento" },
   cargos: { tabla: "rrhh_cargos", articulo: "un cargo" },
-  areas: { tabla: "rrhh_areas", articulo: "un área" },
+  faenas: { tabla: "rrhh_faenas", articulo: "una faena" },
 } as const;
 
 export type Catalogo = keyof typeof CATALOGOS;

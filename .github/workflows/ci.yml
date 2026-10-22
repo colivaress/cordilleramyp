@@ -27,6 +27,10 @@ jobs:
       # "Cannot find name 'LayoutProps'" aunque el código esté bien.
       - run: npx next typegen
       - run: npx tsc --noEmit
+      # Los tests unitarios (src/lib/**/*.test.ts) estuvieron doce archivos
+      # sin que nada los ejecutara: un PR en verde no decía nada de ellos.
+      # Este paso existe para que un test roto bloquee el merge.
+      - run: npm test
 
   dependency-audit:
     name: Auditoría de dependencias

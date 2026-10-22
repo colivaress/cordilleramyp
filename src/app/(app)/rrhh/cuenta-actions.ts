@@ -29,6 +29,18 @@ function revalidar(personalId?: string) {
   if (personalId) revalidatePath(`/rrhh/${personalId}`);
 }
 
+/**
+ * Un valor repetido (23505) en personal, con el mensaje de lo que choca. El
+ * nombre de la restricción viene en el mensaje de Postgres; nunca se le
+ * muestra ese texto crudo a nadie.
+ */
+function mensajeDuplicado(error: { code?: string; message?: string } | null | undefined): string | null {
+  if (error?.code !== "23505") return null;
+  if (error.message?.includes("personal_rut_key")) return "Ya existe una persona con ese RUT.";
+  if (error.message?.includes("personal_email_unico")) return "Ya existe una persona con ese correo.";
+  return "Ya existe una persona con esos datos.";
+}
+
 /** Un WITH CHECK de RLS violado (42501) o el trigger del rol: permiso, no
  *  infraestructura — reintentar no cambia nada. */
 function esPermiso(error: { code?: string } | null | undefined): boolean {
@@ -79,10 +91,10 @@ export async function crearPersona(
   });
   if (rechazo) return { ok: false, mensaje: rechazo };
 
+  // Correo y RUT repetidos los rechaza la base (índices únicos) y
+  // mensajeDuplicado() los traduce. Sin consulta previa: un ilike trataba
+  // "_" del correo como comodín.
   const supabase = await createClient();
-  const { data: existente } = await supabase.from("personal").select("id").ilike("email", c.email).maybeSingle();
-  if (existente) return { ok: false, mensaje: "Ya existe una persona con ese correo." };
-
   // Una fila con user_id nulo ES la invitación: handle_new_user() la vincula
   // cuando la persona activa su cuenta.
   const { data: creada, error } = await supabase
@@ -94,6 +106,9 @@ export async function crearPersona(
       email: c.email,
       telefono: c.telefono,
       fecha_nacimiento: c.fecha_nacimiento,
+      contacto_emergencia_nombre: c.contacto_emergencia_nombre,
+      contacto_emergencia_telefono: c.contacto_emergencia_telefono,
+      contacto_emergencia_relacion: c.contacto_emergencia_relacion,
       rol: c.rol,
       activo: true,
       user_id: null,
@@ -102,7 +117,8 @@ export async function crearPersona(
     .single();
   if (error) {
     if (esPermiso(error)) return { ok: false, mensaje: "No tienes permiso para crear una persona con ese rol." };
-    if (error.code === "23505") return { ok: false, mensaje: "Ese RUT ya está registrado para otra persona." };
+    const duplicado = mensajeDuplicado(error);
+    if (duplicado) return { ok: false, mensaje: duplicado };
     return errorInesperado("crearPersona.insert", error);
   }
 
@@ -158,6 +174,9 @@ export async function guardarCuenta(personalId: string, formulario: FormularioCu
       rut: c.rut,
       telefono: c.telefono,
       fecha_nacimiento: c.fecha_nacimiento,
+      contacto_emergencia_nombre: c.contacto_emergencia_nombre,
+      contacto_emergencia_telefono: c.contacto_emergencia_telefono,
+      contacto_emergencia_relacion: c.contacto_emergencia_relacion,
       ...(c.rol !== actual.rol ? { rol: c.rol } : {}),
     })
     .eq("id", personalId)
@@ -165,7 +184,8 @@ export async function guardarCuenta(personalId: string, formulario: FormularioCu
     .maybeSingle();
   if (error) {
     if (esPermiso(error)) return { ok: false, mensaje: "No tienes permiso para dejar a esta persona con ese rol." };
-    if (error.code === "23505") return { ok: false, mensaje: "Ese RUT ya está registrado para otra persona." };
+    const duplicado = mensajeDuplicado(error);
+    if (duplicado) return { ok: false, mensaje: duplicado };
     return errorInesperado("guardarCuenta.update", error);
   }
   // Un UPDATE que la RLS no deja ver es éxito con cero filas, no un error:

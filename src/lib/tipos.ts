@@ -1,11 +1,15 @@
 import type { Tables, Enums } from "@/lib/supabase/database.types";
 
 /**
- * Fila de personal SIN el RUT: la columna no es legible con un select
- * directo (grants por columna, migración 20261022020000); se lee con la
- * función rrhh_ruts(). Ver COLUMNAS_PERSONAL.
+ * Fila de personal SIN el RUT ni el contacto de emergencia: esas columnas
+ * no son legibles con un select directo (grants por columna, migraciones
+ * 20261022020000 y 20261023010000); se leen con rrhh_ruts() y
+ * rrhh_contactos_emergencia(). Ver COLUMNAS_PERSONAL.
  */
-export type Personal = Omit<Tables<"personal">, "rut">;
+export type Personal = Omit<
+  Tables<"personal">,
+  "rut" | "contacto_emergencia_nombre" | "contacto_emergencia_telefono" | "contacto_emergencia_relacion"
+>;
 
 /** Las columnas legibles de personal, para los select (nunca "*"). */
 export const COLUMNAS_PERSONAL =

@@ -36,10 +36,10 @@ export function fechaValida(texto: string): boolean {
 // ─────────────────────────────────────────────────────────────────────────
 
 // El RUT ya no es parte de la ficha: identifica a la persona y vive en
-// personal (sección "Cuenta y acceso"). Cargo y área son ids de catálogo.
+// personal (sección "Cuenta y acceso"). Cargo y faena son ids de catálogo.
 export type FormularioFicha = {
   cargo_id: string;
-  area_id: string;
+  faena_id: string;
   fecha_ingreso: string;
   tipo_contrato: string;
   fecha_termino_contrato: string;
@@ -53,7 +53,7 @@ export type FormularioFicha = {
 
 export type FichaValida = {
   cargo_id: string;
-  area_id: string | null;
+  faena_id: string | null;
   fecha_ingreso: string;
   tipo_contrato: TipoContrato;
   fecha_termino_contrato: string | null;
@@ -69,8 +69,8 @@ export function leerFicha(f: FormularioFicha): Resultado<FichaValida> {
   const e: string[] = [];
 
   if (!UUID.test(f.cargo_id)) e.push("Elige el cargo.");
-  const area = f.area_id.trim();
-  if (area && !UUID.test(area)) e.push("El área elegida no es válida.");
+  const faena = f.faena_id.trim();
+  if (faena && !UUID.test(faena)) e.push("La faena elegida no es válida.");
 
   if (!fechaValida(f.fecha_ingreso)) e.push("Falta la fecha de ingreso o no es válida.");
 
@@ -109,7 +109,7 @@ export function leerFicha(f: FormularioFicha): Resultado<FichaValida> {
     ok: true,
     valor: {
       cargo_id: f.cargo_id,
-      area_id: area || null,
+      faena_id: faena || null,
       fecha_ingreso: f.fecha_ingreso,
       tipo_contrato: tipo,
       fecha_termino_contrato: tipo === "indefinido" ? null : termino || null,
@@ -192,6 +192,27 @@ export function leerRemuneracion(f: FormularioRemuneracion): Resultado<Remunerac
  * fecha y, si hay varias con la misma vigencia (una corrección), la
  * registrada último. `null` si ninguna rige todavía.
  */
+/**
+ * Cargo con que se abre el formulario del contrato, según el rol de la
+ * persona. SOLO un valor inicial y editable, no una regla: rol (permisos,
+ * lo cambia el administrador) y cargo (dato contractual, Art. 10 Nº3, lo
+ * administra también el adm. de contrato) son cosas distintas, y el día que
+ * haya dos cargos para un mismo rol este mapeo deja de valer. Por eso no se
+ * impone en la base ni se recalcula al editar. Vacío si el cargo no está en
+ * el catálogo o está desactivado.
+ */
+const CARGO_POR_ROL: Partial<Record<string, string>> = {
+  administrador: "Administrador",
+  administrador_contrato: "Administrador de contrato",
+  supervisor: "Supervisor",
+  trabajador: "Encarpador",
+};
+
+export function cargoSugerido(rol: string, cargos: readonly { id: string; nombre: string; activo: boolean }[]): string {
+  const nombre = CARGO_POR_ROL[rol]?.toLowerCase();
+  return (nombre && cargos.find((c) => c.activo && c.nombre.toLowerCase() === nombre)?.id) || "";
+}
+
 export function vigenteEn<T extends { vigente_desde: string; created_at: string }>(
   filas: T[],
   fecha: string,

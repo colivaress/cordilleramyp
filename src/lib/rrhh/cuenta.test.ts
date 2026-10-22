@@ -12,6 +12,9 @@ const base = (): FormularioCuenta => ({
   fechaNacimiento: "1990-01-01",
   rol: "supervisor",
   tiposInspeccion: ["encarpe", "encarpe", "inventado"],
+  contactoNombre: "",
+  contactoTelefono: "",
+  contactoRelacion: "",
 });
 
 test("cuenta válida: RUT normalizado, correo en minúsculas, tipos sin repetidos ni inventados", () => {
@@ -22,6 +25,25 @@ test("cuenta válida: RUT normalizado, correo en minúsculas, tipos sin repetido
   assert.equal(r.valor.rut, "123456785");
   assert.equal(r.valor.email, "juan@ejemplo.cl");
   assert.deepEqual(r.valor.tiposInspeccion, ["encarpe"]);
+});
+
+test("cuenta: contacto de emergencia todo o nada, teléfono normalizado, relación opcional", () => {
+  let r = leerCuenta(base(), { creando: false });
+  assert.equal(r.ok && r.valor.contacto_emergencia_telefono, null);
+  r = leerCuenta({ ...base(), contactoNombre: " María Soto ", contactoTelefono: "9 8765 4321", contactoRelacion: " esposa " }, { creando: false });
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.valor.contacto_emergencia_nombre, "María Soto");
+    assert.equal(r.valor.contacto_emergencia_telefono, "56987654321");
+    assert.equal(r.valor.contacto_emergencia_relacion, "esposa");
+  }
+  // Un número suelto no sirve: quien llama tiene que saber a quién llama.
+  r = leerCuenta({ ...base(), contactoTelefono: "987654321" }, { creando: false });
+  assert.deepEqual(r, { ok: false, errores: ["Falta el nombre del contacto de emergencia."] });
+  r = leerCuenta({ ...base(), contactoNombre: "María" }, { creando: false });
+  assert.deepEqual(r, { ok: false, errores: ["Falta el teléfono del contacto de emergencia."] });
+  r = leerCuenta({ ...base(), contactoNombre: "María", contactoTelefono: "123" }, { creando: false });
+  assert.equal(r.ok, false);
 });
 
 test("cuenta: el RUT es opcional, pero si se escribe tiene que ser válido", () => {

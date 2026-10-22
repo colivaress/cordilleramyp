@@ -25,7 +25,7 @@ import {
 
 type Item = { id: string; nombre: string; activo: boolean; usos: number };
 
-/** Catálogo con baja lógica (tipos de documento, cargos, áreas). "usos" es
+/** Catálogo con baja lógica (tipos de documento, cargos, faenas). "usos" es
  *  cuántos documentos o fichas lo usan: lo que hay que mirar antes de
  *  desactivarlo. */
 export function CatalogoLista({

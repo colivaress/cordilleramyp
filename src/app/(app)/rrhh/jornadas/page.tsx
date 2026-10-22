@@ -26,7 +26,7 @@ export default async function JornadasPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Jornadas</h1>
-          <p className="text-sm text-muted-foreground">Turnos de trabajo que se asignan a cada trabajador desde su ficha.</p>
+          <p className="text-sm text-muted-foreground">Horarios de trabajo. Se asignan a las personas, por rango de fechas, en Turnos.</p>
         </div>
         <Link href="/rrhh" className={buttonVariants({ variant: "outline" })}>
           Volver a RRHH
