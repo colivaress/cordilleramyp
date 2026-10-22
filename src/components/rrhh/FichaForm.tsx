@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 type Opcion = { id: string; nombre: string; activo: boolean };
 
 /** Datos contractuales y previsionales. Los editan administrador y
- *  administrador de contrato (no son montos de sueldo). Cargo y área salen
+ *  administrador de contrato (no son montos de sueldo). Cargo y faena salen
  *  de su catálogo: un texto libre deja "Encarpador" y "ENCARPADOR" como dos
  *  cargos distintos y los filtros dejan gente fuera sin avisar. */
 export function FichaForm({
@@ -32,13 +32,13 @@ export function FichaForm({
   inicial,
   existe,
   cargos,
-  areas,
+  faenas,
 }: {
   personalId: string;
   inicial: FormularioFicha;
   existe: boolean;
   cargos: Opcion[];
-  areas: Opcion[];
+  faenas: Opcion[];
 }) {
   const [f, setF] = useState(inicial);
   const [errores, setErrores] = useState<string[]>([]);
@@ -68,10 +68,10 @@ export function FichaForm({
     }
   }
 
-  // Un cargo o área desactivado sigue apareciendo si es el que ya tiene la
+  // Un cargo o faena desactivado sigue apareciendo si es el que ya tiene la
   // ficha (baja lógica: no desaparece de lo histórico), pero no se ofrece
   // para elegirlo de nuevo.
-  const catalogo = (id: "cargo_id" | "area_id", etiqueta: string, opciones: Opcion[], vacio: string) => (
+  const catalogo = (id: "cargo_id" | "faena_id", etiqueta: string, opciones: Opcion[], vacio: string) => (
     <div className="grid min-w-0 gap-1.5">
       <Label htmlFor={`ficha-${id}`}>{etiqueta}</Label>
       <select
@@ -111,7 +111,7 @@ export function FichaForm({
     <form onSubmit={guardar} className="grid gap-4">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {catalogo("cargo_id", "Cargo", cargos, "Elegir…")}
-        {catalogo("area_id", "Área (opcional)", areas, "Sin área")}
+        {catalogo("faena_id", "Faena (opcional)", faenas, "Sin faena")}
         {campo("fecha_ingreso", "Fecha de ingreso", { type: "date" })}
         <div className="grid gap-1.5">
           <Label htmlFor="ficha-tipo_contrato">Tipo de contrato</Label>

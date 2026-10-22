@@ -4,6 +4,7 @@ import { cargarFichaCompleta } from "@/lib/rrhh/ficha-servidor";
 import { fechaCorta, hoyChile, textoAntiguedad } from "@/lib/rrhh/ficha";
 import { nombreCompleto } from "@/lib/mensajes";
 import {
+  ContactoEmergencia,
   DatosFicha,
   DocumentosLista,
   HistorialJornadas,
@@ -32,6 +33,17 @@ export default async function MisDatosPage() {
           {ficha && ` · ingreso ${fechaCorta(ficha.fecha_ingreso)} · ${textoAntiguedad(ficha.fecha_ingreso, hoy)}`}
         </p>
       </div>
+
+      {/* Es de la persona, no del contrato: se muestra aunque no haya ficha. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Contacto de emergencia</CardTitle>
+          <CardDescription>A quién avisar si tienes un accidente. Para cambiarlo, pídeselo a administración.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ContactoEmergencia contacto={datos.contactoEmergencia} />
+        </CardContent>
+      </Card>
 
       {!ficha ? (
         <Card>

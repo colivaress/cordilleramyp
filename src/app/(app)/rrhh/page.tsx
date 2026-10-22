@@ -45,29 +45,29 @@ export const dynamic = "force-dynamic";
 export default async function RrhhPage({
   searchParams,
 }: {
-  searchParams: Promise<{ pestana?: string; q?: string; area?: string; contrato?: string }>;
+  searchParams: Promise<{ pestana?: string; q?: string; faena?: string; contrato?: string }>;
 }) {
   // Guarda en la página, no en un layout (ver guardas.ts). La RLS dice lo
   // mismo: un supervisor que llegara acá igual no vería montos ajenos.
   const { perfil } = await requireModuloRrhh();
-  const { pestana, q = "", area = "", contrato = "" } = await searchParams;
+  const { pestana, q = "", faena = "", contrato = "" } = await searchParams;
   const desvinculados = pestana === "desvinculados";
   const hoy = hoyChile();
   const supabase = await createClient();
 
-  const [{ data: personal }, { data: fichas }, { data: remuneraciones }, { data: ruts }, { data: areasCatalogo }] =
+  const [{ data: personal }, { data: fichas }, { data: remuneraciones }, { data: ruts }, { data: faenasCatalogo }] =
     await Promise.all([
       supabase.from("personal").select("id, nombre, apellido, email, rol, activo").order("nombre"),
       supabase
         .from("rrhh_fichas")
-        .select("personal_id, area_id, fecha_ingreso, tipo_contrato, fecha_desvinculacion, cargo:rrhh_cargos(nombre), area:rrhh_areas(nombre)"),
+        .select("personal_id, faena_id, fecha_ingreso, tipo_contrato, fecha_desvinculacion, cargo:rrhh_cargos(nombre), faena:rrhh_faenas(nombre)"),
       supabase
         .from("rrhh_remuneracion_base")
         .select("personal_id, liquido_pactado, vigente_desde, created_at")
         .lte("vigente_desde", hoy),
       // El RUT no se lee de personal con un select (grants por columna).
       supabase.rpc("rrhh_ruts"),
-      supabase.from("rrhh_areas").select("id, nombre").order("nombre"),
+      supabase.from("rrhh_faenas").select("id, nombre").order("nombre"),
     ]);
 
   const fichaDe = new Map((fichas ?? []).map((f) => [f.personal_id, f]));
@@ -81,7 +81,7 @@ export default async function RrhhPage({
   const filas = todos.filter((p) => {
     const f = fichaDe.get(p.id);
     if (!!f?.fecha_desvinculacion !== desvinculados) return false;
-    if (area && f?.area_id !== area) return false;
+    if (faena && f?.faena_id !== faena) return false;
     if (contrato && f?.tipo_contrato !== contrato) return false;
     if (!buscado) return true;
     return (
@@ -99,14 +99,17 @@ export default async function RrhhPage({
         <Link href="/rrhh/nuevo" className={buttonVariants()}>
           Agregar persona
         </Link>
+        <Link href="/rrhh/turnos" className={buttonVariants({ variant: "outline" })}>
+          Turnos
+        </Link>
         <Link href="/rrhh/jornadas" className={buttonVariants({ variant: "outline" })}>
           Jornadas
         </Link>
         <Link href="/rrhh/cargos" className={buttonVariants({ variant: "outline" })}>
           Cargos
         </Link>
-        <Link href="/rrhh/areas" className={buttonVariants({ variant: "outline" })}>
-          Áreas
+        <Link href="/rrhh/faenas" className={buttonVariants({ variant: "outline" })}>
+          Faenas
         </Link>
         <Link href="/rrhh/tipos-documento" className={buttonVariants({ variant: "outline" })}>
           Tipos de documento
@@ -152,9 +155,9 @@ export default async function RrhhPage({
           <form className="flex flex-wrap items-end gap-2" action="/rrhh">
             {desvinculados && <input type="hidden" name="pestana" value="desvinculados" />}
             <Input name="q" defaultValue={q} placeholder="Buscar por nombre, RUT o correo" className="w-full sm:w-72" />
-            <select name="area" defaultValue={area} className={nativeSelectClassName} aria-label="Área">
-              <option value="">Todas las áreas</option>
-              {(areasCatalogo ?? []).map((a) => (
+            <select name="faena" defaultValue={faena} className={nativeSelectClassName} aria-label="Faena">
+              <option value="">Todas las faenas</option>
+              {(faenasCatalogo ?? []).map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.nombre}
                 </option>
@@ -186,7 +189,7 @@ export default async function RrhhPage({
                     <TableHead>RUT</TableHead>
                     <TableHead>Rol</TableHead>
                     <TableHead>Cargo</TableHead>
-                    <TableHead>Área</TableHead>
+                    <TableHead>Faena</TableHead>
                     <TableHead>Ingreso</TableHead>
                     <TableHead className="text-right">Líquido pactado</TableHead>
                   </TableRow>
@@ -226,7 +229,7 @@ export default async function RrhhPage({
                           )}
                         </TableCell>
                         <TableCell>{f?.cargo?.nombre ?? "—"}</TableCell>
-                        <TableCell>{f?.area?.nombre ?? "—"}</TableCell>
+                        <TableCell>{f?.faena?.nombre ?? "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">
                           {f ? fechaCorta(f.fecha_ingreso) : "—"}
                           {f?.fecha_desvinculacion && (

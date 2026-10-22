@@ -1,4 +1,5 @@
 import { normalizarRut, rutValido } from "../rut.ts";
+import { normalizarTelefonoCl } from "../telefono.ts";
 import { ORDEN_TIPOS_INSPECCION, type RolUsuario } from "../tipos.ts";
 import type { Resultado } from "./parametros.ts";
 
@@ -77,6 +78,10 @@ export type FormularioCuenta = {
   rol: string;
   /** Solo cuenta si el rol es supervisor. Vacío = suspendido (ver la ficha). */
   tiposInspeccion: string[];
+  /** Contacto de emergencia: de un tercero, se guarda lo mínimo. */
+  contactoNombre: string;
+  contactoTelefono: string;
+  contactoRelacion: string;
 };
 
 export type CuentaValida = {
@@ -88,6 +93,9 @@ export type CuentaValida = {
   fecha_nacimiento: string;
   rol: RolUsuario;
   tiposInspeccion: string[];
+  contacto_emergencia_nombre: string | null;
+  contacto_emergencia_telefono: string | null;
+  contacto_emergencia_relacion: string | null;
 };
 
 const CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -114,6 +122,18 @@ export function leerCuenta(f: FormularioCuenta, opciones: { creando: boolean }):
   // WhatsApp automático y el manual).
   if (rol === "supervisor" && !telefono) e.push("El teléfono es obligatorio para un supervisor.");
 
+  // Contacto de emergencia: todo o nada. Un número suelto no sirve en una
+  // emergencia (quien llama tiene que saber a quién llama) y un nombre sin
+  // número tampoco. La relación es opcional.
+  const contactoNombre = f.contactoNombre.trim();
+  const contactoRelacion = f.contactoRelacion.trim();
+  const contactoTelefono = f.contactoTelefono.trim() ? normalizarTelefonoCl(f.contactoTelefono) : null;
+  if (f.contactoTelefono.trim() && !contactoTelefono)
+    e.push("El teléfono de emergencia no es un número chileno válido (por ejemplo +56 9 1234 5678).");
+  if (f.contactoTelefono.trim() && !contactoNombre) e.push("Falta el nombre del contacto de emergencia.");
+  if (!f.contactoTelefono.trim() && (contactoNombre || contactoRelacion))
+    e.push("Falta el teléfono del contacto de emergencia.");
+
   const validos = new Set<string>(ORDEN_TIPOS_INSPECCION);
   const tipos = rol === "supervisor" ? [...new Set(f.tiposInspeccion)].filter((t) => validos.has(t)).sort() : [];
 
@@ -129,6 +149,9 @@ export function leerCuenta(f: FormularioCuenta, opciones: { creando: boolean }):
       fecha_nacimiento: f.fechaNacimiento,
       rol,
       tiposInspeccion: tipos,
+      contacto_emergencia_nombre: contactoTelefono ? contactoNombre : null,
+      contacto_emergencia_telefono: contactoTelefono,
+      contacto_emergencia_relacion: contactoTelefono && contactoRelacion ? contactoRelacion : null,
     },
   };
 }

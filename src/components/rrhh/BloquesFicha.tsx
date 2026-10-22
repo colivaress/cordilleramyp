@@ -1,5 +1,6 @@
 import { formatearCLP } from "@/lib/dinero";
 import { formatearRut } from "@/lib/rut";
+import { formatearTelefonoCl } from "@/lib/telefono";
 import type { FichaCompleta } from "@/lib/rrhh/ficha-servidor";
 import {
   ETIQUETA_SALUD,
@@ -37,7 +38,7 @@ export function DatosFicha({ ficha, rut }: { ficha: NonNullable<FichaCompleta["f
     <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <Dato etiqueta="RUT">{rut ? formatearRut(rut) : "—"}</Dato>
       <Dato etiqueta="Cargo">{ficha.cargo?.nombre ?? "—"}</Dato>
-      <Dato etiqueta="Área">{ficha.area?.nombre ?? "—"}</Dato>
+      <Dato etiqueta="Faena">{ficha.faena?.nombre ?? "—"}</Dato>
       <Dato etiqueta="Ingreso">{fechaCorta(ficha.fecha_ingreso)}</Dato>
       <Dato etiqueta="Contrato">
         {ETIQUETA_TIPO_CONTRATO[ficha.tipo_contrato]}
@@ -104,19 +105,58 @@ export function HistorialSueldo({ filas }: { filas: FichaCompleta["remuneracione
   );
 }
 
+function textoRango(desde: string, hasta: string | null): string {
+  return hasta ? `del ${fechaCorta(desde)} al ${fechaCorta(hasta)}` : `desde el ${fechaCorta(desde)}, hasta nuevo aviso`;
+}
+
+const ACCION_CAMBIO: Record<string, string> = {
+  asignada: "Asignada",
+  corregida: "Corregida",
+  anulada: "Anulada",
+};
+
+/** Historial de asignaciones de jornada, solo lectura. Las anuladas se
+ *  muestran tachadas (no se borran) y cada cambio dice quién y cuándo:
+ *  es lo que hace falta para revisar un cálculo de horas después. */
 export function HistorialJornadas({ filas, vigenteId }: { filas: FichaCompleta["jornadas"]; vigenteId: string | null }) {
   if (filas.length === 0) return <p className="text-sm text-muted-foreground">Sin jornada asignada.</p>;
   return (
     <ul className="grid gap-2">
       {filas.map((j) => (
         <li key={j.id} className="rounded-md border px-3 py-2 text-sm">
-          <span className="font-medium">{j.nombre}</span> · {String(j.horas).replace(".", ",")} h semanales · desde{" "}
-          {fechaCorta(j.vigente_desde)}
+          <span className={j.anulada_en ? "text-muted-foreground line-through" : undefined}>
+            <span className="font-medium">{j.nombre}</span> · {String(j.horas).replace(".", ",")} h semanales ·{" "}
+            {textoRango(j.vigente_desde, j.vigente_hasta)}
+          </span>
           {j.id === vigenteId && <span className="ml-2 text-xs font-medium text-success-700">vigente</span>}
+          {j.anulada_en && <span className="ml-2 text-xs font-medium text-danger-700">anulada</span>}
           <span className="block text-xs text-muted-foreground">{describirDias(j.dias)}</span>
+          {j.cambios.length > 0 && (
+            <ul className="mt-1 grid gap-0.5 text-xs text-muted-foreground">
+              {j.cambios.map((c) => (
+                <li key={c.id}>
+                  {ACCION_CAMBIO[c.accion] ?? c.accion} el {fechaHora(c.hecho_en)}
+                  {c.autor && ` por ${c.autor}`}
+                  {c.accion === "corregida" && ` (${textoRango(c.vigente_desde, c.vigente_hasta)})`}
+                  {c.motivo && `: ${c.motivo}`}
+                </li>
+              ))}
+            </ul>
+          )}
         </li>
       ))}
     </ul>
+  );
+}
+
+export function ContactoEmergencia({ contacto }: { contacto: FichaCompleta["contactoEmergencia"] }) {
+  if (!contacto?.telefono) return <p className="text-sm text-muted-foreground">Sin contacto de emergencia registrado.</p>;
+  return (
+    <dl className="grid gap-3 sm:grid-cols-3">
+      <Dato etiqueta="Nombre">{contacto.nombre}</Dato>
+      <Dato etiqueta="Teléfono">{formatearTelefonoCl(contacto.telefono)}</Dato>
+      <Dato etiqueta="Relación">{contacto.relacion ?? "—"}</Dato>
+    </dl>
   );
 }
 

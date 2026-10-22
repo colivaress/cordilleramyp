@@ -43,6 +43,9 @@ export default async function NuevaPersonaPage() {
               fechaNacimiento: "",
               rol: perfil.rol === "administrador" ? "supervisor" : rolInicial,
               tiposInspeccion: [],
+              contactoNombre: "",
+              contactoTelefono: "",
+              contactoRelacion: "",
             }}
           />
         </CardContent>

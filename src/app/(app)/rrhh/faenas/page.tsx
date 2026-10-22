@@ -7,22 +7,23 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 export const dynamic = "force-dynamic";
 
-// Catálogo de áreas de la ficha (antes texto libre; también es el filtro del
-// listado). El conteo dice cuántas fichas la usan.
-export default async function AreasPage() {
+// Catálogo de faenas de la ficha: el lugar (cliente o planta) donde la
+// persona está destinada a trabajar. Antes se llamaba "área". También es el
+// filtro del listado y de Turnos. El conteo dice cuántas fichas la usan.
+export default async function FaenasPage() {
   await requireModuloRrhh();
   const supabase = await createClient();
   const [{ data: items }, { data: fichas }] = await Promise.all([
-    supabase.from("rrhh_areas").select("id, nombre, activo").order("nombre"),
-    supabase.from("rrhh_fichas").select("area_id"),
+    supabase.from("rrhh_faenas").select("id, nombre, activo").order("nombre"),
+    supabase.from("rrhh_fichas").select("faena_id"),
   ]);
   const cuenta = new Map<string, number>();
-  for (const f of fichas ?? []) if (f.area_id) cuenta.set(f.area_id, (cuenta.get(f.area_id) ?? 0) + 1);
+  for (const f of fichas ?? []) if (f.faena_id) cuenta.set(f.faena_id, (cuenta.get(f.faena_id) ?? 0) + 1);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Áreas</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Faenas</h1>
         <Link href="/rrhh" className={buttonVariants({ variant: "outline" })}>
           Volver a RRHH
         </Link>
@@ -31,16 +32,16 @@ export default async function AreasPage() {
         <CardHeader>
           <CardTitle>Catálogo</CardTitle>
           <CardDescription>
-            Un área se desactiva, no se borra: las fichas que ya la tienen la conservan, pero deja de
+            Una faena se desactiva, no se borra: las fichas que ya la tienen la conservan, pero deja de
             ofrecerse en las nuevas.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <CatalogoLista
-            catalogo="areas"
+            catalogo="faenas"
             items={(items ?? []).map((t) => ({ ...t, usos: cuenta.get(t.id) ?? 0 }))}
-            etiquetaNuevo="Nueva área"
-            etiquetaItem="Área"
+            etiquetaNuevo="Nueva faena"
+            etiquetaItem="Faena"
             etiquetaUsos="Fichas"
           />
         </CardContent>

@@ -278,7 +278,7 @@ check("…y aparece en el historial con el valor anterior", r.html.includes("$81
 
 const { data: cargo } = await srv.from("rrhh_cargos").select("id").limit(1).single();
 const fichaS3 = {
-  cargo_id: cargo.id, area_id: "", fecha_ingreso: "2024-01-10", tipo_contrato: "indefinido",
+  cargo_id: cargo.id, faena_id: "", fecha_ingreso: "2024-01-10", tipo_contrato: "indefinido",
   fecha_termino_contrato: "", afp: "uno", sistema_salud: "fonasa", isapre: "", plan_isapre_uf: "", afecto_afc: true, cargas_familiares: "0",
 };
 g = await llamarAccion(`/rrhh/${S3}`, ID_FICHA, cS1, S3, fichaS3);
@@ -296,6 +296,7 @@ const ID_ACCESO = await idAccion(htmlFichaAdmin, "cambiarAcceso");
 const cuentaS3 = {
   nombre: "S3", apellido: "Prueba", rut: "", email: "", telefono: "56900000002",
   fechaNacimiento: "1990-01-01", rol: "supervisor", tiposInspeccion: [],
+  contactoNombre: "", contactoTelefono: "", contactoRelacion: "",
 };
 const rolDe = async (id) => (await srv.from("personal").select("rol").eq("id", id).single()).data.rol;
 const tiposDe = async (id) =>
@@ -311,7 +312,7 @@ check("…y S1 conserva encarpe", JSON.stringify(await tiposDe(S1)) === '["encar
 g = await llamarAccion(`/rrhh/${S3}`, ID_CUENTA, cC, S3, { ...cuentaS3, rut: "33.333.333-4" });
 check("RUT inválido: error con nombre", g.resultado?.ok === false && g.resultado.errores?.[0]?.includes("RUT no es válido"), g.resultado);
 g = await llamarAccion(`/rrhh/${S3}`, ID_CUENTA, cC, S3, { ...cuentaS3, rut: "11.111.111-1" });
-check("RUT de otra persona: rechazado", g.resultado?.ok === false && /otra persona/.test(g.resultado.mensaje), g.resultado);
+check("RUT de otra persona: \"Ya existe una persona con ese RUT\", no el error de Postgres", g.resultado?.mensaje === "Ya existe una persona con ese RUT.", g.resultado);
 g = await llamarAccion(`/rrhh/${S3}`, ID_CUENTA, cC, S3, { ...cuentaS3, rut: "33.333.333-3" });
 check("adm. contrato SÍ edita los datos personales (RUT de S3)", g.resultado?.ok === true, g.resultado ?? g.status);
 g = await llamarAccion(`/rrhh/${idA}`, ID_CUENTA, cC, idA, { ...cuentaS3, nombre: "A", rol: "administrador", telefono: "" });
@@ -324,6 +325,7 @@ check("admin deja a S3 sin tipos de nuevo", g.resultado?.ok === true && (await t
 const nueva = (rol) => ({
   nombre: "Nueva", apellido: rol, rut: "", email: `rls.nueva.${rol}@test.cordilleramyp.local`, telefono: "56977777777",
   fechaNacimiento: "1995-05-05", rol, tiposInspeccion: [],
+  contactoNombre: "", contactoTelefono: "", contactoRelacion: "",
 });
 g = await llamarAccion("/rrhh/nuevo", ID_CREAR, cC, nueva("administrador"));
 check("adm. contrato crea un administrador llamando la acción: rechazado", g.resultado?.ok === false && /solo puede crear personas con rol Trabajador/.test(g.resultado.mensaje), g.resultado);
@@ -374,6 +376,114 @@ g = await llamarAccion(`/rrhh/${S1}`, ID_ACCESO, cT, { personalId: S1, activo: f
 check("trabajador suspendiendo a otro: rechazado", rechazada(g), { status: g.status, redirect: g.redirect, resultado: g.resultado });
 const telT = (await srv.from("personal").select("telefono").eq("id", idT).single()).data.telefono;
 check("…y su fila quedó igual", telT === null, telT);
+
+console.log("\n— Correo repetido —");
+g = await llamarAccion("/rrhh/nuevo", ID_CREAR, cC, { ...nueva("trabajador"), email: "RLS.Nueva.Trabajador@test.cordilleramyp.local" });
+check("el mismo correo con otras mayúsculas: \"Ya existe una persona con ese correo\"", g.resultado?.mensaje === "Ya existe una persona con ese correo.", g.resultado);
+
+console.log("\n— Faenas (antes Áreas) —");
+r = await pedir("/rrhh/faenas", cC);
+check("adm. contrato entra a /rrhh/faenas", r.status === 200 && r.html.includes("Faenas"), r.status);
+r = await pedir("/rrhh/areas", cA);
+check("/rrhh/areas ya no existe (404)", r.status === 404, r.status);
+r = await pedir("/rrhh", cA);
+check("el listado filtra por faena", r.html.includes('name="faena"') && r.html.includes("Todas las faenas"));
+
+console.log("\n— Contacto de emergencia —");
+g = await llamarAccion(`/rrhh/${S3}`, ID_CUENTA, cC, S3, { ...cuentaS3, rut: "33.333.333-3", contactoTelefono: "9 8888 7777" });
+check("un teléfono de emergencia sin nombre: rechazado con mensaje", g.resultado?.ok === false && g.resultado.errores?.includes("Falta el nombre del contacto de emergencia."), g.resultado);
+g = await llamarAccion(`/rrhh/${S3}`, ID_CUENTA, cC, S3, { ...cuentaS3, rut: "33.333.333-3", contactoNombre: "Rosa Prueba", contactoTelefono: "9 8888 7777", contactoRelacion: "hermana" });
+check("adm. contrato registra el contacto de S3", g.resultado?.ok === true, g.resultado);
+const { data: contactoS3 } = await srv.from("personal").select("contacto_emergencia_nombre, contacto_emergencia_telefono, contacto_emergencia_relacion").eq("id", S3).single();
+check("…normalizado", JSON.stringify(contactoS3) === JSON.stringify({ contacto_emergencia_nombre: "Rosa Prueba", contacto_emergencia_telefono: "56988887777", contacto_emergencia_relacion: "hermana" }), contactoS3);
+r = await pedir(`/rrhh/${S3}`, cA);
+check("la ficha lo muestra en el formulario de la cuenta", r.html.includes("Rosa Prueba") && r.html.includes("+56 9 8888 7777"));
+r = await pedir("/mis-datos", cT);
+check("T ve su propio contacto en Mis datos (solo lectura)", r.html.includes("María Prueba") && r.html.includes("+56 9 8765 4321") && !r.html.includes("Rosa Prueba"));
+r = await pedir("/mis-datos", cS1);
+check("S1 no ve el contacto de T", !r.html.includes("María Prueba") && !r.html.includes("8765"));
+
+console.log("\n— Cargo sugerido por rol (solo valor inicial) —");
+const { data: nuevaT } = await srv.from("personal").select("id").eq("email", "rls.nueva.trabajador@test.cordilleramyp.local").single();
+const { data: encarpador } = await srv.from("rrhh_cargos").select("id").eq("nombre", "Encarpador").single();
+r = await pedir(`/rrhh/${nuevaT.id}`, cA);
+check("un trabajador sin contrato abre el formulario con Encarpador elegido", new RegExp(`<option value="${encarpador.id}" selected=""`).test(r.html));
+r = await pedir(`/rrhh/${S1}`, cA);
+check("una ficha existente conserva su cargo (no se recalcula)", !new RegExp(`<option value="${encarpador.id}" selected=""`).test(r.html));
+
+console.log("\n— Turnos: acceso por ruta —");
+r = await pedir("/rrhh/turnos", cA);
+check("admin entra a /rrhh/turnos", r.status === 200 && r.html.includes("Asignar turno") && r.html.includes("Art. 10 Nº5"), r.status);
+const htmlTurnos = r.html;
+r = await pedir("/rrhh/turnos", cC);
+check("adm. contrato entra a /rrhh/turnos", r.status === 200, r.status);
+r = await pedir("/rrhh/turnos", cS1);
+check("supervisor escribiendo /rrhh/turnos rebota", sinPermiso(r), { status: r.status, location: r.location });
+r = await pedir("/rrhh/turnos", cT);
+check("trabajador escribiendo /rrhh/turnos rebota", sinPermisoT(r), { status: r.status, location: r.location });
+r = await pedir(`/rrhh/${S1}`, cA);
+check("la ficha ya no asigna jornadas (solo historial)", r.status === 200 && !r.html.includes('id="jornada-desde"') && r.html.includes('href="/rrhh/turnos"'));
+
+console.log("\n— Turnos: Server Actions (todo o nada) —");
+const ID_TURNO = await idAccion(htmlTurnos, "asignarTurno");
+const ID_CORREGIR = await idAccion(htmlTurnos, "corregirAsignacion");
+const ID_ANULAR = await idAccion(htmlTurnos, "anularAsignacion");
+const idS2 = await idDe("S2");
+const { data: jornadas } = await srv.from("rrhh_jornadas").select("id, nombre, activo");
+const turnoA = jornadas.find((j) => j.nombre === "Turno A").id;
+const turnoB = jornadas.find((j) => j.nombre === "Turno B").id;
+const asignacionesDe = async (id) =>
+  (await srv.from("rrhh_jornada_trabajador").select("id, vigente_desde, vigente_hasta, created_by, anulada_en").eq("personal_id", id).order("vigente_desde")).data ?? [];
+const turno = (personalIds, desde, hasta, jornadaId = turnoA) => ({ jornadaId, desde, hasta, personalIds });
+g = await llamarAccion("/rrhh/turnos", ID_TURNO, cS1, turno([S3], "2026-04-01", "2026-04-30"));
+check("supervisor asignando turnos directo: rechazado", rechazada(g), { status: g.status, redirect: g.redirect, resultado: g.resultado });
+g = await llamarAccion("/rrhh/turnos", ID_TURNO, cT, turno([idT], "2026-04-01", "2026-04-30"));
+check("trabajador asignándose un turno directo: rechazado", rechazada(g), { status: g.status, redirect: g.redirect, resultado: g.resultado });
+g = await llamarAccion("/rrhh/turnos", ID_TURNO, cC, turno([S3, idT], "2026-04-01", "2026-04-30", turnoB));
+check("jornada desactivada: rechazado", g.resultado?.ok === false && /desactivada/.test(g.resultado.mensaje), g.resultado);
+g = await llamarAccion("/rrhh/turnos", ID_TURNO, cC, turno([S3, idS2], "2026-04-01", "2026-04-30"));
+check("con un desvinculado: no se asigna a nadie y se dice quién", g.resultado?.ok === false && g.resultado.errores?.some((e) => /S2 Prueba está desvinculado/.test(e)), g.resultado);
+g = await llamarAccion("/rrhh/turnos", ID_TURNO, cC, turno([S3, idT, S1], "2026-03-05", "2026-03-20"));
+check(
+  "S1 choca: no se asigna a nadie y se muestran sus dos asignaciones",
+  g.resultado?.ok === false && g.resultado.conflictos?.length === 2 && g.resultado.conflictos.every((c) => c.persona === "S1 Prueba" && c.jornada === "Turno A"),
+  g.resultado,
+);
+check("…S3 y T siguen sin asignaciones (todo o nada)", (await asignacionesDe(S3)).length === 0 && (await asignacionesDe(idT)).length === 0);
+g = await llamarAccion("/rrhh/turnos", ID_TURNO, cC, turno([S3, idT], "2026-04-01", "2026-04-30"));
+check("adm. contrato asigna abril a S3 y T de una vez", g.resultado?.ok === true && g.resultado.asignadas === 2, g.resultado);
+const [abrilT] = await asignacionesDe(idT);
+check("…con autor de la sesión", abrilT?.created_by === (await idDe("C")) && abrilT.vigente_hasta === "2026-04-30", abrilT);
+
+g = await llamarAccion("/rrhh/turnos", ID_CORREGIR, cC, { id: abrilT.id, desde: "2026-04-01", hasta: "2026-04-15", motivo: "" });
+check("corregir sin motivo: rechazado con mensaje", g.resultado?.ok === false && /motivo/.test(g.resultado.mensaje), g.resultado);
+g = await llamarAccion("/rrhh/turnos", ID_CORREGIR, cT, { id: abrilT.id, desde: "2026-04-01", hasta: "2030-01-01", motivo: "yo" });
+check("trabajador corrigiendo su turno directo: rechazado", rechazada(g), { status: g.status, redirect: g.redirect, resultado: g.resultado });
+g = await llamarAccion("/rrhh/turnos", ID_CORREGIR, cC, { id: abrilT.id, desde: "2026-04-01", hasta: "2026-04-15", motivo: "Rota a tarde la segunda quincena" });
+check("adm. contrato corrige el rango de T", g.resultado?.ok === true, g.resultado);
+const s1Marzo = (await asignacionesDe(S1)).find((a) => a.vigente_desde === "2026-03-01");
+g = await llamarAccion("/rrhh/turnos", ID_CORREGIR, cA, { id: s1Marzo.id, desde: "2026-03-01", hasta: "2026-03-10", motivo: "Extiende" });
+check("corregir hacia un choque: rechazado mostrando con qué", g.resultado?.ok === false && g.resultado.conflictos?.length === 1, g.resultado);
+
+r = await pedir("/rrhh/turnos?mes=2026-04", cA);
+check("el mes muestra el hueco con nombre y fechas", r.html.includes("Del 16-04-2026 al 30-04-2026 T Prueba no tiene jornada asignada."));
+check("…y no inventa huecos de quien tiene el mes cubierto", !r.html.includes("S3 Prueba no tiene jornada asignada"));
+r = await pedir(`/rrhh/${idT}`, cA);
+// React separa los fragmentos de texto con <!-- -->: se comparan sin ellos.
+const plano = (html) => html.replace(/<!-- -->/g, "");
+check("la ficha de T muestra la corrección con autor y motivo", /Corregida el [^<]* por C Prueba \(del 01-04-2026 al 15-04-2026\): Rota a tarde la segunda quincena/.test(plano(r.html)), plano(r.html).match(/Corregida[^<]{0,160}/)?.[0]);
+
+g = await llamarAccion("/rrhh/turnos", ID_ANULAR, cT, { id: abrilT.id, motivo: "no quiero" });
+check("trabajador anulando su turno directo: rechazado", rechazada(g), { status: g.status, redirect: g.redirect, resultado: g.resultado });
+g = await llamarAccion("/rrhh/turnos", ID_ANULAR, cC, { id: abrilT.id, motivo: "Se asignó por error" });
+check("adm. contrato anula la asignación de T", g.resultado?.ok === true, g.resultado);
+check("…la fila sigue ahí, anulada (no se borra)", !!(await asignacionesDe(idT))[0]?.anulada_en);
+g = await llamarAccion("/rrhh/turnos", ID_ANULAR, cC, { id: abrilT.id, motivo: "otra vez" });
+check("anular dos veces: rechazado", g.resultado?.ok === false && /ya estaba anulada/.test(g.resultado.mensaje), g.resultado);
+r = await pedir("/mis-datos", cT);
+// T no lee la fila de quien anuló (RLS de personal): ve la acción y el
+// motivo sin autor, igual que en su historial de sueldo.
+check("T ve su historial con la anulación, sin poder tocarlo", /Anulada el [^<]*: Se asignó por error/.test(plano(r.html)) && !r.html.includes(">Corregir<"), plano(r.html).match(/Anulada[^<]{0,160}/)?.[0]);
 
 console.log("\n— /usuarios ya no existe —");
 r = await pedir("/usuarios", cA);

@@ -307,6 +307,9 @@ export type Database = {
         Row: {
           activo: boolean
           apellido: string | null
+          contacto_emergencia_nombre: string | null
+          contacto_emergencia_relacion: string | null
+          contacto_emergencia_telefono: string | null
           created_at: string
           email: string | null
           fecha_nacimiento: string | null
@@ -321,6 +324,9 @@ export type Database = {
         Insert: {
           activo?: boolean
           apellido?: string | null
+          contacto_emergencia_nombre?: string | null
+          contacto_emergencia_relacion?: string | null
+          contacto_emergencia_telefono?: string | null
           created_at?: string
           email?: string | null
           fecha_nacimiento?: string | null
@@ -334,6 +340,9 @@ export type Database = {
         Update: {
           activo?: boolean
           apellido?: string | null
+          contacto_emergencia_nombre?: string | null
+          contacto_emergencia_relacion?: string | null
+          contacto_emergencia_telefono?: string | null
           created_at?: string
           email?: string | null
           fecha_nacimiento?: string | null
@@ -406,31 +415,6 @@ export type Database = {
             referencedColumns: ["anio", "mes"]
           },
         ]
-      }
-      rrhh_areas: {
-        Row: {
-          activo: boolean
-          created_at: string
-          id: string
-          nombre: string
-          orden: number
-        }
-        ComputedFields: never
-        Insert: {
-          activo?: boolean
-          created_at?: string
-          id?: string
-          nombre: string
-          orden?: number
-        }
-        Update: {
-          activo?: boolean
-          created_at?: string
-          id?: string
-          nombre?: string
-          orden?: number
-        }
-        Relationships: []
       }
       rrhh_cargos: {
         Row: {
@@ -516,14 +500,39 @@ export type Database = {
           },
         ]
       }
+      rrhh_faenas: {
+        Row: {
+          activo: boolean
+          created_at: string
+          id: string
+          nombre: string
+          orden: number
+        }
+        ComputedFields: never
+        Insert: {
+          activo?: boolean
+          created_at?: string
+          id?: string
+          nombre: string
+          orden?: number
+        }
+        Update: {
+          activo?: boolean
+          created_at?: string
+          id?: string
+          nombre?: string
+          orden?: number
+        }
+        Relationships: []
+      }
       rrhh_fichas: {
         Row: {
           afecto_afc: boolean
           afp: Database["public"]["Enums"]["rrhh_afp"]
-          area_id: string | null
           cargas_familiares: number
           cargo_id: string
           created_at: string
+          faena_id: string | null
           fecha_desvinculacion: string | null
           fecha_ingreso: string
           fecha_termino_contrato: string | null
@@ -540,10 +549,10 @@ export type Database = {
         Insert: {
           afecto_afc?: boolean
           afp: Database["public"]["Enums"]["rrhh_afp"]
-          area_id?: string | null
           cargas_familiares?: number
           cargo_id: string
           created_at?: string
+          faena_id?: string | null
           fecha_desvinculacion?: string | null
           fecha_ingreso: string
           fecha_termino_contrato?: string | null
@@ -559,10 +568,10 @@ export type Database = {
         Update: {
           afecto_afc?: boolean
           afp?: Database["public"]["Enums"]["rrhh_afp"]
-          area_id?: string | null
           cargas_familiares?: number
           cargo_id?: string
           created_at?: string
+          faena_id?: string | null
           fecha_desvinculacion?: string | null
           fecha_ingreso?: string
           fecha_termino_contrato?: string | null
@@ -577,17 +586,17 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "rrhh_fichas_area_id_fkey"
-            columns: ["area_id"]
-            isOneToOne: false
-            referencedRelation: "rrhh_areas"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "rrhh_fichas_cargo_id_fkey"
             columns: ["cargo_id"]
             isOneToOne: false
             referencedRelation: "rrhh_cargos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rrhh_fichas_faena_id_fkey"
+            columns: ["faena_id"]
+            isOneToOne: false
+            referencedRelation: "rrhh_faenas"
             referencedColumns: ["id"]
           },
           {
@@ -608,31 +617,56 @@ export type Database = {
       }
       rrhh_jornada_trabajador: {
         Row: {
+          anulada_en: string | null
+          anulada_por: string | null
           created_at: string
           created_by: string | null
           id: string
           jornada_id: string
+          motivo_cambio: string | null
           personal_id: string
+          updated_at: string | null
+          updated_by: string | null
           vigente_desde: string
+          vigente_hasta: string | null
         }
         ComputedFields: never
         Insert: {
+          anulada_en?: string | null
+          anulada_por?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
           jornada_id: string
+          motivo_cambio?: string | null
           personal_id: string
+          updated_at?: string | null
+          updated_by?: string | null
           vigente_desde: string
+          vigente_hasta?: string | null
         }
         Update: {
+          anulada_en?: string | null
+          anulada_por?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
           jornada_id?: string
+          motivo_cambio?: string | null
           personal_id?: string
+          updated_at?: string | null
+          updated_by?: string | null
           vigente_desde?: string
+          vigente_hasta?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "rrhh_jornada_trabajador_anulada_por_fkey"
+            columns: ["anulada_por"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "rrhh_jornada_trabajador_created_by_fkey"
             columns: ["created_by"]
@@ -649,6 +683,82 @@ export type Database = {
           },
           {
             foreignKeyName: "rrhh_jornada_trabajador_personal_id_fkey"
+            columns: ["personal_id"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rrhh_jornada_trabajador_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rrhh_jornada_trabajador_cambios: {
+        Row: {
+          accion: string
+          asignacion_id: string
+          hecho_en: string
+          hecho_por: string | null
+          id: string
+          jornada_id: string
+          motivo: string | null
+          personal_id: string
+          vigente_desde: string
+          vigente_hasta: string | null
+        }
+        ComputedFields: never
+        Insert: {
+          accion: string
+          asignacion_id: string
+          hecho_en?: string
+          hecho_por?: string | null
+          id?: string
+          jornada_id: string
+          motivo?: string | null
+          personal_id: string
+          vigente_desde: string
+          vigente_hasta?: string | null
+        }
+        Update: {
+          accion?: string
+          asignacion_id?: string
+          hecho_en?: string
+          hecho_por?: string | null
+          id?: string
+          jornada_id?: string
+          motivo?: string | null
+          personal_id?: string
+          vigente_desde?: string
+          vigente_hasta?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rrhh_jornada_trabajador_cambios_asignacion_id_fkey"
+            columns: ["asignacion_id"]
+            isOneToOne: false
+            referencedRelation: "rrhh_jornada_trabajador"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rrhh_jornada_trabajador_cambios_hecho_por_fkey"
+            columns: ["hecho_por"]
+            isOneToOne: false
+            referencedRelation: "personal"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rrhh_jornada_trabajador_cambios_jornada_id_fkey"
+            columns: ["jornada_id"]
+            isOneToOne: false
+            referencedRelation: "rrhh_jornadas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rrhh_jornada_trabajador_cambios_personal_id_fkey"
             columns: ["personal_id"]
             isOneToOne: false
             referencedRelation: "personal"
@@ -1235,6 +1345,15 @@ export type Database = {
         Returns: {
           alguna_vez_inicio_sesion: boolean
           personal_id: string
+        }[]
+      }
+      rrhh_contactos_emergencia: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          nombre: string
+          personal_id: string
+          relacion: string
+          telefono: string
         }[]
       }
       rrhh_desvincular: {

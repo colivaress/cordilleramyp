@@ -22,7 +22,7 @@ import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
  * Server Actions de la ficha del trabajador (fase 3). Cada una repite la
  * guarda de ruta aunque la RLS diga lo mismo, y vuelve a validar con las
  * mismas funciones puras que usa el formulario:
- *   - ficha, jornada, documentos, desvinculación → requireModuloRrhh
+ *   - ficha, documentos, desvinculación → requireModuloRrhh
  *     (administrador y administrador de contrato);
  *   - montos de remuneración → requireEditarMontos (solo administrador).
  */
@@ -86,35 +86,6 @@ export async function registrarRemuneracion(
   });
   if (error) return errorInesperado("registrarRemuneracion", error);
   revalidarFicha(personalId);
-  return { ok: true };
-}
-
-export async function asignarJornada(input: {
-  personalId: string;
-  jornadaId: string;
-  vigenteDesde: string;
-}): Promise<ResultadoAccion> {
-  const { perfil } = await requireModuloRrhh();
-  if (!UUID.test(input.personalId)) return NO_VALIDO;
-  if (!UUID.test(input.jornadaId)) return { ok: false, mensaje: "Elige una jornada." };
-  if (!fechaValida(input.vigenteDesde)) return { ok: false, mensaje: "Elige desde qué fecha rige." };
-
-  const supabase = await createClient();
-  const { data: jornada } = await supabase
-    .from("rrhh_jornadas")
-    .select("activo")
-    .eq("id", input.jornadaId)
-    .maybeSingle();
-  if (!jornada?.activo) return { ok: false, mensaje: "Esa jornada no existe o está desactivada." };
-
-  const { error } = await supabase.from("rrhh_jornada_trabajador").insert({
-    personal_id: input.personalId,
-    jornada_id: input.jornadaId,
-    vigente_desde: input.vigenteDesde,
-    created_by: perfil.id,
-  });
-  if (error) return errorInesperado("asignarJornada", error);
-  revalidarFicha(input.personalId);
   return { ok: true };
 }
 
