@@ -450,6 +450,14 @@ check(
   g.resultado,
 );
 check("…S3 y T siguen sin asignaciones (todo o nada)", (await asignacionesDe(S3)).length === 0 && (await asignacionesDe(idT)).length === 0);
+g = await llamarAccion("/rrhh/turnos", ID_TURNO, cC, turno([S3, idT], "2023-12-01", "2023-12-31"));
+check(
+  "antes del ingreso de S3 (10-01-2024): no se asigna a nadie y se dice a quién",
+  g.resultado?.ok === false &&
+    JSON.stringify(g.resultado.errores) === JSON.stringify(["S3 Prueba ingresó el 10-01-2024: el turno no puede empezar antes."]),
+  g.resultado,
+);
+check("…y T, que sí podía, tampoco quedó asignado (todo o nada)", (await asignacionesDe(idT)).length === 0);
 g = await llamarAccion("/rrhh/turnos", ID_TURNO, cC, turno([S3, idT], "2026-04-01", "2026-04-30"));
 check("adm. contrato asigna abril a S3 y T de una vez", g.resultado?.ok === true && g.resultado.asignadas === 2, g.resultado);
 const [abrilT] = await asignacionesDe(idT);

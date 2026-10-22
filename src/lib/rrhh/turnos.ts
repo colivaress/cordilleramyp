@@ -125,6 +125,21 @@ export function leerTurno(f: FormularioTurno): Resultado<TurnoValido> {
   return { ok: true, valor: { jornadaId: f.jornadaId, desde: f.desde, hasta, personalIds: ids } };
 }
 
+/**
+ * Un turno no puede empezar antes del ingreso: el cálculo de horas de ese
+ * mes contaría días en que la persona no era trabajador. Devuelve un error
+ * por persona, con su nombre. (Lo contrario —un rango que termina antes de
+ * la desvinculación— es legítimo: cerrar el mes de quien se fue.)
+ */
+export function erroresAntesDelIngreso(
+  personas: readonly { nombre: string; fecha_ingreso: string }[],
+  desde: string,
+): string[] {
+  return personas
+    .filter((p) => desde < p.fecha_ingreso)
+    .map((p) => `${p.nombre} ingresó el ${fechaCorta(p.fecha_ingreso)}: el turno no puede empezar antes.`);
+}
+
 /** Asignaciones vigentes de esas personas que chocan con el rango nuevo. */
 export function conflictos<T extends Asignacion>(existentes: readonly T[], personalIds: readonly string[], rango: Rango): T[] {
   const ids = new Set(personalIds);

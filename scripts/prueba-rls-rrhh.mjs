@@ -469,6 +469,39 @@ v = (await A.from("rrhh_jornada_trabajador").select("id").eq("personal_id", P.S2
 check("…y no dejó asignada a la otra persona del lote (todo o nada)", v?.length === 0, v);
 v = await C.from("rrhh_jornada_trabajador").update({ anulada_en: new Date().toISOString(), anulada_por: P.A.id, motivo_cambio: "Se cargó a la persona equivocada" }).eq("id", asigSemana2).select("anulada_en, anulada_por");
 check("Adm. contrato anula (el autor lo fija la base, no el cliente)", !v.error && !!v.data?.[0]?.anulada_en && v.data[0].anulada_por === P.C.id, v.error?.message ?? v.data);
+v = (await A.from("rrhh_jornada_trabajador").select("id").eq("personal_id", P.S1.id).eq("vigente_desde", "2026-03-01").single()).data;
+const asigSemana1 = v?.id;
+v = await srv.from("rrhh_jornada_trabajador").update({ anulada_en: new Date().toISOString(), motivo_cambio: "Desde un script" }).eq("id", asigSemana1).select("id");
+check(
+  "Anular sin fila en personal (service role): mensaje en español, no el check",
+  !!v.error && /no tiene ficha de personal asociada/.test(v.error.message) && !/anulacion_completa/.test(v.error.message),
+  v.error?.message ?? v.data,
+);
+v = (await A.from("rrhh_jornada_trabajador").select("anulada_en").eq("id", asigSemana1).single()).data;
+check("…y la asignación sigue vigente", v?.anulada_en === null, v);
+// Una sesión autenticada cuyo auth.uid() no tiene fila en personal (por
+// ejemplo, una cuenta sin ficha). La RLS se salta a propósito con el rol
+// dueño de la tabla para llegar al trigger; lo que se prueba es su mensaje.
+const sinFicha = execSync(`docker exec -i supabase_db_cordilleraMyP psql -U postgres -qtA`, {
+  encoding: "utf8",
+  input: `
+begin;
+create temp table _r (t text) on commit drop;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-000000000999","role":"authenticated"}', true);
+do $$ begin
+  update public.rrhh_jornada_trabajador set anulada_en = now(), motivo_cambio = 'x' where id = '${asigSemana1}';
+  insert into _r values ('ANULÓ');
+exception when others then insert into _r values (sqlerrm);
+end $$;
+select t from _r;
+rollback;
+`,
+});
+check(
+  "Anular desde una cuenta sin fila en personal: mismo mensaje",
+  /no tiene ficha de personal asociada/.test(sinFicha) && !/anulacion_completa/.test(sinFicha),
+  sinFicha.trim(),
+);
 v = await C.from("rrhh_jornada_trabajador").insert({ personal_id: P.S1.id, jornada_id: jornadaA, vigente_desde: "2026-03-10", vigente_hasta: "2026-03-12" }).select("id");
 check("Una anulada ya no bloquea su rango", !v.error && v.data?.length === 1, v.error?.message);
 v = await A.from("rrhh_jornada_trabajador").update({ anulada_en: null, anulada_por: null, motivo_cambio: "revivir" }).eq("id", asigSemana2).select("id");

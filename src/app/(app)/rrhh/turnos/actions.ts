@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireModuloRrhh } from "@/lib/rrhh/guardas";
 import { fechaValida } from "@/lib/rrhh/ficha";
-import { conflictos, leerTurno, type FormularioTurno, type Rango } from "@/lib/rrhh/turnos";
+import { conflictos, erroresAntesDelIngreso, leerTurno, type FormularioTurno, type Rango } from "@/lib/rrhh/turnos";
 import { nombreCompleto } from "@/lib/mensajes";
 import { errorInesperado, type ResultadoAccion } from "@/lib/resultado-accion";
 
@@ -68,13 +68,15 @@ export async function asignarTurno(formulario: FormularioTurno): Promise<Resulta
   const supabase = await createClient();
   const [{ data: jornada }, { data: fichas, error: errFichas }, { data: personas }] = await Promise.all([
     supabase.from("rrhh_jornadas").select("activo").eq("id", t.jornadaId).maybeSingle(),
-    supabase.from("rrhh_fichas").select("personal_id, fecha_desvinculacion").in("personal_id", t.personalIds),
+    supabase.from("rrhh_fichas").select("personal_id, fecha_ingreso, fecha_desvinculacion").in("personal_id", t.personalIds),
     supabase.from("personal").select("id, nombre, apellido").in("id", t.personalIds),
   ]);
   if (errFichas) return errorInesperado("asignarTurno.fichas", errFichas);
   if (!jornada?.activo) return { ok: false, mensaje: "Esa jornada no existe o está desactivada." };
 
   // Solo a quien tiene contrato vigente: sin contrato no hay horas que medir.
+  // (Hoy un desvinculado se rechaza entero, aunque el rango termine antes de
+  // su salida: ver el PR #132.)
   const nombreDe = new Map((personas ?? []).map((p) => [p.id, nombreCompleto(p.nombre, p.apellido)]));
   const fichaDe = new Map((fichas ?? []).map((f) => [f.personal_id, f]));
   const sinContrato = t.personalIds.filter((id) => !fichaDe.has(id));
@@ -82,6 +84,10 @@ export async function asignarTurno(formulario: FormularioTurno): Promise<Resulta
   const errores = [
     ...sinContrato.map((id) => `${nombreDe.get(id) ?? "Una de las personas marcadas"} no tiene contrato registrado.`),
     ...desvinculados.map((id) => `${nombreDe.get(id) ?? "Una de las personas marcadas"} está desvinculado.`),
+    ...erroresAntesDelIngreso(
+      (fichas ?? []).map((f) => ({ nombre: nombreDe.get(f.personal_id) ?? "Una de las personas marcadas", fecha_ingreso: f.fecha_ingreso })),
+      t.desde,
+    ),
   ];
   if (errores.length) return { ok: false, mensaje: "No se asignó a nadie.", errores };
 
@@ -194,7 +200,12 @@ export async function anularAsignacion(input: { id: string; motivo: string }): P
     .eq("id", input.id)
     .select("id")
     .maybeSingle();
-  if (error) return errorInesperado("anularAsignacion", error);
+  if (error) {
+    // El trigger exige que quien anula tenga fila en personal.
+    if (error.code === "42501")
+      return { ok: false, mensaje: "No se puede anular: tu cuenta no tiene ficha de personal asociada." };
+    return errorInesperado("anularAsignacion", error);
+  }
   if (!data) return { ok: false, mensaje: "No tienes permiso para anular turnos." };
   revalidar([actual.personal_id]);
   return { ok: true };

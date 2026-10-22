@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   conflictos,
+  erroresAntesDelIngreso,
   jornadaDelDia,
   leerTurno,
   rangoMes,
@@ -78,6 +79,20 @@ test("conflictos: solo las vigentes de las personas marcadas que tocan el rango"
   assert.deepEqual(r.map((x) => x.id), ["a"]);
   const abierto = conflictos(existentes, [P, Q], { desde: "2026-11-15", hasta: null });
   assert.deepEqual(abierto.map((x) => x.id), ["b", "c"]);
+});
+
+test("un turno no empieza antes del ingreso: error por persona, con su nombre", () => {
+  const personas = [
+    { nombre: "Ana Soto", fecha_ingreso: "2026-12-01" },
+    { nombre: "Luis Rojas", fecha_ingreso: "2026-11-01" },
+    { nombre: "Juan Pérez", fecha_ingreso: "2019-03-15" },
+  ];
+  assert.deepEqual(erroresAntesDelIngreso(personas, "2026-11-01"), [
+    "Ana Soto ingresó el 01-12-2026: el turno no puede empezar antes.",
+  ]);
+  assert.deepEqual(erroresAntesDelIngreso(personas, "2026-10-31").length, 2);
+  // Empezar el mismo día del ingreso sí vale.
+  assert.deepEqual(erroresAntesDelIngreso(personas, "2026-12-01"), []);
 });
 
 test("formulario de turno: valida jornada, fechas, orden y al menos un trabajador", () => {
