@@ -26,7 +26,7 @@ const DECLARACION_CONTROL_SALIDA =
   "Declaro que el aseguramiento de la carga esta realizado conforme al instructivo de encarpe y amarre, por tanto certifico que se puede realizar el traslado seguro de esta carga a destino.";
 
 const fmt = (v: string | null) =>
-  v ? new Date(v).toLocaleString("es-CL", { dateStyle: "medium", timeStyle: "short" }) : "—";
+  v ? new Date(v).toLocaleString("es-CL", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Santiago" }) : "—";
 
 const fmtCorta = (v: string | null) =>
   v
