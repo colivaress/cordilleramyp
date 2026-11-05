@@ -6,6 +6,7 @@ const fmtFecha = (v: string | Date | null | undefined) =>
     ? new Date(v).toLocaleString("es-CL", {
         dateStyle: "short",
         timeStyle: "short",
+        timeZone: "America/Santiago",
       })
     : "—";
 

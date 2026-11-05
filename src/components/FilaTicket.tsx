@@ -13,6 +13,7 @@ function formatearFecha(iso: string | null): string {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
+    timeZone: "America/Santiago",
   });
 }
 
