@@ -22,7 +22,7 @@ import { puedeReinspeccionar } from "@/lib/ticket-state-machine";
 export const dynamic = "force-dynamic";
 
 const fmt = (v: string | null) =>
-  v ? new Date(v).toLocaleString("es-CL", { dateStyle: "medium", timeStyle: "short" }) : "—";
+  v ? new Date(v).toLocaleString("es-CL", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Santiago" }) : "—";
 
 export default async function TicketDetallePage({
   params,

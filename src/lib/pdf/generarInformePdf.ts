@@ -21,6 +21,7 @@ const fmt = (v: string | null) =>
     ? new Date(v).toLocaleString("es-CL", {
         dateStyle: "medium",
         timeStyle: "short",
+        timeZone: "America/Santiago",
       })
     : "—";
 
@@ -30,6 +31,7 @@ const fmtCorta = (v: string | null) =>
         day: "2-digit",
         month: "2-digit",
         year: "numeric",
+        timeZone: "America/Santiago",
       })
     : "—";
 
