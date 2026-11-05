@@ -41,7 +41,7 @@ export function CountdownBadge({
         CLASES[nivel] ?? CLASES.ninguno,
         className,
       )}
-      title={`Vence: ${new Date(fechaVencimiento).toLocaleString("es-CL")}`}
+      title={`Vence: ${new Date(fechaVencimiento).toLocaleString("es-CL", { timeZone: "America/Santiago" })}`}
     >
       {formatoTabla
         ? textoVencimientoTabla(fechaVencimiento)
